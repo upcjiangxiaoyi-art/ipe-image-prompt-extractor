@@ -1,5 +1,5 @@
 /*
- *  Image Prompt Extractor v1.8.5
+ *  Image Prompt Extractor v1.8.5.2
  *  SillyTavern 1.18 — SillyTavern.getContext() + fetch API
  */
 
