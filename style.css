@@ -1,1 +1,935 @@
-/* ============================================================ Image Prompt Extractor — 样式 ============================================================ */ /* ---------- 悬浮球 ---------- */ .ipe-ball { position: fixed; bottom: 30px; right: 30px; width: 42px; height: 42px; border-radius: 50%; background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.25); cursor: pointer; z-index: 10001; transition: all 0.25s ease; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12); } .ipe-ball:hover { background: rgba(255, 255, 255, 0.82); transform: scale(1.08); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); } .ipe-ball.processing { animation: ipe-pulse 1.6s ease-in-out infinite; } .ipe-ball.has-result::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: #6ec577; box-shadow: 0 0 4px rgba(110, 197, 119, 0.6); } @keyframes ipe-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.35); } 50% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); } } /* ---------- 主面板 ---------- */ .ipe-panel { position: fixed; right: 24px; bottom: 82px; width: 400px; max-height: 78vh; background: rgba(28, 28, 32, 0.94); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.08); color: #d4d4d4; z-index: 10000; overflow: hidden; display: none; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; line-height: 1.5; } .ipe-panel.visible { display: flex; flex-direction: column; } /* ---------- 面板头部 ---------- */ .ipe-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); flex-shrink: 0; } .ipe-panel-title { font-size: 14px; font-weight: 600; color: #e8e8e8; letter-spacing: 0.3px; } /* ---------- 开关 ---------- */ .ipe-toggle { position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; } .ipe-toggle input { opacity: 0; width: 0; height: 0; } .ipe-toggle-slider { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.12); border-radius: 10px; transition: background 0.25s; } .ipe-toggle-slider::before { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #888; transition: all 0.25s; } .ipe-toggle input:checked + .ipe-toggle-slider { background: rgba(110, 197, 119, 0.35); } .ipe-toggle input:checked + .ipe-toggle-slider::before { transform: translateX(16px); background: #6ec577; } /* ---------- 可滚动区域 ---------- */ .ipe-sections { overflow-y: auto; flex: 1; padding: 6px 0; } .ipe-sections::-webkit-scrollbar { width: 4px; } .ipe-sections::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 2px; } /* ---------- 折叠区块 ---------- */ .ipe-section { border-bottom: 1px solid rgba(255, 255, 255, 0.04); } .ipe-section-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; cursor: pointer; user-select: none; font-size: 12.5px; font-weight: 500; color: #aaa; letter-spacing: 0.5px; text-transform: uppercase; transition: color 0.2s; } .ipe-section-header:hover { color: #ddd; } .ipe-collapse-icon { font-size: 11px; transition: transform 0.2s; color: #666; } .ipe-section.collapsed .ipe-collapse-icon { transform: rotate(-90deg); } .ipe-section-body { padding: 0 16px 12px; display: flex; flex-direction: column; gap: 8px; } .ipe-section.collapsed .ipe-section-body { display: none; } /* ---------- 表单元素 ---------- */ .ipe-section-body label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #888; } .ipe-section-body input[type="text"], .ipe-section-body input[type="password"] { width: 100%; padding: 7px 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; color: #d4d4d4; font-size: 12.5px; font-family: inherit; outline: none; transition: border-color 0.2s; box-sizing: border-box; } .ipe-section-body input:focus, .ipe-section-body textarea:focus { border-color: rgba(255, 255, 255, 0.2); } .ipe-section-body textarea { width: 100%; padding: 8px 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; color: #d4d4d4; font-size: 12.5px; font-family: inherit; line-height: 1.55; resize: vertical; outline: none; transition: border-color 0.2s; box-sizing: border-box; } .ipe-hint { font-size: 11px; color: #666; padding-left: 2px; } /* ---------- 预览区 ---------- */ .ipe-preview-status { font-size: 11.5px; color: #666; padding: 2px 0; } .ipe-preview-status.active { color: #6ec577; } .ipe-preview-status.error { color: #d4726a; } .ipe-preview-actions { display: flex; gap: 8px; padding-top: 4px; } /* ---------- 按钮 ---------- */ .ipe-btn { flex: 1; padding: 7px 12px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: #bbb; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.2s; } .ipe-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: #e0e0e0; } .ipe-btn:disabled { opacity: 0.35; cursor: not-allowed; } .ipe-btn-primary { background: rgba(110, 197, 119, 0.15); border-color: rgba(110, 197, 119, 0.25); color: #6ec577; } .ipe-btn-primary:hover:not(:disabled) { background: rgba(110, 197, 119, 0.25); color: #8fd696; } /* ---------- iOS / 移动端适配 ---------- */ @media (max-width: 480px) { .ipe-panel { left: 8px; right: 8px; bottom: 78px; width: auto; max-height: 70vh; border-radius: 12px; } .ipe-ball { bottom: 20px; right: 20px; width: 38px; height: 38px; } .ipe-section-body textarea { font-size: 14px; /* iOS 下小于 16px 会触发页面缩放 */ } .ipe-section-body input[type="text"], .ipe-section-body input[type="password"] { font-size: 14px; } }
+
+#adr044-drawer .adr044-box {
+    padding: 6px 0 10px;
+    font-family: -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+}
+
+#adr044-drawer .adr044-note {
+    font-size: 12px;
+    color: #888;
+    margin: 4px 0 8px;
+}
+
+#adr044-drawer details {
+    border-top: 1px solid rgba(0,0,0,.12);
+    padding: 7px 0;
+}
+
+#adr044-drawer summary {
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 6px;
+}
+
+#adr044-drawer label {
+    display: block;
+    font-size: 12px;
+    margin-top: 6px;
+}
+
+#adr044-drawer input,
+#adr044-drawer select,
+#adr044-drawer textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 16px;
+    padding: 7px;
+    margin-top: 3px;
+}
+
+#adr044-drawer textarea {
+    resize: vertical;
+}
+
+.adr044-tabs {
+    display: flex;
+    gap: 6px;
+    margin: 10px 0 8px;
+}
+
+.adr044-tabs button {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(214,122,106,.32);
+    background: rgba(214,122,106,.10);
+}
+
+.adr044-tabs button.active {
+    background: rgba(214,122,106,.32);
+    font-weight: 700;
+}
+
+#adr044-emotion-status,
+#adr044-plot-status {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.adr044-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.adr044-actions button {
+    flex: 1;
+}
+
+.adr044-check {
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+}
+
+.adr044-check input {
+    width: auto !important;
+}
+
+
+#adr044-probe-context,
+#adr044-probe-content {
+    min-height: 34px;
+}
+
+
+#adr044-preview-precise {
+    min-height: 34px;
+    font-weight: 700;
+}
+
+
+#adr048-fab {
+    position: fixed !important;
+    right: 12px !important;
+    bottom: 148px !important;
+    z-index: 2147483647 !important;
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+#adr048-popup-panel {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483646 !important;
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    background: rgba(0,0,0,.12) !important;
+}
+
+#adr048-popup-panel[data-open="1"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+#adr048-popup-shell {
+    position: fixed !important;
+    left: 10px !important;
+    right: 10px !important;
+    top: 76px !important;
+    bottom: 76px !important;
+    z-index: 2147483647 !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    background: var(--SmartThemeBlurTintColor, rgba(28,28,32,.96)) !important;
+    color: var(--SmartThemeBodyColor, #eee) !important;
+    border: 1px solid rgba(255,255,255,.18) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 12px 36px rgba(0,0,0,.42) !important;
+    padding: 0 12px 14px !important;
+}
+
+#adr048-popup-inner {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+#adr048-popup-panel .adr048-popup-header {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 2 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    min-height: 48px !important;
+    padding: 8px 0 !important;
+    background: var(--SmartThemeBlurTintColor, rgba(28,28,32,.98)) !important;
+    border-bottom: 1px solid rgba(255,255,255,.12) !important;
+}
+
+#adr048-popup-close {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(255,255,255,.2) !important;
+    background: rgba(255,255,255,.08) !important;
+    color: inherit !important;
+    font-size: 24px !important;
+    line-height: 1 !important;
+}
+
+#adr048-popup-panel .adr048-popup-content {
+    display: block !important;
+}
+
+#adr048-popup-panel input,
+#adr048-popup-panel select,
+#adr048-popup-panel textarea {
+    font-size: 16px !important;
+}
+
+#adr044-drawer.adr044-highlight,
+#adr048-popup-inner.adr044-highlight {
+    outline: 2px solid rgba(214,122,106,.88) !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 0 5px rgba(214,122,106,.16) !important;
+    border-radius: 10px !important;
+}
+
+
+#adr048-fab[data-anchor="ipe"] {
+    outline: 1px solid rgba(255,255,255,.2) !important;
+}
+
+
+#adr044-show-floating-window {
+    width: auto !important;
+    margin-right: 6px !important;
+}
+
+#adr048-popup-panel[data-open="1"],
+#adr048-popup-panel[data-open="1"] #adr048-popup-shell {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+#adr048-fab {
+    pointer-events: auto !important;
+    touch-action: none !important;
+}
+
+
+#adr048-popup-panel {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 2147483646 !important;
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    background: rgba(0,0,0,.25) !important;
+}
+
+#adr048-popup-panel[data-open="1"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+#adr048-popup-shell {
+    position: fixed !important;
+    left: 10px !important;
+    right: 10px !important;
+    top: 64px !important;
+    bottom: 64px !important;
+    z-index: 2147483647 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    min-height: 360px !important;
+    max-height: calc(100vh - 128px) !important;
+    background: rgba(31,31,35,.98) !important;
+    color: #f2f2f2 !important;
+    border: 1px solid rgba(255,255,255,.18) !important;
+    border-radius: 14px !important;
+    box-shadow: 0 14px 42px rgba(0,0,0,.48) !important;
+    font-family: -apple-system,'PingFang SC','Microsoft YaHei',sans-serif !important;
+}
+
+#adr048-popup-head {
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    min-height: 52px !important;
+    padding: 10px 12px !important;
+    border-bottom: 1px solid rgba(255,255,255,.12) !important;
+    background: rgba(25,25,28,.98) !important;
+}
+
+#adr048-popup-sub {
+    font-size: 11px !important;
+    opacity: .72 !important;
+    margin-top: 2px !important;
+}
+
+#adr048-popup-close {
+    flex: 0 0 auto !important;
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255,255,255,.20) !important;
+    background: rgba(255,255,255,.08) !important;
+    color: #fff !important;
+    font-size: 26px !important;
+    line-height: 1 !important;
+}
+
+#adr048-popup-body {
+    flex: 1 1 auto !important;
+    display: block !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding: 10px 12px 16px !important;
+    min-height: 260px !important;
+}
+
+#adr048-popup-body label {
+    display: block !important;
+    font-size: 12px !important;
+    margin-top: 7px !important;
+    opacity: .9 !important;
+}
+
+#adr048-popup-body input,
+#adr048-popup-body select,
+#adr048-popup-body textarea {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    font-size: 16px !important;
+    padding: 7px !important;
+    margin-top: 4px !important;
+    border-radius: 7px !important;
+}
+
+#adr048-popup-body textarea {
+    resize: vertical !important;
+}
+
+.adr048-note {
+    font-size: 12px !important;
+    color: rgba(255,255,255,.68) !important;
+    margin: 2px 0 8px !important;
+}
+
+.adr048-section {
+    border-top: 1px solid rgba(255,255,255,.12) !important;
+    padding: 8px 0 !important;
+}
+
+.adr048-summary {
+    font-weight: 800 !important;
+    margin-bottom: 6px !important;
+}
+
+.adr048-tabs {
+    display: flex !important;
+    gap: 7px !important;
+    margin: 10px 0 8px !important;
+}
+
+.adr048-tabs button {
+    flex: 1 !important;
+    min-height: 36px !important;
+    border-radius: 9px !important;
+    border: 1px solid rgba(214,122,106,.36) !important;
+    background: rgba(214,122,106,.12) !important;
+    color: inherit !important;
+}
+
+.adr048-tabs button.active {
+    background: rgba(214,122,106,.36) !important;
+    font-weight: 800 !important;
+}
+
+.adr048-actions {
+    display: flex !important;
+    gap: 7px !important;
+    margin-top: 7px !important;
+}
+
+.adr048-actions button {
+    flex: 1 !important;
+    min-height: 34px !important;
+}
+
+.adr048-status {
+    font-size: 12px !important;
+    color: rgba(255,255,255,.72) !important;
+    margin-bottom: 5px !important;
+}
+
+.adr048-check {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+}
+
+.adr048-check input {
+    width: auto !important;
+}
+
+
+.arrebol-d-injection {
+    margin: 8px 0 !important;
+    padding: 6px 8px !important;
+    border-left: 3px solid rgba(214,122,106,.72) !important;
+    border-radius: 8px !important;
+    background: rgba(214,122,106,.08) !important;
+}
+
+.arrebol-d-card {
+    margin: 8px 0 !important;
+    padding: 6px 8px !important;
+    border-left: 3px solid rgba(214,122,106,.72) !important;
+    border-radius: 8px !important;
+    background: rgba(214,122,106,.08) !important;
+}
+
+.arrebol-d-title {
+    cursor: pointer !important;
+    font-weight: 700 !important;
+    color: rgba(214,122,106,.95) !important;
+}
+
+.arrebol-d-body {
+    margin-top: 8px !important;
+    white-space: pre-wrap !important;
+}
+
+
+.arrebol-d-card .arrebol-d-body {
+    display: block !important;
+    margin: 8px 0 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1.55 !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+}
+
+
+.arrebol-d-card .arrebol-d-body {
+    display: block !important;
+    margin: 8px 0 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1.65 !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+}
+
+
+.arrebol-d-card {
+    margin: 8px 0 !important;
+    padding: 6px 8px !important;
+    border-left: 3px solid rgba(214,122,106,.72) !important;
+    border-radius: 8px !important;
+    background: rgba(214,122,106,.08) !important;
+}
+
+.arrebol-d-card[open] {
+    padding-bottom: 6px !important;
+}
+
+.arrebol-d-title {
+    cursor: pointer !important;
+    font-weight: 700 !important;
+    color: rgba(214,122,106,.95) !important;
+}
+
+
+/* v1.0.3.8 起，神秘注入不再向聊天正文写入 details/summary。
+   以下样式仅兼容旧消息，不再主动使用。 */
+
+
+/* v1.0.3.9 起，神秘注入使用纯文本 arrebol_d###...###。
+   页面隐藏建议交给酒馆显示层美化正则处理。 */
+
+
+/* v1.0.4.0：设置保存改用稳定 localStorage key：arrebol_d_settings_stable_v1 */
+
+
+/* v1.0.5.0 UI repair only */
+#adr044-tab-emotion.active,
+#adr044-tab-plot.active {
+    opacity: 1 !important;
+}
+
+
+/* v1.0.5.1 all button fallback */
+
+
+/* v1.0.5.3 save then reload after inject */
+
+
+/* v1.0.5.4 blur helper fix */
+
+
+/* v1.0.5.5 auto trigger counter */
+.adr044-auto-counter {
+  margin: 8px 0 2px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: rgba(255, 238, 246, 0.72);
+  border: 1px solid rgba(255, 170, 195, 0.42);
+  color: #9f5d76;
+  font-size: 12px;
+  line-height: 1.45;
+}
+#adr048-popup-panel .adr044-auto-counter {
+  background: rgba(255, 238, 246, 0.78);
+  border-color: rgba(255, 170, 195, 0.45);
+}
+
+
+/* v1.0.5.6.1 compact prompt template selector */
+.adr044-template-compact {
+  margin: 8px 0 10px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 170, 195, 0.26);
+  background: rgba(255, 238, 246, 0.06);
+}
+.adr044-template-compact select,
+.adr044-template-compact input {
+  width: 100%;
+  margin: 4px 0;
+  box-sizing: border-box;
+}
+.adr044-template-mini-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 5px;
+}
+.adr044-template-mini-actions button {
+  min-height: 30px;
+  font-size: 12px;
+}
+.adr044-template-status {
+  min-height: 15px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #d989a1;
+}
+
+
+/* v1.0.5.6.2 template selection memory */
+
+
+/* v1.0.5.6.3 auto trigger baseline persistence fix */
+
+
+/* v1.0.5.6.4 refresh baseline guard */
+
+
+/* v1.0.5.6.5 independent auto trigger state fix */
+
+
+/* v1.0.5.6.6 one-shot high-priority extra instruction */
+
+
+/* v1.0.5.6.7 independent auto trigger baselines */
+
+
+/* v1.0.5.6.8 auto state migration guard after inject reload */
+
+
+/* v1.0.5.6.8.1 UI clean: hide total counter text, mobile tap/drag guard */
+
+/* v1.9.0 final UI guard: keep floating-window text readable across SillyTavern themes. */
+#adr048-popup-shell,
+#adr048-popup-shell *,
+#adr044-drawer,
+#adr044-drawer * {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif !important;
+}
+
+#adr048-popup-body,
+#adr048-popup-body label,
+#adr048-popup-body .adr048-summary,
+#adr048-popup-sub,
+#adr048-popup-body .adr048-note,
+#adr048-popup-body .adr048-status {
+    color: #ffffff !important;
+}
+
+#adr048-popup-body input,
+#adr048-popup-body select,
+#adr048-popup-body textarea,
+#adr044-drawer input,
+#adr044-drawer select,
+#adr044-drawer textarea {
+    background: #ffffff !important;
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    caret-color: #111111 !important;
+    border: 1px solid rgba(255,255,255,.72) !important;
+    text-shadow: none !important;
+}
+
+#adr048-popup-body input::placeholder,
+#adr048-popup-body textarea::placeholder,
+#adr044-drawer input::placeholder,
+#adr044-drawer textarea::placeholder {
+    color: #666666 !important;
+    opacity: 1 !important;
+}
+
+#adr048-popup-body button,
+#adr044-drawer button {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif !important;
+    text-shadow: none !important;
+}
+
+.adr048-tabs {
+    gap: 5px !important;
+    margin: 7px 0 6px !important;
+}
+
+.adr048-tabs button {
+    min-height: 28px !important;
+    padding: 4px 8px !important;
+    border-radius: 7px !important;
+    font-size: 14px !important;
+    line-height: 1.2 !important;
+}
+
+.adr044-tabs button {
+    min-height: 28px !important;
+    padding: 4px 8px !important;
+    border-radius: 7px !important;
+    font-size: 14px !important;
+    line-height: 1.2 !important;
+}
+
+
+/* v1.9.1 compact typography polish: smaller floating-window text, UI-only. */
+#adr048-popup-shell,
+#adr048-popup-body,
+#adr044-drawer {
+    font-size: 13px !important;
+    line-height: 1.42 !important;
+}
+
+#adr048-popup-head {
+    min-height: 46px !important;
+    padding: 8px 10px !important;
+}
+
+#adr048-popup-body {
+    padding: 8px 10px 14px !important;
+}
+
+#adr048-popup-body label,
+#adr044-drawer label {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    margin-top: 6px !important;
+}
+
+#adr048-popup-body input,
+#adr048-popup-body select,
+#adr048-popup-body textarea,
+#adr044-drawer input,
+#adr044-drawer select,
+#adr044-drawer textarea {
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+    padding: 6px !important;
+}
+
+#adr048-popup-body .adr048-summary,
+#adr044-drawer summary {
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+}
+
+#adr048-popup-sub,
+#adr048-popup-body .adr048-note,
+#adr048-popup-body .adr048-status,
+#adr044-drawer .adr044-note,
+#adr044-emotion-status,
+#adr044-plot-status,
+.adr044-auto-counter,
+.adr044-template-status {
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+}
+
+.adr048-tabs button,
+.adr044-tabs button {
+    min-height: 26px !important;
+    padding: 3px 7px !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+}
+
+.adr048-actions button,
+.adr044-actions button,
+.adr044-template-mini-actions button {
+    min-height: 28px !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+}
+
+#adr048-popup-close {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 22px !important;
+}
+
+/* v1.9.2 selectable control polish: make checkboxes visible under white input guard. UI-only. */
+#adr048-popup-body input[type="checkbox"],
+#adr044-drawer input[type="checkbox"],
+#adr044-show-floating-window {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    max-width: 16px !important;
+    flex: 0 0 16px !important;
+    padding: 0 !important;
+    margin: 0 6px 0 0 !important;
+    box-sizing: border-box !important;
+    border-radius: 4px !important;
+    border: 2px solid rgba(255,255,255,.88) !important;
+    background: rgba(255,255,255,.16) !important;
+    box-shadow: 0 0 0 1px rgba(214,122,106,.38), inset 0 0 0 1px rgba(0,0,0,.32) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    vertical-align: middle !important;
+    position: relative !important;
+}
+
+#adr048-popup-body input[type="checkbox"]:checked,
+#adr044-drawer input[type="checkbox"]:checked,
+#adr044-show-floating-window:checked {
+    background: #d67a6a !important;
+    border-color: #f0c0b8 !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.72), 0 0 0 4px rgba(214,122,106,.18) !important;
+}
+
+#adr048-popup-body input[type="checkbox"]:checked::after,
+#adr044-drawer input[type="checkbox"]:checked::after,
+#adr044-show-floating-window:checked::after {
+    content: "✓" !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    line-height: 12px !important;
+    text-align: center !important;
+}
+
+.adr048-check,
+.adr044-check {
+    min-height: 22px !important;
+}
+
+
+/* v1.9.3 manual calibration button: UI-only, does not change auto guard logic. */
+.adr044-auto-calibrate-row {
+    display: flex !important;
+    justify-content: flex-end !important;
+    margin: 6px 0 2px !important;
+}
+
+.adr044-auto-calibrate {
+    width: auto !important;
+    min-height: 28px !important;
+    padding: 5px 12px !important;
+    border-radius: 12px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    background: rgba(214,122,106,.18) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid rgba(214,122,106,.46) !important;
+    box-shadow: none !important;
+}
+
+
+/* v1.9.4 auto-trigger start popup: visual hint only, non-blocking. */
+#adr044-auto-trigger-popup {
+    position: fixed !important;
+    right: 22px !important;
+    top: 22px !important;
+    z-index: 2147483647 !important;
+    width: min(360px, calc(100vw - 44px)) !important;
+    box-sizing: border-box !important;
+    padding: 14px 42px 14px 16px !important;
+    border-radius: 18px !important;
+    border: 1px solid rgba(255,255,255,.72) !important;
+    background: rgba(42,28,31,.96) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    box-shadow: 0 14px 38px rgba(0,0,0,.36), 0 0 0 4px rgba(214,122,106,.18) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+    opacity: 0 !important;
+    transform: translateY(-8px) scale(.98) !important;
+    transition: opacity .22s ease, transform .22s ease !important;
+    pointer-events: auto !important;
+}
+
+#adr044-auto-trigger-popup[data-open="1"] {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+}
+
+#adr044-auto-trigger-popup[data-open="0"] {
+    opacity: 0 !important;
+    transform: translateY(-8px) scale(.98) !important;
+}
+
+#adr044-auto-trigger-popup .adr044-auto-trigger-popup-title {
+    margin: 0 0 6px !important;
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+    font-weight: 800 !important;
+    color: #ffe3df !important;
+    -webkit-text-fill-color: #ffe3df !important;
+}
+
+#adr044-auto-trigger-popup .adr044-auto-trigger-popup-text {
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.55 !important;
+    font-weight: 600 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+#adr044-auto-trigger-popup .adr044-auto-trigger-popup-close {
+    position: absolute !important;
+    right: 10px !important;
+    top: 9px !important;
+    width: 24px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(255,255,255,.38) !important;
+    background: rgba(255,255,255,.12) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 18px !important;
+    line-height: 20px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+}
+
+
+/* v1.9.11 test: keep 1.9.4 linked floating-window logic, only make the entry a small pink orb. */
+#adr048-fab {
+    width: 42px !important;
+    height: 42px !important;
+    min-width: 42px !important;
+    min-height: 42px !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    background: rgba(255,132,178,.72) !important;
+    color: #fff !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+    box-shadow: 0 8px 20px rgba(255,105,155,.22), 0 6px 18px rgba(0,0,0,.22) !important;
+    border: 1px solid rgba(255,255,255,.36) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+}
+
+
+/* v1.9.22: pale-pink compact pill with emoji + ARB, IPE-style lazy fixed FAB. UI skin only. */
+#adr048-fab {
+    width: 78px !important;
+    height: 32px !important;
+    min-width: 78px !important;
+    min-height: 32px !important;
+    max-width: 78px !important;
+    max-height: 32px !important;
+    padding: 0 12px !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(255,255,255,.44) !important;
+    background: rgba(255, 196, 218, .72) !important;
+    color: rgba(95, 42, 65, .88) !important;
+    -webkit-text-fill-color: rgba(95, 42, 65, .88) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+    font-size: 13px !important;
+    line-height: 32px !important;
+    font-weight: 700 !important;
+    letter-spacing: .2px !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    box-shadow: 0 4px 12px rgba(255, 122, 162, .13) !important;
+    opacity: .94 !important;
+    backdrop-filter: blur(12px) saturate(1.05) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(1.05) !important;
+    transform: translateZ(0) !important;
+    transition: background .16s ease, transform .16s ease, box-shadow .16s ease, opacity .16s ease !important;
+}
+
+#adr048-fab:hover,
+#adr048-fab:focus-visible {
+    background: rgba(255, 196, 218, .84) !important;
+    box-shadow: 0 6px 14px rgba(255, 122, 162, .18) !important;
+    transform: translateY(-1px) translateZ(0) !important;
+    opacity: 1 !important;
+}
+
+#adr048-fab:active {
+    background: rgba(255, 196, 218, .78) !important;
+    box-shadow: 0 3px 9px rgba(255, 122, 162, .12) !important;
+    transform: scale(.98) translateZ(0) !important;
+}
+
+
+
+/* v1.9.21: hide FAB during mobile typing without display:none, preserving rect and coordinates. */
+#adr048-fab[data-adr048-input-hidden="1"] {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* v1.9.26 failure first-report popup: same component, warmer warning tone. */
+#adr044-auto-trigger-popup[data-kind="error"] {
+    box-shadow: 0 14px 38px rgba(0,0,0,.38), 0 0 0 4px rgba(244,161,92,.20) !important;
+    border-color: rgba(255,214,174,.76) !important;
+}
+#adr044-auto-trigger-popup[data-kind="error"] .adr044-auto-trigger-popup-title {
+    color: #ffd6ae !important;
+    -webkit-text-fill-color: #ffd6ae !important;
+}

@@ -1,2168 +1,4358 @@
+
 /*
- *  Image Prompt Extractor v1.8.5.2
- *  SillyTavern 1.18 — SillyTavern.getContext() + fetch API
+ * Arrebol D 暗河红霞导演系统 v1.9.26｜ripple & GPT
+ * 抽屉内嵌稳定版：
+ * - 情感导演 / 剧情导演 双页面
+ * - 双 API / 双模型 / 双预设
+ * - 拉取模型
+ * - 本地测试
+ * - 生成导演分析
+ * - 自动注入到当前聊天，下一轮可读到
  */
 
-const EXT_NAME = "image-prompt-extractor";
-const DEFAULTS = {
-    enabled: true,
-    autoInject: false,
-    autoInjectDelay: 1800,
-    requestTimeout: 0,
-    apiEndpoint: "", apiKey: "", model: "",
-    systemPrompt: "", baseTemplate: "", characterAnchors: "", extractionRules: "",
-    activeBaseTemplate: "tpl_1",
-    quickEntryLeft: "",
-    quickEntryTop: "",
-    baseTemplatesJson: "",
-    anchorPresetsJson: "",
-    activeAnchorPreset: "anchor_1",
-    rulePresetsJson: "",
-    activeRulePreset: "rule_1",
-    systemPromptPresetsJson: "",
-    activeSystemPromptPreset: "sys_emo",
-    showQuickEntry: true,
-    baseTemplateSlot1: "",
-    baseTemplateSlot2: "",
-    baseTemplateSlot3: "",
-    baseTemplateSlot4: "",
-    baseTemplateName1: "预设1",
-    baseTemplateName2: "预设2",
-    baseTemplateName3: "预设3",
-    baseTemplateName4: "预设4"
-};
-let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
-let ipeAbortController = null;
-let autoTimer = null, pendingAutoIdx = -1;
-
-function ctx() { return SillyTavern.getContext(); }
-
-// 参考“小酒悬浮窗”的方式：优先把悬浮 UI 挂到顶层 SillyTavern 页面，而不是脚本 iframe 内。
-function ipeRootWindow() {
-    try {
-        if (window.top && window.top.document) return window.top;
-    } catch(e) {}
-    return window;
-}
-function ipeRootDocument() {
-    try {
-        var w = ipeRootWindow();
-        if (w && w.document) return w.document;
-    } catch(e) {}
-    return document;
-}
-
-function loadSettings() {
-    try {
-        const es = ctx().extensionSettings;
-        if (!es[EXT_NAME]) es[EXT_NAME] = {};
-        for (const [k, v] of Object.entries(DEFAULTS)) {
-            if (es[EXT_NAME][k] === undefined) es[EXT_NAME][k] = v;
-        }
-
-        var st = es[EXT_NAME];
-
-        // V1.8 迁移：四槽位基础模板 -> 无限模板列表
-        if (!st.baseTemplatesJson) {
-            var list = [];
-            for (var i = 1; i <= 4; i++) {
-                var name = st["baseTemplateName" + i] || ("预设" + i);
-                var value = st["baseTemplateSlot" + i] || "";
-                if (i === 1 && !value && st.baseTemplate) value = st.baseTemplate;
-                list.push({
-                    id: "tpl_" + i,
-                    name: name,
-                    value: value
-                });
-            }
-            st.baseTemplatesJson = JSON.stringify(list);
-        }
-
-        // V1.8 迁移：单一角色锚点 -> 角色锚点预设列表
-        if (!st.anchorPresetsJson) {
-            st.anchorPresetsJson = JSON.stringify([{
-                id: "anchor_1",
-                name: "角色锚点1",
-                value: st.characterAnchors || ""
-            }]);
-        }
-
-        // V1.8.5 迁移：单一提取规则 -> 提取规则预设列表
-        if (!st.rulePresetsJson) {
-            st.rulePresetsJson = JSON.stringify([{
-                id: "rule_1",
-                name: "GPT-image-2",
-                value: st.extractionRules || ""
-            }, {
-                id: "rule_2",
-                name: "NanoBanana",
-                value: ""
-            }, {
-                id: "rule_3",
-                name: "NAI",
-                value: ""
-            }]);
-        }
-
-        // V1.8.5 迁移：单一系统提示 -> 两套系统提示预设
-        if (!st.systemPromptPresetsJson) {
-            st.systemPromptPresetsJson = JSON.stringify([{
-                id: "sys_emo",
-                name: "情感",
-                value: st.systemPrompt || "You extract concise visual image-generation descriptions from Chinese roleplay text. Focus on visible emotion, relationship tension, micro-expressions, body language, atmosphere, lighting, and cinematic mood. Output only the final English Description. Do not think aloud. Do not explain."
-            }, {
-                id: "sys_plot",
-                name: "剧情",
-                value: "You extract concise visual image-generation descriptions from Chinese roleplay text. Focus on visible plot actions, scene composition, character placement, objects, environment, time, lighting, camera distance, and narrative context. Output only the final English Description. Do not think aloud. Do not explain."
-            }]);
-        }
-
-        if (!st.activeBaseTemplate || String(st.activeBaseTemplate).indexOf("slot") === 0) {
-            var n = String(st.activeBaseTemplate || "slot1").replace(/^slot/, "") || "1";
-            st.activeBaseTemplate = "tpl_" + n;
-        }
-        if (!st.activeAnchorPreset) st.activeAnchorPreset = "anchor_1";
-        if (!st.activeRulePreset) st.activeRulePreset = "rule_1";
-        if (!st.activeSystemPromptPreset) st.activeSystemPromptPreset = "sys_emo";
-    } catch(e) { console.error("[IPE] loadSettings:", e); }
-}
-function cfg() {
-    try { return ctx().extensionSettings[EXT_NAME]; }
-    catch(e) { return {...DEFAULTS}; }
-}
-function ipeSaveNow() {
-    try {
-        var c = ctx();
-        if (c && typeof c.saveSettings === "function") {
-            c.saveSettings();
-        } else if (c && typeof c.saveSettingsDebounced === "function") {
-            c.saveSettingsDebounced();
-        }
-    } catch(e) {}
-}
-
-function save(key, val) {
-    try {
-        var c = ctx();
-        c.extensionSettings[EXT_NAME][key] = val;
-        if (typeof c.saveSettingsDebounced === "function") c.saveSettingsDebounced();
-        else ipeSaveNow();
-    } catch(e) {}
-}
-
-function saveCritical(key, val) {
-    try {
-        var c = ctx();
-        c.extensionSettings[EXT_NAME][key] = val;
-        ipeSaveNow();
-    } catch(e) {}
-}
-
-function esc(s) {
-    if (!s) return "";
-    var d = ipeRootDocument().createElement("div"); d.textContent = s; return d.innerHTML;
-}
-function q(s) {
-    var rd = ipeRootDocument();
-    try {
-        var a = rd.querySelector(s);
-        if (a) return a;
-    } catch(e) {}
-    try { return document.querySelector(s); } catch(e) { return null; }
-}
-
-function ipeSafeJsonParse(text, fallback) {
-    try {
-        var v = JSON.parse(String(text || ""));
-        return v;
-    } catch(e) {
-        return fallback;
-    }
-}
-
-function ipeMakeId(prefix) {
-    return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
-}
-
-function ipeGetBaseTemplates() {
-    var c = cfg();
-    var list = ipeSafeJsonParse(c.baseTemplatesJson, null);
-    if (!Array.isArray(list) || list.length === 0) {
-        list = [];
-        for (var i = 1; i <= 4; i++) {
-            list.push({
-                id: "tpl_" + i,
-                name: c["baseTemplateName" + i] || ("预设" + i),
-                value: c["baseTemplateSlot" + i] || (i === 1 ? (c.baseTemplate || "") : "")
-            });
-        }
-    }
-
-    var out = [];
-    for (var j = 0; j < list.length; j++) {
-        var item = list[j] || {};
-        var id = String(item.id || ("tpl_" + (j + 1)));
-        var name = String(item.name || ("模板" + (j + 1)));
-        var value = String(item.value || "");
-        out.push({ id: id, name: name, value: value });
-    }
-
-    if (out.length === 0) out.push({ id: "tpl_1", name: "预设1", value: "" });
-    return out;
-}
-
-function ipeSaveBaseTemplates(list) {
-    save("baseTemplatesJson", JSON.stringify(list || []));
-}
-
-function ipeGetActiveTemplateId() {
-    var list = ipeGetBaseTemplates();
-    var active = cfg().activeBaseTemplate || "";
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return active;
-    }
-    saveCritical("activeBaseTemplate", list[0].id);
-    return list[0].id;
-}
-
-function ipeGetActiveTemplateItem() {
-    var list = ipeGetBaseTemplates();
-    var active = ipeGetActiveTemplateId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return list[i];
-    }
-    return list[0];
-}
-
-function ipeGetTemplateValue() {
-    var item = ipeGetActiveTemplateItem();
-    return String((item && item.value) || cfg().baseTemplate || "");
-}
-
-function ipeSetTemplateValue(val) {
-    var list = ipeGetBaseTemplates();
-    var active = ipeGetActiveTemplateId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].value = val || "";
-            if (i === 0) save("baseTemplate", val || "");
-            break;
-        }
-    }
-    ipeSaveBaseTemplates(list);
-}
-
-function ipeSetTemplateName(val) {
-    var list = ipeGetBaseTemplates();
-    var active = ipeGetActiveTemplateId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].name = val || ("模板" + (i + 1));
-            break;
-        }
-    }
-    ipeSaveBaseTemplates(list);
-}
-
-function ipeAddTemplatePreset() {
-    var list = ipeGetBaseTemplates();
-    var id = ipeMakeId("tpl");
-    list.push({ id: id, name: "新模板" + (list.length + 1), value: "image###{Description}###" });
-    ipeSaveBaseTemplates(list);
-    saveCritical("activeBaseTemplate", id);
-    ipeRefreshSystemPromptEditors();
-    ipeRefreshTemplateEditors();
-    ipeRefreshAnchorEditors();
-    ipeRefreshRuleEditors();
-    applyQuickEntryVisibility();
-    ipeSaveNow();
-}
-
-function ipeDeleteTemplatePreset() {
-    var list = ipeGetBaseTemplates();
-    if (list.length <= 1) {
-        setStatus("至少保留一个基础模板", "#d4726a");
-        return;
-    }
-    var active = ipeGetActiveTemplateId();
-    var next = [];
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== active) next.push(list[i]);
-    }
-    ipeSaveBaseTemplates(next);
-    saveCritical("activeBaseTemplate", next[0].id);
-    ipeRefreshTemplateEditors();
-    ipeSaveNow();
-}
-
-function ipeGetAnchorPresets() {
-    var c = cfg();
-    var list = ipeSafeJsonParse(c.anchorPresetsJson, null);
-    if (!Array.isArray(list) || list.length === 0) {
-        list = [{ id: "anchor_1", name: "角色锚点1", value: c.characterAnchors || "" }];
-    }
-
-    var out = [];
-    for (var i = 0; i < list.length; i++) {
-        var item = list[i] || {};
-        out.push({
-            id: String(item.id || ("anchor_" + (i + 1))),
-            name: String(item.name || ("角色锚点" + (i + 1))),
-            value: String(item.value || "")
-        });
-    }
-    if (out.length === 0) out.push({ id: "anchor_1", name: "角色锚点1", value: "" });
-    return out;
-}
-
-function ipeSaveAnchorPresets(list) {
-    save("anchorPresetsJson", JSON.stringify(list || []));
-}
-
-function ipeGetActiveAnchorId() {
-    var list = ipeGetAnchorPresets();
-    var active = cfg().activeAnchorPreset || "";
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return active;
-    }
-    saveCritical("activeAnchorPreset", list[0].id);
-    return list[0].id;
-}
-
-function ipeGetActiveAnchorItem() {
-    var list = ipeGetAnchorPresets();
-    var active = ipeGetActiveAnchorId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return list[i];
-    }
-    return list[0];
-}
-
-function ipeGetAnchorValue() {
-    var item = ipeGetActiveAnchorItem();
-    return String((item && item.value) || cfg().characterAnchors || "");
-}
-
-function ipeSetAnchorValue(val) {
-    var list = ipeGetAnchorPresets();
-    var active = ipeGetActiveAnchorId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].value = val || "";
-            if (i === 0) save("characterAnchors", val || "");
-            break;
-        }
-    }
-    ipeSaveAnchorPresets(list);
-}
-
-function ipeSetAnchorName(val) {
-    var list = ipeGetAnchorPresets();
-    var active = ipeGetActiveAnchorId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].name = val || ("角色锚点" + (i + 1));
-            break;
-        }
-    }
-    ipeSaveAnchorPresets(list);
-}
-
-function ipeAddAnchorPreset() {
-    var list = ipeGetAnchorPresets();
-    var id = ipeMakeId("anchor");
-    list.push({ id: id, name: "新角色锚点" + (list.length + 1), value: "" });
-    ipeSaveAnchorPresets(list);
-    saveCritical("activeAnchorPreset", id);
-    ipeRefreshAnchorEditors();
-    ipeSaveNow();
-}
-
-function ipeDeleteAnchorPreset() {
-    var list = ipeGetAnchorPresets();
-    if (list.length <= 1) {
-        setStatus("至少保留一个角色锚点", "#d4726a");
-        return;
-    }
-    var active = ipeGetActiveAnchorId();
-    var next = [];
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== active) next.push(list[i]);
-    }
-    ipeSaveAnchorPresets(next);
-    saveCritical("activeAnchorPreset", next[0].id);
-    ipeRefreshAnchorEditors();
-    ipeSaveNow();
-}
-
-
-
-function ipeGetSystemPromptPresets() {
-    var c = cfg();
-    var list = ipeSafeJsonParse(c.systemPromptPresetsJson, null);
-    if (!Array.isArray(list) || list.length === 0) {
-        list = [{
-            id: "sys_emo",
-            name: "情感",
-            value: c.systemPrompt || "You extract concise visual image-generation descriptions from Chinese roleplay text. Focus on visible emotion, relationship tension, micro-expressions, body language, atmosphere, lighting, and cinematic mood. Output only the final English Description. Do not think aloud. Do not explain."
-        }, {
-            id: "sys_plot",
-            name: "剧情",
-            value: "You extract concise visual image-generation descriptions from Chinese roleplay text. Focus on visible plot actions, scene composition, character placement, objects, environment, time, lighting, camera distance, and narrative context. Output only the final English Description. Do not think aloud. Do not explain."
-        }];
-    }
-
-    var out = [];
-    for (var i = 0; i < list.length; i++) {
-        var item = list[i] || {};
-        out.push({
-            id: String(item.id || ("sys_" + (i + 1))),
-            name: String(item.name || ("系统提示" + (i + 1))),
-            value: String(item.value || "")
-        });
-    }
-    if (out.length > 2) out = out.slice(0, 2);
-    if (out.length === 0) out.push({ id: "sys_emo", name: "情感", value: "" });
-    if (out.length === 1) out.push({ id: "sys_plot", name: "剧情", value: "" });
-    return out;
-}
-
-function ipeSaveSystemPromptPresets(list) {
-    save("systemPromptPresetsJson", JSON.stringify(list || []));
-}
-
-function ipeGetActiveSystemPromptId() {
-    var list = ipeGetSystemPromptPresets();
-    var active = cfg().activeSystemPromptPreset || "";
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return active;
-    }
-    saveCritical("activeSystemPromptPreset", list[0].id);
-    return list[0].id;
-}
-
-function ipeGetActiveSystemPromptItem() {
-    var list = ipeGetSystemPromptPresets();
-    var active = ipeGetActiveSystemPromptId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return list[i];
-    }
-    return list[0];
-}
-
-function ipeGetSystemPromptValue() {
-    var item = ipeGetActiveSystemPromptItem();
-    return String((item && item.value) || cfg().systemPrompt || "");
-}
-
-function ipeSetSystemPromptValue(val) {
-    var list = ipeGetSystemPromptPresets();
-    var active = ipeGetActiveSystemPromptId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].value = val || "";
-            if (i === 0) save("systemPrompt", val || "");
-            break;
-        }
-    }
-    ipeSaveSystemPromptPresets(list);
-}
-
-function ipeRefreshSystemPromptEditors() {
-    var list = ipeGetSystemPromptPresets();
-    var active = ipeGetActiveSystemPromptId();
-    var item = ipeGetActiveSystemPromptItem();
-
-    ipeFillSelect("ipe-system-slot", list, active);
-    ipeFillSelect("iped-system-slot", list, active);
-
-    ["ipe-system-prompt","iped-system-prompt"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
-    });
-}
-
-function ipeGetRulePresets() {
-    var c = cfg();
-    var list = ipeSafeJsonParse(c.rulePresetsJson, null);
-    if (!Array.isArray(list) || list.length === 0) {
-        list = [{
-            id: "rule_1",
-            name: "GPT-image-2",
-            value: c.extractionRules || ""
-        }, {
-            id: "rule_2",
-            name: "NanoBanana",
-            value: ""
-        }, {
-            id: "rule_3",
-            name: "NAI",
-            value: ""
-        }];
-    }
-
-    var out = [];
-    for (var i = 0; i < list.length; i++) {
-        var item = list[i] || {};
-        out.push({
-            id: String(item.id || ("rule_" + (i + 1))),
-            name: String(item.name || ("提取规则" + (i + 1))),
-            value: String(item.value || "")
-        });
-    }
-    if (out.length === 0) out.push({ id: "rule_1", name: "GPT-image-2", value: "" });
-    return out;
-}
-
-function ipeSaveRulePresets(list) {
-    save("rulePresetsJson", JSON.stringify(list || []));
-}
-
-function ipeGetActiveRuleId() {
-    var list = ipeGetRulePresets();
-    var active = cfg().activeRulePreset || "";
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return active;
-    }
-    saveCritical("activeRulePreset", list[0].id);
-    return list[0].id;
-}
-
-function ipeGetActiveRuleItem() {
-    var list = ipeGetRulePresets();
-    var active = ipeGetActiveRuleId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) return list[i];
-    }
-    return list[0];
-}
-
-function ipeGetRuleValue() {
-    var item = ipeGetActiveRuleItem();
-    return String((item && item.value) || cfg().extractionRules || "");
-}
-
-function ipeSetRuleValue(val) {
-    var list = ipeGetRulePresets();
-    var active = ipeGetActiveRuleId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].value = val || "";
-            if (i === 0) save("extractionRules", val || "");
-            break;
-        }
-    }
-    ipeSaveRulePresets(list);
-}
-
-function ipeSetRuleName(val) {
-    var list = ipeGetRulePresets();
-    var active = ipeGetActiveRuleId();
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === active) {
-            list[i].name = val || ("提取规则" + (i + 1));
-            break;
-        }
-    }
-    ipeSaveRulePresets(list);
-}
-
-function ipeAddRulePreset() {
-    var list = ipeGetRulePresets();
-    var id = ipeMakeId("rule");
-    list.push({ id: id, name: "新提取规则" + (list.length + 1), value: "" });
-    ipeSaveRulePresets(list);
-    saveCritical("activeRulePreset", id);
-    ipeRefreshRuleEditors();
-    ipeSaveNow();
-}
-
-function ipeDeleteRulePreset() {
-    var list = ipeGetRulePresets();
-    if (list.length <= 1) {
-        setStatus("至少保留一个提取规则", "#d4726a");
-        return;
-    }
-    var active = ipeGetActiveRuleId();
-    var next = [];
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== active) next.push(list[i]);
-    }
-    ipeSaveRulePresets(next);
-    saveCritical("activeRulePreset", next[0].id);
-    ipeRefreshRuleEditors();
-    ipeSaveNow();
-}
-
-function ipeRefreshRuleEditors() {
-    var list = ipeGetRulePresets();
-    var active = ipeGetActiveRuleId();
-    var item = ipeGetActiveRuleItem();
-
-    ipeFillSelect("ipe-rule-slot", list, active);
-    ipeFillSelect("iped-rule-slot", list, active);
-
-    ["ipe-rule-name","iped-rule-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
-    });
-    ["ipe-extract-rules","iped-extract-rules"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
-    });
-}
-
-function ipeFillSelect(id, list, active) {
-    var el = q("#" + id);
-    if (!el) return;
-    list = Array.isArray(list) ? list : [];
-    if (list.length === 0) {
-        el.innerHTML = "";
-        return;
-    }
-
-    var exists = false;
-    for (var i = 0; i < list.length; i++) {
-        if (String(list[i].id) === String(active)) exists = true;
-    }
-    if (!exists) active = list[0].id;
-
-    var html = "";
-    for (var j = 0; j < list.length; j++) {
-        var selected = String(list[j].id) === String(active) ? " selected" : "";
-        html += '<option value="' + esc(list[j].id) + '"' + selected + '>' + esc(list[j].name) + '</option>';
-    }
-    el.innerHTML = html;
-    el.value = active;
-
-    for (var k = 0; k < el.options.length; k++) {
-        if (String(el.options[k].value) === String(active)) {
-            el.selectedIndex = k;
-            break;
-        }
-    }
-}
-
-function ipeRefreshTemplateEditors() {
-    var list = ipeGetBaseTemplates();
-    var active = ipeGetActiveTemplateId();
-    var item = ipeGetActiveTemplateItem();
-
-    ipeFillSelect("ipe-template-slot", list, active);
-    ipeFillSelect("iped-template-slot", list, active);
-
-    ["ipe-template-name","iped-template-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
-    });
-    ["ipe-base-template","iped-base-template"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
-    });
-}
-
-function ipeRefreshAnchorEditors() {
-    var list = ipeGetAnchorPresets();
-    var active = ipeGetActiveAnchorId();
-    var item = ipeGetActiveAnchorItem();
-
-    ipeFillSelect("ipe-anchor-slot", list, active);
-    ipeFillSelect("iped-anchor-slot", list, active);
-
-    ["ipe-anchor-name","iped-anchor-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
-    });
-    ["ipe-char-anchors","iped-char-anchors"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
-    });
-}
-
-function normalizeApiBase(base) {
-    var url = (base || "").trim();
-    if (!url) return "";
-
-    while (url.length > 1 && url.charAt(url.length - 1) === "/") {
-        url = url.slice(0, -1);
-    }
-
-    // 用户如果填了完整的聊天接口，回退到基础 /v1
-    if (url.indexOf("/chat/completions") >= 0) {
-        url = url.replace(/\/chat\/completions\/?$/, "");
-    }
-
-    // 用户如果填了 /models，回退到基础 /v1
-    if (url.indexOf("/models") >= 0) {
-        url = url.replace(/\/models\/?$/, "");
-    }
-
-    // 用户只填域名时，补 /v1
-    if (!url.endsWith("/v1")) {
-        url += "/v1";
-    }
-
-    return url;
-}
-
-function buildChatUrl(base) {
-    var root = normalizeApiBase(base);
-    if (!root) return "";
-    return root + "/chat/completions";
-}
-
-function buildModelsUrl(base) {
-    var root = normalizeApiBase(base);
-    if (!root) return "";
-    return root + "/models";
-}
-
-function extractModelsFromResponse(data) {
-    var models = [];
-
-    function pushModel(m) {
-        if (!m) return;
-        if (typeof m === "string") {
-            models.push(m);
-            return;
-        }
-        if (m.id) models.push(m.id);
-        else if (m.name) models.push(m.name);
-        else if (m.model) models.push(m.model);
-    }
-
-    if (data && data.data && Array.isArray(data.data)) {
-        data.data.forEach(pushModel);
-    }
-
-    if (models.length === 0 && data && data.models && Array.isArray(data.models)) {
-        data.models.forEach(pushModel);
-    }
-
-    if (models.length === 0 && data && data.result && Array.isArray(data.result)) {
-        data.result.forEach(pushModel);
-    }
-
-    if (models.length === 0 && Array.isArray(data)) {
-        data.forEach(pushModel);
-    }
-
-    // 兼容某些中转返回 { "model-a": {...}, "model-b": {...} }
-    if (models.length === 0 && data && typeof data === "object") {
-        for (var k in data) {
-            if (!data.hasOwnProperty(k)) continue;
-            if (k === "data" || k === "models" || k === "result" || k === "object" || k === "success" || k === "message" || k === "error") continue;
-            if (typeof data[k] === "object" || typeof data[k] === "string" || typeof data[k] === "number") {
-                models.push(k);
-            }
-        }
-    }
-
-    var clean = [];
-    models.forEach(function(id) {
-        id = String(id || "").trim();
-        if (!id) return;
-        if (clean.indexOf(id) < 0) clean.push(id);
-    });
-
-    return clean;
-}
-
-function ipeFetchWithTimeout(url, options, timeoutMs) {
-    timeoutMs = Number(timeoutMs || 0);
-
-    if (!timeoutMs || timeoutMs <= 0 || typeof AbortController === "undefined") {
-        return fetch(url, options);
-    }
-
-    if (timeoutMs < 30000) timeoutMs = 30000;
-
-    options = options || {};
-    var originalSignal = options.signal;
-    var controller = new AbortController();
-
-    if (originalSignal) {
-        if (originalSignal.aborted) {
-            try { controller.abort(); } catch(e) {}
-        } else {
-            try {
-                originalSignal.addEventListener("abort", function() {
-                    try { controller.abort(); } catch(e) {}
-                }, { once: true });
-            } catch(e) {}
-        }
-    }
-
-    var timer = setTimeout(function() {
-        try { controller.abort(); } catch(e) {}
-    }, timeoutMs);
-
-    options.signal = controller.signal;
-
-    return fetch(url, options).finally(function() {
-        clearTimeout(timer);
-    });
-}
-
-async function fetchModels() {
-    var c = cfg();
-    if (!c.apiEndpoint) {
-        setStatus("请先填写 API 地址", "#d4726a");
-        return;
-    }
-
-    var url = buildModelsUrl(c.apiEndpoint);
-    var headers = {};
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
-
-    try {
-        setStatus("正在拉取模型…", "#6ec577");
-
-        var res = await ipeFetchWithTimeout(url, {
-            method: "GET",
-            headers: headers
-        }, Number(cfg().requestTimeout || 0));
-
-        var raw = await res.text();
-
-        if (!res.ok) {
-            throw new Error("HTTP " + res.status + "：" + raw.slice(0, 180));
-        }
-
-        var data;
+(function () {
+    "use strict";
+
+    var EXT = "arrebol-d-final-v1040-stable-settings";
+    var EMOTION_PRESET = "你是 RP 情感导演。请阅读最近的聊天内容和用户补充信息，只分析情感曲线与人设稳定，不写正文。\n\n你需要判断：\n1. 当前关系阶段是什么。\n2. 情绪温度是否过热、过冷、空转或错拍。\n3. 角色是否出现 OOC 风险。\n4. 是否存在秒爱、秒软、秒承诺、隐藏深情化。\n5. 是否把照顾误写成占有，把心疼误写成告白。\n6. 是否过度代演用户的心理与选择。\n7. 当前角色根据人设应该如何承接情绪。\n8. 下一阶段情感应该升温、降温、维持、错拍，还是延迟。\n\n输出必须短，不超过 300 字。不要写分析过程。不要写正文。只给下一阶段情感方向，要给可执行动作与明确禁区。\n\n固定输出格式：\n【情感方向】\n……\n\n【人设边界】\n……\n\n【避免】\n……";
+    var PLOT_PRESET = "你是 RP 剧情导演。请阅读最近的聊天内容和用户补充信息，只分析剧情推进、事件张力、伏笔与场景调度，不写正文。\n\n你需要判断：\n1. 当前剧情是否停滞、空转或重复。\n2. 场景是否需要推进、转场、插入事件、制造阻碍，还是维持压抑。\n3. 哪些伏笔可以轻轻回收，哪些伏笔不能急着揭开。\n4. NPC、环境、现实阻尼是否应该介入。\n5. 当前剧情的下一步应该发生什么“可执行事件”。\n6. 避免强行相遇、强行表白、强行救场、巧合堆叠。\n7. 不要替用户决定行动，只给世界和角色侧的推进方向。\n\n输出必须短，不超过 300 字。不要写正文。不要写分析过程。只给下一阶段剧情方向。\n\n固定输出格式：\n【剧情推进】\n……\n\n【事件抓手】\n……\n\n【避免】\n……";
+
+    var DEFAULTS = {
+        activeTab: "emotion",
+        autoInjectEmotion: true,
+        autoInjectPlot: true,
+        injectMode: "visible",
+        showFloatingWindow: true,
+        showAutoTriggerPopup: true,
+        fabLeft: null,
+        fabTop: null,
+        autoTriggerEmotion: false,
+        autoTriggerPlot: false,
+        autoTriggerEmotionRange: "20",
+        autoTriggerPlotRange: "10",
+        autoTriggerEmotionCustomRange: 0,
+        autoTriggerPlotCustomRange: 0,
+        lastAutoTriggerChatKey: "",
+        lastAutoTriggerEmotionCount: -1,
+        lastAutoTriggerPlotCount: -1,
+
+        range: "30",
+        customRange: 0,
+        supplementMemory: "",
+
+        emotionApiEndpoint: "",
+        emotionApiKey: "",
+        emotionModel: "",
+        emotionPreset: EMOTION_PRESET,
+        emotionPreview: "",
+
+        plotApiEndpoint: "",
+        plotApiKey: "",
+        plotModel: "",
+        plotPreset: PLOT_PRESET,
+        plotPreview: ""
+    };
+
+    var initialized = false;
+    var processing = false;
+    var aborter = null;
+    var adrDAbortWasManual = false;
+
+    // v1.9.26：自动触发失败保拍后的首报/退避状态。
+    // 只服务于“这一拍没结算时稍后重试”，不参与 baseline 数学。
+    var adrDAutoFailureReportedByBeat = {};
+    var adrDAutoRetryByBeat = {};
+    var ADR_D_AUTO_RETRY_DELAYS = [45000, 90000, 120000, 180000];
+
+    var ADR048_FAB_REGISTRY_KEY = "__arrebolD_fab_owner_v1922__";
+    var ADR048_FAB_INSTANCE_ID = "adr048-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+
+    function rootWin() {
         try {
-            data = JSON.parse(raw);
-        } catch(e) {
-            throw new Error("模型接口返回的不是 JSON：" + raw.slice(0, 160));
-        }
-
-        var models = extractModelsFromResponse(data);
-
-        if (!models.length) {
-            throw new Error("没有识别到模型列表，返回：" + raw.slice(0, 180));
-        }
-
-        ["ipe-model", "iped-model"].forEach(function(sid) {
-            var sel = q("#" + sid);
-            if (!sel) return;
-
-            sel.innerHTML = "";
-
-            var first = ipeRootDocument().createElement("option");
-            first.value = "";
-            first.textContent = "请选择模型";
-            first.disabled = true;
-            sel.appendChild(first);
-
-            models.forEach(function(id) {
-                var opt = ipeRootDocument().createElement("option");
-                opt.value = id;
-                opt.textContent = id;
-                if (id === c.model) opt.selected = true;
-                sel.appendChild(opt);
-            });
-
-            if (c.model && models.indexOf(c.model) >= 0) {
-                sel.value = c.model;
-            } else if (models.length > 0) {
-                sel.value = models[0];
-                save("model", models[0]);
-            }
-        });
-
-        setStatus("已加载 " + models.length + " 个模型", "#6ec577");
-    } catch(e) {
-        console.error("[IPE] fetchModels:", e);
-        setStatus("拉取模型失败：" + e.message, "#d4726a");
-    }
-}
-
-async function testConnection() {
-    var c = cfg();
-    if (!c.apiEndpoint) {
-        setStatus("请先填写 API 地址", "#d4726a");
-        return;
+            if (window.top && window.top.document) return window.top;
+        } catch (e) {}
+        return window;
     }
 
-    var url = buildChatUrl(c.apiEndpoint);
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
-
-    var model = c.model || "gpt-4o-mini";
-
-    try {
-        setStatus("正在测试连接…", "#6ec577");
-
-        var res = await ipeFetchWithTimeout(url, {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify({
-                model: model,
-                messages: [
-                    { role: "user", content: "Hi" }
-                ],
-                max_tokens: 5,
-                stream: false
-            })
-        }, Number(cfg().requestTimeout || 0));
-
-        var raw = await res.text();
-
-        if (!res.ok) {
-            throw new Error("HTTP " + res.status + "：" + raw.slice(0, 180));
-        }
-
-        setStatus("连接成功 ✓", "#6ec577");
-    } catch(e) {
-        console.error("[IPE] testConnection:", e);
-        setStatus("连接失败：" + e.message, "#d4726a");
-    }
-}
-
-function parseChatResponse(data) {
-    if (!data) return "";
-
-    if (data.choices && data.choices[0]) {
-        var ch = data.choices[0];
-
-        if (ch.message) {
-            var msg = ch.message;
-
-            if (typeof msg.content === "string" && msg.content.trim()) {
-                return msg.content.trim();
-            }
-
-            if (msg.content && Array.isArray(msg.content)) {
-                var parts = [];
-                msg.content.forEach(function(part) {
-                    if (!part) return;
-                    if (typeof part === "string") parts.push(part);
-                    else if (part.text) parts.push(part.text);
-                    else if (part.content) parts.push(part.content);
-                });
-                if (parts.join("").trim()) return parts.join("\n").trim();
-            }
-
-            if (msg.text) return String(msg.text).trim();
-            if (msg.reasoning_content && msg.reasoning_content.trim()) {
-                // 有些中转会把内容放在 reasoning_content，但这通常不是最终 Description。
-                // 这里只在没有 content 时兜底返回，避免完全空。
-                return String(msg.reasoning_content).trim();
-            }
-        }
-
-        if (ch.text) return String(ch.text).trim();
-        if (ch.delta && ch.delta.content) return String(ch.delta.content).trim();
+    function rootDoc() {
+        try {
+            var w = rootWin();
+            if (w && w.document) return w.document;
+        } catch (e) {}
+        return document;
     }
 
-    if (data.content && Array.isArray(data.content) && data.content[0]) {
-        if (data.content[0].text) return String(data.content[0].text).trim();
-        if (typeof data.content[0] === "string") return String(data.content[0]).trim();
+    function ctx() {
+        return SillyTavern.getContext();
     }
 
-    if (data.response) return String(data.response).trim();
-    if (data.text) return String(data.text).trim();
-    if (data.output_text) return String(data.output_text).trim();
-
-    return "";
-}
-
-function ipeExtractContentText(text) {
-    text = String(text || "");
-
-    // 只提取 <content>...</content> 里的正文。
-    // 支持多段 content，全部拼接；不读取思维链、隐藏标签、其他元信息。
-    var parts = [];
-    var re = /<content(?:\s[^>]*)?>([\s\S]*?)<\/content>/gi;
-    var m;
-
-    while ((m = re.exec(text)) !== null) {
-        if (m[1] && String(m[1]).trim()) {
-            parts.push(String(m[1]).trim());
-        }
+    function q(sel) {
+        var d = rootDoc();
+        try {
+            var el = d.querySelector(sel);
+            if (el) return el;
+        } catch (e) {}
+        try { return document.querySelector(sel); } catch (e2) {}
+        return null;
     }
 
-    if (parts.length > 0) {
-        return parts.join("\n\n");
+    function esc(s) {
+        var d = rootDoc();
+        var div = d.createElement("div");
+        div.textContent = s == null ? "" : String(s);
+        return div.innerHTML;
     }
 
-    // 如果这一条消息没有 <content> 标签，兜底使用原文。
-    // 这样普通酒馆消息也能手动提取，不会直接空跑。
-    return text;
-}
 
-function ipeTrimSourceText(text) {
-    text = ipeExtractContentText(text);
-
-    // 只限制“输入正文”长度，不限制模型输出 max_tokens。
-    // 这里保留一个很宽的输入保护，避免超长历史/隐藏块把请求撑爆。
-    var maxLen = 9000;
-    if (text.length > maxLen) {
-        text = text.slice(text.length - maxLen);
-        text = "【注意：以下为 <content> 正文末尾片段，前文已省略】\n" + text;
-    }
-
-    return text;
-}
-
-function buildVisionUserPrompt(text, supplement) {
-    var c = cfg();
-    var user = "";
-
-    var activeAnchors = ipeGetAnchorValue();
-    if (activeAnchors) user += "【角色外貌锚点】\n" + activeAnchors + "\n\n";
-    var activeRules = ipeGetRuleValue();
-    if (activeRules) user += "【提取规则】\n" + activeRules + "\n\n";
-
-    user += "【正文内容】\n" + ipeTrimSourceText(text);
-
-    if (supplement) user += "\n\n【补充指令】\n" + supplement;
-
-    user += "\n\n任务：把正文转成英文生图 Description。\n";
-    user += "要求：只输出最终英文 Description；不要解释；不要标题；不要代码块；不要中文；不要复述任务。\n";
-    user += "优先写可见画面：人物数量、姿态、表情、服装、环境、光线、氛围、镜头距离。";
-
-    return user;
-}
-
-
-function ipeCanAbortRequest() {
-    return !!ipeAbortController;
-}
-
-function ipeAbortCurrentRequest() {
-    try {
-        if (ipeAbortController) {
-            ipeAbortController.abort();
-            ipeAbortController = null;
-            ipeSetStopButtonsState(false);
-            setStatus("已打断当前请求", "#d4726a");
-        } else {
-            ipeSetStopButtonsState(false);
-            setStatus("当前没有进行中的请求", "#888");
-        }
-    } catch(e) {
-        setStatus("打断失败：" + e.message, "#d4726a");
-    }
-}
-
-async function callAPI(text, supplement) {
-    var c = cfg();
-    if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
-    if (!c.model) throw new Error("请先加载并选择模型");
-
-    var url = buildChatUrl(c.apiEndpoint);
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
-
-    if (typeof AbortController !== "undefined") {
-        ipeAbortController = new AbortController();
-        ipeSetStopButtonsState(true);
-    } else {
-        ipeAbortController = null;
-    }
-
-    var systemPrompt = ipeGetSystemPromptValue() || c.systemPrompt || "You extract concise visual image-generation descriptions from Chinese roleplay text. Output only the final English Description. Do not think aloud. Do not explain.";
-
-    var body = {
-        model: c.model,
-        messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: buildVisionUserPrompt(text, supplement || "") }
-        ],
-        temperature: 0.4,
-        stream: false
-    };
-
-    var fetchOptions = {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(body)
-    };
-    if (ipeAbortController) fetchOptions.signal = ipeAbortController.signal;
-
-    var res = await ipeFetchWithTimeout(url, fetchOptions, Number(cfg().requestTimeout || 0));
-
-    var raw = await res.text();
-
-    if (!res.ok) {
-        throw new Error("API " + res.status + "：" + raw.slice(0, 220));
-    }
-
-    var data;
-    try {
-        data = JSON.parse(raw);
-    } catch(e) {
-        throw new Error("API 返回不是 JSON：" + raw.slice(0, 180));
-    }
-
-    var out = parseChatResponse(data);
-    if (out) return out;
-
-    var finish = "";
-    try {
-        if (data.choices && data.choices[0] && data.choices[0].finish_reason) {
-            finish = data.choices[0].finish_reason;
-        }
-    } catch(e) {}
-
-    if (finish === "length") {
-        throw new Error("模型返回为空，finish_reason=length。服务端仍然截断了输出。当前插件已不主动设置 max_tokens；请检查中转/模型是否有默认输出上限。原始返回：" + raw.slice(0, 180));
-    }
-
-    throw new Error("无法解析响应：" + raw.slice(0, 220));
-}
-
-function setStatus(t, color) {
-    ["#ipe-status","#iped-status"].forEach(function(id){
-        var e = q(id); if(e){e.textContent=t;e.style.color=color||"";}
-    });
-}
-function setPreview(t) {
-    ["#ipe-preview-text","#iped-preview-text"].forEach(function(id){
-        var e = q(id); if(e){e.value=t;e.disabled=false;}
-    });
-}
-function setBtns(r, j) {
-    ["ipe","iped"].forEach(function(p){
-        var br=q("#"+p+"-btn-reroll"),bj=q("#"+p+"-btn-inject");
-        if(br)br.disabled=!r; if(bj)bj.disabled=!j;
-    });
-    ipeSetStopButtonsState(!!ipeAbortController);
-}
-
-function createUI() {
-    createChatQuickButton();
-    createPanel();
-    createDrawer();
-    bindAll();
-    setTimeout(function(){ ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); }, 120);
-}
-
-function ipeForcePanelVisible() {
-    var p = q("#ipe-panel");
-    if (!p) {
-        try { createPanel(); } catch(e) {}
-        p = q("#ipe-panel");
-    }
-    if (!p) return;
-
-    var currentlyOpen = p.getAttribute("data-ipe-open") === "1";
-
-    if (currentlyOpen) {
-        p.setAttribute("data-ipe-open", "0");
-        p.classList.remove("visible");
-        p.style.setProperty("display", "none", "important");
-        return;
-    }
-
-    p.setAttribute("data-ipe-open", "1");
-    p.classList.add("visible");
-
-    function imp(k, v) { try { p.style.setProperty(k, v, "important"); } catch(e) { p.style[k] = v; } }
-
-    imp("display", "flex");
-    imp("visibility", "visible");
-    imp("opacity", "1");
-    imp("position", "fixed");
-    imp("z-index", "2147483646");
-    imp("right", "8px");
-    imp("left", "8px");
-    imp("bottom", "78px");
-    imp("width", "auto");
-    imp("max-height", "72vh");
-    imp("overflow", "hidden");
-    imp("pointer-events", "auto");
-    imp("transform", "translateZ(0)");
-}
-
-function ipeOpenPanelOnly() {
-    var p = q("#ipe-panel");
-    if (!p) {
-        try { createPanel(); } catch(e) {}
-        p = q("#ipe-panel");
-    }
-    if (!p) return;
-
-    p.setAttribute("data-ipe-open", "1");
-    p.classList.add("visible");
-
-    function imp(k, v) { try { p.style.setProperty(k, v, "important"); } catch(e) { p.style[k] = v; } }
-
-    imp("display", "flex");
-    imp("visibility", "visible");
-    imp("opacity", "1");
-    imp("position", "fixed");
-    imp("z-index", "2147483646");
-    imp("right", "8px");
-    imp("left", "8px");
-    imp("bottom", "78px");
-    imp("width", "auto");
-    imp("max-height", "72vh");
-    imp("overflow", "hidden");
-    imp("pointer-events", "auto");
-    imp("transform", "translateZ(0)");
-}
-
-function ipeHardOpenPanel() {
-    var p = q("#ipe-panel");
-
-    if (!p) {
-        try { createPanel(); } catch(e) {}
-        p = q("#ipe-panel");
-    }
-
-    if (!p) {
-        try { alert("IPE 面板未创建成功，但扩展本体已加载。请从扩展抽屉里继续使用。"); } catch(e) {}
-        return;
-    }
-
-    p.setAttribute("data-ipe-open", "1");
-    p.classList.add("visible");
-
-    function imp(k, v) {
-        try { p.style.setProperty(k, v, "important"); }
-        catch(e) { try { p.style[k] = v; } catch(_) {} }
-    }
-
-    imp("display", "flex");
-    imp("visibility", "visible");
-    imp("opacity", "1");
-    imp("position", "fixed");
-    imp("z-index", "2147483646");
-    imp("right", "8px");
-    imp("left", "8px");
-    imp("bottom", "76px");
-    imp("width", "auto");
-    imp("max-height", "74vh");
-    imp("overflow", "hidden");
-    imp("pointer-events", "auto");
-    imp("transform", "translateZ(0)");
-
-    // 如果按钮在顶层文档，面板也必须在顶层文档
-    try {
-        var d = ipeRootDocument();
-        if (p.ownerDocument !== d) {
-            (d.body || d.documentElement).appendChild(p);
-        }
-    } catch(e) {}
-}
-
-function ipeHardTogglePanel() {
-    var p = q("#ipe-panel");
-    if (p && p.getAttribute("data-ipe-open") === "1") {
-        p.setAttribute("data-ipe-open", "0");
-        p.classList.remove("visible");
-        try { p.style.setProperty("display", "none", "important"); } catch(e) { p.style.display = "none"; }
-        return;
-    }
-    ipeHardOpenPanel();
-}
-
-
-function ipeRemoveMiniButton() {
-    var mini = q("#ipe-open-mini");
-    if (mini && mini.parentNode) {
-        try { mini.parentNode.removeChild(mini); } catch(e) {}
-    }
-}
-
-
-function ipeFindQuickMount() {
-    var d = ipeRootDocument ? ipeRootDocument() : document;
-    var selectors = [
-        "#send_form",
-        "#form_sheld",
-        "#chatForm",
-        "#chat",
-        "#sheld",
-        "body"
+    var ADR_D_LOCAL_BACKUP_KEY = "arrebol_d_settings_stable_v1";
+    var ADR_D_OLD_BACKUP_KEYS = [
+        "arrebol_d_final_v1035_settings_backup",
+        "arrebol_d_final_v1036_settings_backup",
+        "arrebol_d_final_v1037_settings_backup",
+        "arrebol_d_final_v1038_settings_backup",
+        "arrebol_d_final_v1039_settings_backup",
+        "arrebol_d_final_v1035_save_fix_settings_backup",
+        "arrebol_d_final_v1036_fold_br_fix_settings_backup",
+        "arrebol_d_final_v1037_mystery_sync_fix_settings_backup",
+        "arrebol_d_final_v1038_comment_only_inject_settings_backup",
+        "arrebol_d_final_v1039_plain_marker_inject_settings_backup"
     ];
 
-    for (var i = 0; i < selectors.length; i++) {
+    function adrDLoadLocalBackup() {
         try {
-            var el = d.querySelector(selectors[i]);
-            if (el) return el;
-        } catch(e) {}
-    }
-    return d.body || d.documentElement;
-}
+            var raw = rootWin().localStorage.getItem(ADR_D_LOCAL_BACKUP_KEY);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                return obj && typeof obj === "object" ? obj : {};
+            }
 
-function ipeToggleMiniPanel() {
-    var p = q("#ipe-panel");
-    if (!p) {
-        try { createPanel(); bindAll(); } catch(e) {}
-        p = q("#ipe-panel");
-    }
-    if (!p) return;
-
-    var open = p.getAttribute("data-ipe-open") === "1";
-    if (open) {
-        p.setAttribute("data-ipe-open", "0");
-        p.classList.remove("visible");
-        try { p.style.setProperty("display", "none", "important"); } catch(e) { p.style.display = "none"; }
-        return;
-    }
-
-    p.setAttribute("data-ipe-open", "1");
-    p.classList.add("visible");
-
-    function imp(k, v) {
-        try { p.style.setProperty(k, v, "important"); }
-        catch(e) { try { p.style[k] = v; } catch(_) {} }
+            // 迁移旧版备份：以后升级插件不再丢 API / 模型 / 预设。
+            for (var i = 0; i < ADR_D_OLD_BACKUP_KEYS.length; i++) {
+                var oldRaw = rootWin().localStorage.getItem(ADR_D_OLD_BACKUP_KEYS[i]);
+                if (!oldRaw) continue;
+                try {
+                    var oldObj = JSON.parse(oldRaw);
+                    if (oldObj && typeof oldObj === "object") {
+                        rootWin().localStorage.setItem(ADR_D_LOCAL_BACKUP_KEY, JSON.stringify(oldObj));
+                        return oldObj;
+                    }
+                } catch (e0) {}
+            }
+        } catch (e) {}
+        return {};
     }
 
-    imp("display", "flex");
-    imp("visibility", "visible");
-    imp("opacity", "1");
-    imp("position", "fixed");
-    imp("z-index", "2147483646");
-    var entry = q("#ipe-chat-quick-entry");
-    var entryRect = null;
-    try { if (entry) entryRect = entry.getBoundingClientRect(); } catch(e) {}
-
-    if (entryRect) {
-        var panelWidth = Math.min(420, Math.max(320, (window.innerWidth || 420) - 20));
-        var left = Math.max(10, Math.min((window.innerWidth || 420) - panelWidth - 10, entryRect.left));
-        var bottomSpace = (window.innerHeight || 700) - entryRect.bottom;
-        if (bottomSpace > 280) {
-            imp("top", Math.round(entryRect.bottom + 8) + "px");
-            imp("bottom", "auto");
-        } else {
-            imp("bottom", Math.round((window.innerHeight || 700) - entryRect.top + 8) + "px");
-            imp("top", "auto");
-        }
-        imp("left", Math.round(left) + "px");
-        imp("right", "auto");
-        imp("width", panelWidth + "px");
-    } else {
-        imp("right", "10px");
-        imp("left", "10px");
-        imp("bottom", "72px");
-        imp("width", "auto");
-    }
-    imp("max-height", "70vh");
-    imp("overflow", "hidden");
-    imp("pointer-events", "auto");
-}
-
-function ipeRemoveOldFloatingBits() {
-    ["#ipe-open-mini", "#ipe-ball"].forEach(function(sel){
-        var el = q(sel);
-        if (el && el.parentNode) {
-            try { el.parentNode.removeChild(el); } catch(e) {}
-        }
-    });
-}
-
-
-function applyQuickEntryVisibility() {
-    var visible = !!cfg().showQuickEntry;
-    var el = q("#ipe-chat-quick-entry");
-    if (el) {
-        el.style.display = visible ? "inline-flex" : "none";
-    }
-    if (!visible) {
-        var p = q("#ipe-floating-panel");
-        if (p) p.style.display = "none";
-    }
-}
-
-function createChatQuickButton() {
-    ipeRemoveOldFloatingBits();
-
-    if (!cfg().showQuickEntry) {
-        var oldEntry = q("#ipe-chat-quick-entry");
-        if (oldEntry && oldEntry.parentNode) {
-            try { oldEntry.parentNode.removeChild(oldEntry); } catch(e) {}
-        }
-        applyQuickEntryVisibility();
-        return;
-    }
-
-
-    var existing = q("#ipe-chat-quick-entry");
-    if (existing) return;
-
-    var d = ipeRootDocument ? ipeRootDocument() : document;
-    var btn = d.createElement("button");
-    btn.id = "ipe-chat-quick-entry";
-    btn.type = "button";
-    btn.textContent = "🎨 IPE";
-    btn.title = "可移动 IPE 快捷入口：拖动移动，点击打开小面板";
-
-    function imp(k, v) {
-        try { btn.style.setProperty(k, v, "important"); }
-        catch(e) { try { btn.style[k] = v; } catch(_) {} }
-    }
-
-    var savedLeft = Number(cfg().quickEntryLeft);
-    var savedTop = Number(cfg().quickEntryTop);
-    var hasSaved = Number.isFinite(savedLeft) && Number.isFinite(savedTop);
-
-    imp("position", "fixed");
-    imp("left", hasSaved ? savedLeft + "px" : "12px");
-    imp("top", hasSaved ? savedTop + "px" : "");
-    imp("right", hasSaved ? "auto" : "12px");
-    imp("bottom", hasSaved ? "auto" : "92px");
-
-    imp("display", "inline-flex");
-    imp("align-items", "center");
-    imp("justify-content", "center");
-    imp("gap", "4px");
-    imp("height", "34px");
-    imp("min-height", "34px");
-    imp("padding", "0 11px");
-    imp("border-radius", "999px");
-    imp("border", "1px solid rgba(255,255,255,.32)");
-    imp("background", "linear-gradient(135deg, rgba(76,90,220,.96), rgba(36,154,210,.96))");
-    imp("color", "#ffffff");
-    imp("font-size", "13px");
-    imp("font-weight", "700");
-    imp("line-height", "1");
-    imp("box-shadow", "0 8px 22px rgba(0,0,0,.35)");
-    imp("z-index", "2147483647");
-    imp("cursor", "grab");
-    imp("pointer-events", "auto");
-    imp("user-select", "none");
-    imp("-webkit-user-select", "none");
-    imp("touch-action", "none");
-    imp("white-space", "nowrap");
-
-    var dragging = false;
-    var moved = false;
-    var startX = 0;
-    var startY = 0;
-    var startLeft = 0;
-    var startTop = 0;
-
-    function clampPos(left, top) {
-        var w = 88, h = 36;
+    function adrDSaveLocalBackup(obj) {
         try {
-            var rect = btn.getBoundingClientRect();
-            if (rect && rect.width) w = rect.width;
-            if (rect && rect.height) h = rect.height;
-        } catch(e) {}
-        var maxLeft = Math.max(0, (window.innerWidth || 360) - w - 4);
-        var maxTop = Math.max(0, (window.innerHeight || 640) - h - 4);
+            rootWin().localStorage.setItem(ADR_D_LOCAL_BACKUP_KEY, JSON.stringify(obj || {}));
+        } catch (e) {}
+    }
+
+    function settings() {
+        var c = ctx();
+        if (!c.extensionSettings[EXT]) c.extensionSettings[EXT] = {};
+
+        var backup = adrDLoadLocalBackup();
+        var st = c.extensionSettings[EXT];
+
+        if (backup && typeof backup === "object") {
+            for (var bk in backup) {
+                // 只在字段真正缺失时从本地备份恢复。
+                // 空字符串是用户主动清空文本框/API/模板的合法值，不能被旧备份“复活”。
+                if (st[bk] === undefined) {
+                    st[bk] = backup[bk];
+                }
+            }
+        }
+
+        for (var k in DEFAULTS) {
+            if (st[k] === undefined) st[k] = DEFAULTS[k];
+        }
+        if (!st.emotionPreset) st.emotionPreset = EMOTION_PRESET;
+        if (!st.plotPreset) st.plotPreset = PLOT_PRESET;
+        return st;
+    }
+
+    function save(key, val) {
+        try {
+            settings()[key] = val;
+            var c = ctx();
+            if (typeof c.saveSettingsDebounced === "function") c.saveSettingsDebounced();
+        } catch (e) {}
+    }
+
+    function saveNow() {
+        try { adrDSaveLocalBackup(settings()); } catch (e0) {}
+
+        try {
+            var c = ctx();
+            if (typeof c.saveSettings === "function") c.saveSettings();
+            if (typeof c.saveSettingsDebounced === "function") c.saveSettingsDebounced();
+        } catch (e) {}
+    }
+
+    function status(type, text, color) {
+        var el = qForm("adr044-" + type + "-status");
+        if (el) {
+            el.textContent = text;
+            if (color) el.style.color = color;
+        }
+    }
+
+    function adrDToast(msg) {
+        // v1.9.0：收尾兜底。提示函数绝不允许反向拖崩保存流程。
+        try {
+            var text = String(msg || "");
+            var root = (typeof window !== "undefined") ? window : globalThis;
+            var t = root && root.toastr;
+            if (t && typeof t.success === "function") { t.success(text); return; }
+            if (t && typeof t.info === "function") { t.info(text); return; }
+            try { status("emotion", text, "#8ed99d"); } catch (e1) {}
+            try { status("plot", text, "#8ed99d"); } catch (e2) {}
+            try { console.log("[Arrebol D] " + text); } catch (e3) {}
+        } catch (e) {}
+    }
+
+    function adrDAutoTriggerPopup(items, count) {
+        // v1.9.4：自动分析开始瞬间给用户一个非阻塞提示，避免分析未完成前过快输入。
+        // 只做页面提示，不改变计数、触发、注入、API 调用逻辑。
+        try {
+            var d = rootDoc();
+            if (!d || !d.body) return;
+
+            var list = Array.isArray(items) ? items : [];
+            var names = list.map(function (it) { return labelOf(it && it.type); }).filter(Boolean).join("、") || "小红霞";
+            var old = d.getElementById("adr044-auto-trigger-popup");
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+
+            var box = d.createElement("div");
+            box.id = "adr044-auto-trigger-popup";
+            box.setAttribute("role", "status");
+            box.setAttribute("aria-live", "polite");
+            box.innerHTML = ''
+                + '<div class="adr044-auto-trigger-popup-title">小红霞开始自动分析</div>'
+                + '<div class="adr044-auto-trigger-popup-text">' + esc(names) + '已到触发轮次，正在读取上下文。分析完成前先别太快输入，等注入完成更稳。</div>'
+                + '<button type="button" class="adr044-auto-trigger-popup-close" aria-label="关闭提示">×</button>';
+
+            d.body.appendChild(box);
+
+            var close = box.querySelector(".adr044-auto-trigger-popup-close");
+            if (close) {
+                close.addEventListener("click", function () {
+                    try { if (box && box.parentNode) box.parentNode.removeChild(box); } catch (eClose) {}
+                });
+            }
+
+            try {
+                box.setAttribute("data-open", "1");
+            } catch (eOpen) {}
+
+            setTimeout(function () {
+                try {
+                    if (!box || !box.parentNode) return;
+                    box.setAttribute("data-open", "0");
+                    setTimeout(function () {
+                        try { if (box && box.parentNode) box.parentNode.removeChild(box); } catch (eRemove) {}
+                    }, 260);
+                } catch (eTimeout) {}
+            }, 12000);
+
+            try { console.log("[Arrebol D] auto analysis popup", names, "count=", count); } catch (eLog) {}
+        } catch (e) {}
+    }
+
+
+    function adrDPopupMessage(title, text, kind) {
+        // v1.9.26：复用自动触发提示组件显示失败首报；失败告警不受“开始分析提示”开关控制。
+        try {
+            var d = rootDoc();
+            if (!d || !d.body) return;
+            var old = d.getElementById("adr044-auto-trigger-popup");
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+
+            var box = d.createElement("div");
+            box.id = "adr044-auto-trigger-popup";
+            box.setAttribute("role", "status");
+            box.setAttribute("aria-live", "polite");
+            box.setAttribute("data-kind", kind || "info");
+            box.innerHTML = ''
+                + '<div class="adr044-auto-trigger-popup-title">' + esc(title || "小红霞提示") + '</div>'
+                + '<div class="adr044-auto-trigger-popup-text">' + esc(text || "") + '</div>'
+                + '<button type="button" class="adr044-auto-trigger-popup-close" aria-label="关闭提示">×</button>';
+            d.body.appendChild(box);
+
+            var close = box.querySelector(".adr044-auto-trigger-popup-close");
+            if (close) {
+                close.addEventListener("click", function () {
+                    try { if (box && box.parentNode) box.parentNode.removeChild(box); } catch (eClose) {}
+                });
+            }
+            try { box.setAttribute("data-open", "1"); } catch (eOpen) {}
+            setTimeout(function () {
+                try {
+                    if (!box || !box.parentNode) return;
+                    box.setAttribute("data-open", "0");
+                    setTimeout(function () {
+                        try { if (box && box.parentNode) box.parentNode.removeChild(box); } catch (eRemove) {}
+                    }, 260);
+                } catch (eTimeout) {}
+            }, kind === "error" ? 18000 : 12000);
+        } catch (e) {}
+    }
+
+    function adrDAutoFailureMessage(kind, type, detail) {
+        var label = labelOf(type);
+        var tail = "这一拍不会被结算，小红霞会稍后自动重试。";
+        if (kind === "timeout") {
+            return {
+                title: "小红霞请求超时",
+                text: "【" + label + "】API 长时间未返回，可能是中转站、网络或模型响应过慢。" + tail
+            };
+        }
+        if (kind === "inject") {
+            return {
+                title: "小红霞自动注入失败",
+                text: "【" + label + "】分析已完成，但没有成功写入当前助手楼。" + tail + "如果持续出现，请检查聊天楼层状态。"
+            };
+        }
+        if (kind === "save") {
+            return {
+                title: "小红霞保存注入失败",
+                text: "【" + label + "】分析和写入已完成，但聊天保存返回失败。" + tail + "请检查网络或稍后重试。"
+            };
+        }
         return {
-            left: Math.max(4, Math.min(maxLeft, left)),
-            top: Math.max(4, Math.min(maxTop, top))
+            title: "小红霞自动分析失败",
+            text: "【" + label + "】可能是 API Key、余额、Endpoint、中转站、网络或模型返回异常。" + tail + (detail ? "\n原因：" + String(detail).slice(0, 120) : "")
         };
     }
 
-    function getPoint(ev) {
-        if (ev && ev.touches && ev.touches.length) {
-            return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+    function adrDReportFailure(kind, type, detail, beatKey) {
+        // 自动触发：同一待结算拍子只首报一次；手动触发：每次失败都可提示。
+        try {
+            if (beatKey) {
+                if (adrDAutoFailureReportedByBeat[beatKey]) return;
+                adrDAutoFailureReportedByBeat[beatKey] = Date.now();
+                var msg = adrDAutoFailureMessage(kind, type, detail);
+                adrDPopupMessage(msg.title, msg.text, "error");
+                return;
+            }
+
+            var label = labelOf(type);
+            var title = "小红霞分析失败";
+            var text = "【" + label + "】请检查 API Key、余额、Endpoint、中转站、网络或模型返回。" + (detail ? "\n原因：" + String(detail).slice(0, 120) : "");
+            if (kind === "timeout") {
+                title = "小红霞请求超时";
+                text = "【" + label + "】API 长时间未返回，请检查中转站、网络或稍后重试。";
+            } else if (kind === "inject") {
+                title = "小红霞自动注入失败";
+                text = "【" + label + "】分析完成，但没有成功写入当前助手楼。你可以手动复制，或检查当前聊天楼层状态。";
+            } else if (kind === "save") {
+                title = "小红霞保存注入失败";
+                text = "【" + label + "】分析和写入已完成，但聊天保存返回失败。请检查网络或稍后重试。";
+            }
+            adrDPopupMessage(title, text, "error");
+        } catch (e) {}
+    }
+
+    function adrDAutoBeatKey(type, count, n) {
+        return [adrDChatKey(), type === "plot" ? "plot" : "emotion", Number(count) || 0, Number(n) || 0].join("::");
+    }
+
+    function adrDClearAutoBeatState(beatKey) {
+        if (!beatKey) return;
+        try { delete adrDAutoFailureReportedByBeat[beatKey]; } catch (e1) {}
+        try { delete adrDAutoRetryByBeat[beatKey]; } catch (e2) {}
+    }
+
+    function adrDNoteAutoRetryResult(beatKey, ok) {
+        if (!beatKey) return;
+        if (ok) { adrDClearAutoBeatState(beatKey); return; }
+        try {
+            var item = adrDAutoRetryByBeat[beatKey] || { fails: 0, nextAt: 0 };
+            item.fails = Math.max(0, Number(item.fails) || 0) + 1;
+            var idx = Math.min(item.fails - 1, ADR_D_AUTO_RETRY_DELAYS.length - 1);
+            item.nextAt = Date.now() + ADR_D_AUTO_RETRY_DELAYS[idx];
+            adrDAutoRetryByBeat[beatKey] = item;
+        } catch (e) {}
+    }
+
+    function currentType() {
+        var st = settings();
+        return st.activeTab === "plot" ? "plot" : "emotion";
+    }
+
+    function labelOf(type) {
+        return type === "plot" ? "剧情导演" : "情感导演";
+    }
+
+    function prefixOf(type) {
+        return type === "plot" ? "plot" : "emotion";
+    }
+
+    function field(type, name) {
+        var p = prefixOf(type);
+        return p + name.charAt(0).toUpperCase() + name.slice(1);
+    }
+
+    function setPreview(type, text) {
+        var pv = qForm("adr044-" + type + "-preview");
+        if (pv) pv.value = text || "";
+        save(field(type, "preview"), text || "");
+    }
+
+    function normalizeBase(base) {
+        var url = (base || "").trim();
+        if (!url) return "";
+        while (url.length > 1 && url.charAt(url.length - 1) === "/") url = url.slice(0, -1);
+        if (url.indexOf("/chat/completions") >= 0) url = url.replace(/\/chat\/completions\/?$/, "");
+        if (url.indexOf("/models") >= 0) url = url.replace(/\/models\/?$/, "");
+        if (!url.endsWith("/v1")) url += "/v1";
+        return url;
+    }
+
+    function chatUrl(base) {
+        var b = normalizeBase(base);
+        return b ? b + "/chat/completions" : "";
+    }
+
+    function modelsUrl(base) {
+        var b = normalizeBase(base);
+        return b ? b + "/models" : "";
+    }
+
+    function activeRange() {
+        var st = settings();
+        if (String(st.range) === "custom") {
+            var n = Number(st.customRange || 0);
+            return n > 0 ? n : 30;
         }
-        if (ev && ev.changedTouches && ev.changedTouches.length) {
-            return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
-        }
-        return { x: ev.clientX || 0, y: ev.clientY || 0 };
+        var r = Number(st.range || 30);
+        return r > 0 ? r : 30;
     }
 
-    function beginDrag(ev) {
-        var p = getPoint(ev);
-        var rect = btn.getBoundingClientRect();
-        dragging = true;
-        moved = false;
-        startX = p.x;
-        startY = p.y;
-        startLeft = rect.left;
-        startTop = rect.top;
-        imp("cursor", "grabbing");
-        try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
-    }
+    function autoTriggerRange(type) {
+        var st = settings();
+        var key = type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange";
+        var customKey = type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange";
+        var val = String(st[key] || (type === "plot" ? "10" : "20"));
 
-    function moveDrag(ev) {
-        if (!dragging) return;
-        var p = getPoint(ev);
-        var dx = p.x - startX;
-        var dy = p.y - startY;
-        if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
-        var pos = clampPos(startLeft + dx, startTop + dy);
-        imp("left", pos.left + "px");
-        imp("top", pos.top + "px");
-        imp("right", "auto");
-        imp("bottom", "auto");
-        try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
-    }
-
-    function endDrag(ev) {
-        if (!dragging) return;
-        dragging = false;
-        imp("cursor", "grab");
-
-        var rect = btn.getBoundingClientRect();
-        var pos = clampPos(rect.left, rect.top);
-        save("quickEntryLeft", String(Math.round(pos.left)));
-        save("quickEntryTop", String(Math.round(pos.top)));
-
-        if (!moved) {
-            ipeToggleMiniPanel();
+        if (val === "off") return 0;
+        if (val === "custom") {
+            var n = Number(st[customKey] || 0);
+            return n > 0 ? n : 10;
         }
 
-        try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
+        var r = Number(val || 0);
+        return r > 0 ? r : 10;
     }
 
-    btn.addEventListener("mousedown", beginDrag);
-    btn.addEventListener("touchstart", beginDrag, { passive: false });
-
-    try {
-        d.addEventListener("mousemove", moveDrag, { passive: false });
-        d.addEventListener("mouseup", endDrag, { passive: false });
-        d.addEventListener("touchmove", moveDrag, { passive: false });
-        d.addEventListener("touchend", endDrag, { passive: false });
-        d.addEventListener("touchcancel", endDrag, { passive: false });
-    } catch(e) {
-        window.addEventListener("mousemove", moveDrag, { passive: false });
-        window.addEventListener("mouseup", endDrag, { passive: false });
-        window.addEventListener("touchmove", moveDrag, { passive: false });
-        window.addEventListener("touchend", endDrag, { passive: false });
-        window.addEventListener("touchcancel", endDrag, { passive: false });
+    function cleanMessage(text) {
+        text = String(text || "").trim();
+        text = text.replace(/image###[\s\S]*?###/g, "").trim();
+        text = text.replace(/<!--ARREBOL_DIRECTOR_START-->[\s\S]*?<!--ARREBOL_DIRECTOR_END-->/g, "").trim();
+        text = text.replace(/<!--\s*ARREBOL_D_START:(?:emotion|plot)\s*-->[\s\S]*?<!--\s*ARREBOL_D_END:(?:emotion|plot)\s*-->/g, "").trim();
+        text = text.replace(/<!--\s*ARREBOL_D_START:(?:emotion|plot)[\s\S]*?ARREBOL_D_END:(?:emotion|plot)\s*-->/g, "").trim();
+        text = text.replace(/<details[^>]*class=["']arrebol-d-(?:injection|card)["'][^>]*>[\s\S]*?<\/details>/g, "").trim();
+        text = text.replace(/\n?arrebol_d(?:_visible)?###[\s\S]*?###/g, "").trim();
+        return text;
     }
 
-    try {
-        (d.body || d.documentElement).appendChild(btn);
-    } catch(e) {
-        document.body.appendChild(btn);
+    function recentChat(rounds) {
+        var chat;
+        try { chat = ctx().chat; } catch (e) { return ""; }
+        if (!chat || !chat.length) return "";
+
+        var limit = rounds * 2;
+        var arr = [];
+        var count = 0;
+
+        for (var i = chat.length - 1; i >= 0 && count < limit; i--) {
+            var m = chat[i];
+            if (!m || m.is_system) continue;
+
+            var role = m.is_user ? "用户" : (m.name || "角色");
+            var text = cleanMessage(m.mes);
+            if (!text) continue;
+
+            arr.unshift("[" + role + "] " + text);
+            count++;
+        }
+
+        return arr.join("\n\n");
     }
-    applyQuickEntryVisibility();
-    ipeSetStopButtonsState(!!ipeAbortController);
-}
 
-function ipeEnsureQuickButtonLater() {
-    createChatQuickButton();
-    setTimeout(createChatQuickButton, 700);
-    setTimeout(createChatQuickButton, 1600);
-    setTimeout(createChatQuickButton, 3200);
-}
+    function syncShared() {
+        var st = settings();
 
-function createBall() {
-    // V1.6：不再创建悬浮球，只清理旧版本遗留入口
-    ipeRemoveOldFloatingBits();
-}
+        var range = qForm("adr044-range");
+        if (range) save("range", range.value || "30");
 
-function createPanel() {
-    if (q("#ipe-panel")) return;
-    var c = cfg();
-    var panel = ipeRootDocument().createElement("div");
-    panel.id = "ipe-panel"; panel.className = "ipe-panel";
+        var custom = qForm("adr044-custom");
+        if (custom) save("customRange", Number(custom.value || 0));
 
-    var h = '<div class="ipe-panel-header">';
-    h += '<span class="ipe-panel-title">图像提示词提取器</span>';
-    h += '<div style="display:flex;align-items:center;gap:8px"><label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
-    h += '</div><div class="ipe-sections">';
+        var memory = qForm("adr044-memory");
+        if (memory) save("supplementMemory", memory.value || "");
 
-    h += secHTML("api-config","API 配置", true,
-        '<label>API 地址<input type="text" id="ipe-api-endpoint" value="'+esc(c.apiEndpoint)+'" placeholder="https://api.openai.com/v1"></label>'+
-        '<label>API 密钥<input type="password" id="ipe-api-key" value="'+esc(c.apiKey)+'" placeholder="sk-..."></label>'+
-        '<label>模型</label><select id="ipe-model"><option value="'+esc(c.model)+'">'+(c.model?esc(c.model)+' (已保存)':'请先加载模型')+'</option></select>'+
-        '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-btn-models" class="ipe-btn">加载模型</button><button id="ipe-btn-test" class="ipe-btn">测试连接</button></div>');
+        var mode = qForm("adr044-inject-mode");
+        if (mode) save("injectMode", mode.value || "visible");
 
-    h += secHTML("system-prompt","系统提示", true,
-        '<label>系统提示预设<select id="ipe-system-slot"></select></label>'+
-        '<textarea id="ipe-system-prompt" rows="5" placeholder="系统提示词"></textarea>'+
-        '<div class="ipe-hint">两套固定预设：情感 / 剧情。当前选中的系统提示会用于提取请求</div>');
+        var aiE = qForm("adr044-auto-inject-emotion");
+        if (aiE) save("autoInjectEmotion", !!aiE.checked);
 
-    h += secHTML("base-template","基础模板", true,
-        '<label>模板预设<select id="ipe-template-slot"></select></label>'+
-        '<label>模板名称<input type="text" id="ipe-template-name" value="" placeholder="例如：乙游CG"></label>'+
-        '<div class="ipe-preview-actions" style="margin-top:2px">'+
-            '<button id="ipe-template-add" class="ipe-btn" type="button">新增模板</button>'+
-            '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
-        '</div>'+
-        '<textarea id="ipe-base-template" rows="6" placeholder="image###...{Description}...###"></textarea>'+
-        '<div class="ipe-hint">可无限新增模板。用 {Description} 标记描述文本的插入位置</div>');
+        var aiP = qForm("adr044-auto-inject-plot");
+        if (aiP) save("autoInjectPlot", !!aiP.checked);
 
-    h += secHTML("char-anchors","角色锚点", true,
-        '<label>锚点预设<select id="ipe-anchor-slot"></select></label>'+
-        '<label>锚点名称<input type="text" id="ipe-anchor-name" value="" placeholder="例如：陆星河 / 苑无忧"></label>'+
-        '<div class="ipe-preview-actions" style="margin-top:2px">'+
-            '<button id="ipe-anchor-add" class="ipe-btn" type="button">新增锚点</button>'+
-            '<button id="ipe-anchor-delete" class="ipe-btn" type="button">删除当前</button>'+
-        '</div>'+
-        '<textarea id="ipe-char-anchors" rows="5" placeholder="陆星河：a man, 28 years old, tall..."></textarea>'+
-        '<div class="ipe-hint">当前选中的角色锚点会随提取请求一起发送</div>');
+        var sfw = qForm("adr044-show-floating-window");
+        if (sfw) save("showFloatingWindow", !!sfw.checked);
 
-    h += secHTML("extract-rules","提取规则", true,
-        '<label>规则预设<select id="ipe-rule-slot"></select></label>'+
-        '<label>规则名称<input type="text" id="ipe-rule-name" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana"></label>'+
-        '<div class="ipe-preview-actions" style="margin-top:2px">'+
-            '<button id="ipe-rule-add" class="ipe-btn" type="button">新增规则</button>'+
-            '<button id="ipe-rule-delete" class="ipe-btn" type="button">删除当前</button>'+
-        '</div>'+
-        '<textarea id="ipe-extract-rules" rows="5" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>'+
-        '<div class="ipe-hint">当前选中的提取规则会随提取请求一起发送</div>');
+        var satp = qForm("adr044-show-auto-trigger-popup");
+        if (satp) save("showAutoTriggerPopup", !!satp.checked);
 
-    h += secHTML("preview","预览", false,
-        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
-        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
-        '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
-        '<textarea id="ipe-preview-text" rows="6" placeholder="生成的 Description 将显示在这里…"></textarea>'+
-        '<label>补充指令<input type="text" id="ipe-supplement" placeholder="例：这段是冷战不是撒娇"></label>'+
-        '<div class="ipe-preview-actions">'+
-        '<button id="ipe-btn-save-now" class="ipe-btn">保存设置</button><button id="ipe-btn-extract" class="ipe-btn">手动提取</button>'+
-        '<button id="ipe-btn-stop" class="ipe-btn" disabled>打断请求</button>'+
-        '<button id="ipe-btn-reroll" class="ipe-btn" disabled>重新生成</button>'+
-        '<button id="ipe-btn-inject" class="ipe-btn ipe-btn-primary" disabled>确认注入</button></div>');
-
-    h += '</div>';
-    panel.innerHTML = h;
-    ipeRootDocument().body.appendChild(panel);
-}
-
-function secHTML(id, title, collapsed, body) {
-    return '<div class="ipe-section'+(collapsed?' collapsed':'')+'" id="ipe-section-'+id+'">'+
-        '<div class="ipe-section-header"><span>'+title+'</span><span class="ipe-collapse-icon">▾</span></div>'+
-        '<div class="ipe-section-body">'+body+'</div></div>';
-}
-
-function createDrawer() {
-    if (q("#ipe-drawer")) return;
-    var c = cfg();
-    var h = '<div id="ipe-drawer"><div class="inline-drawer">';
-    h += '<div class="inline-drawer-toggle inline-drawer-header"><b>\uD83C\uDFA8 图像提示词提取器</b>';
-    h += '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>';
-    h += '<div class="inline-drawer-content">';
-    h += '<div style="margin-bottom:6px"><label>启用 <input type="checkbox" id="iped-enabled"'+(c.enabled?' checked':'')+'></label></div>';
-    h += '<div style=\"margin-bottom:6px\"><label>显示快捷入口 <input type=\"checkbox\" id=\"iped-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>';
-    h += '<div style="margin-bottom:6px"><label>自动注入 <input type="checkbox" id="iped-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>';
-    h += '<div style="margin:8px 0;display:flex;gap:6px"><input type="button" id="iped-open-panel" class="menu_button" value="打开 IPE 小面板"><input type="button" id="iped-reset-entry" class="menu_button" value="重置入口位置"></div>';
-    h += '<hr><small><b>API 配置</b></small>';
-    h += '<label>API 地址</label><input type="text" id="iped-api-endpoint" class="text_pole" value="'+esc(c.apiEndpoint)+'" placeholder="https://api.openai.com/v1">';
-    h += '<label>API 密钥</label><input type="password" id="iped-api-key" class="text_pole" value="'+esc(c.apiKey)+'" placeholder="sk-...">';
-    h += '<label>模型</label><select id="iped-model" class="text_pole"><option value="'+esc(c.model)+'">'+(c.model?esc(c.model)+' (已保存)':'请先加载模型')+'</option></select>';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-btn-models" class="menu_button" value="加载模型"><input type="button" id="iped-btn-test" class="menu_button" value="测试连接"></div>';
-    h += '<hr><small><b>系统提示</b></small>';
-    h += '<label>系统提示预设</label><select id="iped-system-slot" class="text_pole"></select>';
-    h += '<textarea id="iped-system-prompt" class="text_pole" rows="4" placeholder="系统提示词"></textarea>';
-    h += '<small style="color:#888">两套固定预设：情感 / 剧情</small>';
-    h += '<hr><small><b>基础模板</b></small>';
-    h += '<label>模板预设</label><select id="iped-template-slot" class="text_pole"></select>';
-    h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
-    h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="image###...{Description}...###"></textarea>';
-    h += '<small style="color:#888">可无限新增模板。用 {Description} 标记插入位置</small>';
-    h += '<hr><small><b>角色锚点</b></small>';
-    h += '<label>锚点预设</label><select id="iped-anchor-slot" class="text_pole"></select>';
-    h += '<label>锚点名称</label><input type="text" id="iped-anchor-name" class="text_pole" value="" placeholder="例如：陆星河 / 苑无忧">';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"></div>';
-    h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
-    h += '<hr><small><b>提取规则</b></small>';
-    h += '<label>规则预设</label><select id="iped-rule-slot" class="text_pole"></select>';
-    h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-add" class="menu_button" value="新增规则"><input type="button" id="iped-rule-delete" class="menu_button" value="删除当前"></div>';
-    h += '<textarea id="iped-extract-rules" class="text_pole" rows="4" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>';
-    h += '<hr><small><b>预览</b></small>';
-    h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
-    h += '<textarea id="iped-preview-text" class="text_pole" rows="5" placeholder="生成的 Description 将显示在这里…"></textarea>';
-    h += '<label>补充指令</label><input type="text" id="iped-supplement" class="text_pole" placeholder="例：这段是冷战不是撒娇">';
-    h += '<div style="display:flex;gap:6px;margin-top:6px">';
-    h += '<input type="button" id="iped-btn-save-now" class="menu_button" value="保存设置">';
-    h += '<input type="button" id="iped-btn-extract" class="menu_button" value="手动提取">';
-    h += '<input type="button" id="iped-btn-stop" class="menu_button" value="打断请求" disabled>';
-    h += '<input type="button" id="iped-btn-reroll" class="menu_button" value="重新生成" disabled>';
-    h += '<input type="button" id="iped-btn-inject" class="menu_button" value="确认注入" disabled>';
-    h += '</div></div></div></div>';
-
-    var jq = null;
-    try { jq = ipeRootWindow().jQuery || ipeRootWindow().$ || window.jQuery || window.$; } catch(e) { jq = window.jQuery || window.$; }
-    var target = jq ? jq("#extensions_settings2") : null;
-    if (target && target.length) { target.append(h); console.log("[IPE] 抽屉已挂载"); }
-}
-
-function ipeForceSaveFromEditors() {
-    try {
-        var el;
-
-        el = q("#ipe-system-prompt") || q("#iped-system-prompt");
-        if (el) ipeSetSystemPromptValue(el.value);
-        el = q("#ipe-system-slot") || q("#iped-system-slot");
-        if (el && el.value) saveCritical("activeSystemPromptPreset", el.value);
-
-        el = q("#ipe-base-template") || q("#iped-base-template");
-        if (el) ipeSetTemplateValue(el.value);
-        el = q("#ipe-template-name") || q("#iped-template-name");
-        if (el) ipeSetTemplateName(el.value);
-
-        el = q("#ipe-char-anchors") || q("#iped-char-anchors");
-        if (el) ipeSetAnchorValue(el.value);
-        el = q("#ipe-anchor-name") || q("#iped-anchor-name");
-        if (el) ipeSetAnchorName(el.value);
-
-        el = q("#ipe-extract-rules") || q("#iped-extract-rules");
-        if (el) ipeSetRuleValue(el.value);
-        el = q("#ipe-rule-name") || q("#iped-rule-name");
-        if (el) ipeSetRuleName(el.value);
-
-        el = q("#ipe-template-slot") || q("#iped-template-slot");
-        if (el && el.value) saveCritical("activeBaseTemplate", el.value);
-        el = q("#ipe-anchor-slot") || q("#iped-anchor-slot");
-        if (el && el.value) saveCritical("activeAnchorPreset", el.value);
-        el = q("#ipe-rule-slot") || q("#iped-rule-slot");
-        if (el && el.value) saveCritical("activeRulePreset", el.value);
-
-        ipeSaveNow();
-        ipeRefreshSystemPromptEditors();
-        ipeRefreshTemplateEditors();
-        ipeRefreshAnchorEditors();
-        ipeRefreshRuleEditors();
-        setStatus("设置已保存", "#62c073");
-    } catch(e) {
-        console.error("[IPE] force save failed:", e);
-        setStatus("保存失败", "#d4726a");
+        saveNow();
     }
-}
 
-function ipeSetStopButtonsState(active) {
-    ["ipe-btn-stop","iped-btn-stop"].forEach(function(id){
-        var el = q("#" + id);
-        if (!el) return;
-        el.disabled = !active;
-        el.style.opacity = active ? "1" : "0.45";
-        el.style.pointerEvents = active ? "auto" : "none";
-    });
-}
+    function syncType(type) {
+        var p = prefixOf(type);
 
-function bindAll() {
-    ipeRootDocument().querySelectorAll(".ipe-section-header").forEach(function(h){
-        h.addEventListener("click", function(){ h.parentElement.classList.toggle("collapsed"); });
-    });
+        var endpoint = qForm("adr044-" + type + "-endpoint");
+        var key = qForm("adr044-" + type + "-key");
+        var model = qForm("adr044-" + type + "-model");
+        var preset = qForm("adr044-" + type + "-preset");
+        var preview = qForm("adr044-" + type + "-preview");
 
-    var fields = [
-        ["apiEndpoint","ipe-api-endpoint","iped-api-endpoint"],
-        ["apiKey","ipe-api-key","iped-api-key"]
-    ];
-    fields.forEach(function(arr){
-        var key=arr[0], id1=arr[1], id2=arr[2];
-        [id1,id2].forEach(function(id){
-            var el=q("#"+id); if(!el) return;
-            el.addEventListener("input", function(){
-                save(key, el.value);
-                var o=q("#"+(id===id1?id2:id1));
-                if(o&&o!==el) o.value=el.value;
+        if (endpoint) save(p + "ApiEndpoint", endpoint.value || "");
+        if (key) save(p + "ApiKey", key.value || "");
+        if (model) save(p + "Model", model.value || "");
+        if (preset) save(p + "Preset", preset.value || "");
+        if (preview) save(p + "Preview", preview.value || "");
+
+        var autoTrigger = qForm("adr044-auto-trigger-" + type);
+        if (autoTrigger) save(type === "plot" ? "autoTriggerPlot" : "autoTriggerEmotion", !!autoTrigger.checked);
+
+        var autoRange = qForm("adr044-auto-trigger-range-" + type);
+        if (autoRange) save(type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange", autoRange.value || (type === "plot" ? "10" : "20"));
+
+        var autoCustom = qForm("adr044-auto-trigger-custom-" + type);
+        if (autoCustom) save(type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange", Number(autoCustom.value || 0));
+
+        saveNow();
+    }
+
+    function syncAll() {
+        syncShared();
+        syncType("emotion");
+        syncType("plot");
+    }
+
+    function adrDForceSaveSettings(type) {
+        adrDBlurActiveElement();
+
+        try {
+            syncShared();
+            if (type === "emotion" || type === "plot") syncType(type);
+            else syncAll();
+
+            // 强制读取当前面板字段，写入设置与本地备份。
+            ["emotion", "plot"].forEach(function (t) {
+                var p = prefixOf(t);
+                var endpoint = qForm("adr044-" + t + "-endpoint");
+                var key = qForm("adr044-" + t + "-key");
+                var model = qForm("adr044-" + t + "-model");
+                var preset = qForm("adr044-" + t + "-preset");
+
+                if (endpoint) save(p + "ApiEndpoint", endpoint.value || "");
+                if (key) save(p + "ApiKey", key.value || "");
+                if (model) save(p + "Model", model.value || "");
+                if (preset) save(p + "Preset", preset.value || "");
             });
-        });
-    });
 
-    ["ipe-system-slot","iped-system-slot"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            saveCritical("activeSystemPromptPreset", el.value);
-            ipeRefreshSystemPromptEditors();
-            ipeSaveNow();
-        });
-    });
+            adrDSaveLocalBackup(settings());
+            saveNow();
+            adrDRefreshAllFieldsFromSettings();
+            adrDToast("暗河红霞设置已保存");
+            return true;
+        } catch (e) {
+            console.error("[Arrebol D] force save failed", e);
+            return false;
+        }
+    }
 
-    ["ipe-system-prompt","iped-system-prompt"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetSystemPromptValue(el.value);
-            var other=q("#"+(id==="ipe-system-prompt"?"iped-system-prompt":"ipe-system-prompt"));
-            if(other&&other!==el) other.value=el.value;
-        });
-        el.addEventListener("change", function(){
-            ipeSetSystemPromptValue(el.value);
-            ipeSaveNow();
-        });
-    });
+    function getCurrentCharacterObject() {
+        var c;
+        try { c = ctx(); } catch (e) { return null; }
 
-    ["ipe-template-slot","iped-template-slot"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            saveCritical("activeBaseTemplate", el.value);
-            ipeRefreshTemplateEditors();
-        });
-    });
+        var id = null;
+        try {
+            if (c.characterId !== undefined && c.characterId !== null) id = c.characterId;
+            else if (c.this_chid !== undefined && c.this_chid !== null) id = c.this_chid;
+            else if (c.chid !== undefined && c.chid !== null) id = c.chid;
+        } catch (e1) {}
 
-    ["ipe-template-name","iped-template-name"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetTemplateName(el.value);
-            ipeRefreshTemplateEditors();
-        });
-        el.addEventListener("change", function(){
-            ipeSetTemplateName(el.value);
-            ipeSaveNow();
-        });
-    });
+        try {
+            if (c.characters && id !== null && id !== undefined && c.characters[id]) return c.characters[id];
+        } catch (e2) {}
 
-    ["ipe-base-template","iped-base-template"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetTemplateValue(el.value);
-            var other=q("#"+(id==="ipe-base-template"?"iped-base-template":"ipe-base-template"));
-            if(other&&other!==el) other.value=el.value;
-        });
-        el.addEventListener("change", function(){
-            ipeSetTemplateValue(el.value);
-            ipeSaveNow();
-        });
-    });
+        try {
+            if (c.character) return c.character;
+        } catch (e3) {}
 
-    ["ipe-template-add","iped-template-add"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeAddTemplatePreset);
-    });
+        try {
+            if (c.characters && Array.isArray(c.characters) && c.name1) {
+                for (var i = 0; i < c.characters.length; i++) {
+                    if (c.characters[i] && c.characters[i].name === c.name1) return c.characters[i];
+                }
+            }
+        } catch (e4) {}
 
-    ["ipe-template-delete","iped-template-delete"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeDeleteTemplatePreset);
-    });
+        return null;
+    }
 
-    ["ipe-anchor-slot","iped-anchor-slot"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            saveCritical("activeAnchorPreset", el.value);
-            ipeRefreshAnchorEditors();
-        });
-    });
+    function asCleanText(v, max) {
+        if (v === undefined || v === null) return "";
+        var s = "";
+        if (typeof v === "string") s = v;
+        else {
+            try { s = JSON.stringify(v, null, 2); }
+            catch (e) { s = String(v); }
+        }
+        s = s.replace(/\r/g, "").trim();
+        if (!s) return "";
+        if (max && s.length > max) s = s.slice(0, max) + "…";
+        return s;
+    }
 
-    ["ipe-anchor-name","iped-anchor-name"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetAnchorName(el.value);
-            ipeRefreshAnchorEditors();
-        });
-        el.addEventListener("change", function(){
-            ipeSetAnchorName(el.value);
-            ipeSaveNow();
-        });
-    });
+    function getNested(obj, path) {
+        try {
+            var cur = obj;
+            for (var i = 0; i < path.length; i++) {
+                if (!cur) return undefined;
+                cur = cur[path[i]];
+            }
+            return cur;
+        } catch (e) { return undefined; }
+    }
 
-    ["ipe-char-anchors","iped-char-anchors"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetAnchorValue(el.value);
-            var other=q("#"+(id==="ipe-char-anchors"?"iped-char-anchors":"ipe-char-anchors"));
-            if(other&&other!==el) other.value=el.value;
-        });
-        el.addEventListener("change", function(){
-            ipeSetAnchorValue(el.value);
-            ipeSaveNow();
-        });
-    });
+    function extractCharacterCardText() {
+        var ch = getCurrentCharacterObject();
+        if (!ch) return "";
 
-    ["ipe-anchor-add","iped-anchor-add"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeAddAnchorPreset);
-    });
+        var parts = [];
+        var seen = {};
 
-    ["ipe-anchor-delete","iped-anchor-delete"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeDeleteAnchorPreset);
-    });
+        function add(label, value, max) {
+            var s = asCleanText(value, max || 6000);
+            if (!s) return;
+            var key = label + "::" + s.slice(0, 80);
+            if (seen[key]) return;
+            seen[key] = true;
+            parts.push("【" + label + "】\n" + s);
+        }
 
-    ["ipe-rule-slot","iped-rule-slot"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            saveCritical("activeRulePreset", el.value);
-            ipeRefreshRuleEditors();
-        });
-    });
+        add("角色名称", ch.name || getNested(ch, ["data", "name"]), 500);
+        add("角色描述", ch.description || getNested(ch, ["data", "description"]), 9000);
+        add("角色性格", ch.personality || getNested(ch, ["data", "personality"]), 5000);
+        add("场景设定", ch.scenario || getNested(ch, ["data", "scenario"]), 5000);
+        add("首条消息", ch.first_mes || getNested(ch, ["data", "first_mes"]), 2500);
+        add("示例对话", ch.mes_example || getNested(ch, ["data", "mes_example"]), 5000);
+        add("创作者注释", ch.creatorcomment || ch.creator_notes || getNested(ch, ["data", "creator_notes"]) || getNested(ch, ["data", "creatorcomment"]), 3000);
+        add("系统提示", ch.system_prompt || getNested(ch, ["data", "system_prompt"]), 3000);
+        add("后历史指令", ch.post_history_instructions || getNested(ch, ["data", "post_history_instructions"]), 3000);
 
-    ["ipe-rule-name","iped-rule-name"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetRuleName(el.value);
-            ipeRefreshRuleEditors();
-        });
-        el.addEventListener("change", function(){
-            ipeSetRuleName(el.value);
-            ipeSaveNow();
-        });
-    });
+        return parts.join("\n\n");
+    }
 
-    ["ipe-extract-rules","iped-extract-rules"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("input", function(){
-            ipeSetRuleValue(el.value);
-            var other=q("#"+(id==="ipe-extract-rules"?"iped-extract-rules":"ipe-extract-rules"));
-            if(other&&other!==el) other.value=el.value;
-        });
-        el.addEventListener("change", function(){
-            ipeSetRuleValue(el.value);
-            ipeSaveNow();
-        });
-    });
+    function extractCharacterBookText() {
+        var ch = getCurrentCharacterObject();
+        if (!ch) return "";
 
-    ["ipe-rule-add","iped-rule-add"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeAddRulePreset);
-    });
+        var candidates = [];
 
-    ["ipe-rule-delete","iped-rule-delete"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("click", ipeDeleteRulePreset);
-    });
+        function pushCandidate(label, obj) {
+            if (obj !== undefined && obj !== null) candidates.push({ label: label, obj: obj });
+        }
 
-    ["ipe-model","iped-model"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            save("model", el.value);
-            var o=q("#"+(id==="ipe-model"?"iped-model":"ipe-model"));
-            if(o) o.value=el.value;
-        });
-    });
+        pushCandidate("data.character_book", getNested(ch, ["data", "character_book"]));
+        pushCandidate("character_book", ch.character_book);
+        pushCandidate("json_data.data.character_book", getNested(ch, ["json_data", "data", "character_book"]));
+        pushCandidate("json_data.character_book", getNested(ch, ["json_data", "character_book"]));
+        pushCandidate("data.extensions.character_book", getNested(ch, ["data", "extensions", "character_book"]));
+        pushCandidate("data.extensions.world", getNested(ch, ["data", "extensions", "world"]));
+        pushCandidate("data.extensions.world_info", getNested(ch, ["data", "extensions", "world_info"]));
+        pushCandidate("data.extensions.lorebook", getNested(ch, ["data", "extensions", "lorebook"]));
 
-    ["ipe-enabled","iped-enabled"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            save("enabled", el.checked);
-            var o=q("#"+(id==="ipe-enabled"?"iped-enabled":"ipe-enabled"));
-            if(o) o.checked=el.checked;
-        });
-    });
+        var parts = [];
 
-    ["ipe-show-quick-entry","iped-show-quick-entry"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            save("showQuickEntry", el.checked);
-            var o=q("#"+(id==="ipe-show-quick-entry"?"iped-show-quick-entry":"ipe-show-quick-entry"));
-            if(o) o.checked=el.checked;
-            if (el.checked) {
-                createChatQuickButton();
+        function entryText(entry, i) {
+            if (!entry) return "";
+            var keys = entry.keys || entry.key || entry.keywords || entry.primary_keys || [];
+            if (Array.isArray(keys)) keys = keys.join(", ");
+            var comment = entry.comment || entry.name || entry.title || "";
+            var content = entry.content || entry.text || entry.value || entry.entry || "";
+            var enabled = entry.enabled;
+            if (enabled === false || entry.disable === true) return "";
+
+            var s = "";
+            if (comment) s += "条目 " + (i + 1) + "｜" + comment + "\n";
+            else s += "条目 " + (i + 1) + "\n";
+            if (keys) s += "关键词：" + keys + "\n";
+            if (content) s += asCleanText(content, 3000);
+            return s.trim();
+        }
+
+        candidates.forEach(function (cand) {
+            var obj = cand.obj;
+            if (!obj) return;
+
+            var entries = null;
+            if (Array.isArray(obj)) entries = obj;
+            else if (Array.isArray(obj.entries)) entries = obj.entries;
+            else if (obj.entries && typeof obj.entries === "object") {
+                entries = [];
+                Object.keys(obj.entries).forEach(function (k) { entries.push(obj.entries[k]); });
+            }
+
+            if (entries && entries.length) {
+                var texts = [];
+                entries.forEach(function (e, i) {
+                    var t = entryText(e, i);
+                    if (t) texts.push(t);
+                });
+                if (texts.length) {
+                    parts.push("【角色卡世界书：" + cand.label + "】\n" + texts.join("\n\n"));
+                }
             } else {
-                applyQuickEntryVisibility();
-                var oldEntry = q("#ipe-chat-quick-entry");
-                if (oldEntry && oldEntry.parentNode) {
-                    try { oldEntry.parentNode.removeChild(oldEntry); } catch(e) {}
+                var raw = asCleanText(obj, 3000);
+                if (raw && raw !== "{}" && raw !== "[]") {
+                    parts.push("【角色卡世界书候选：" + cand.label + "】\n" + raw);
                 }
             }
         });
-    });
 
-    ["ipe-auto-inject","iped-auto-inject"].forEach(function(id){
-        var el=q("#"+id); if(!el) return;
-        el.addEventListener("change", function(){
-            save("autoInject", el.checked);
-            var o=q("#"+(id==="ipe-auto-inject"?"iped-auto-inject":"ipe-auto-inject"));
-            if(o) o.checked=el.checked;
-        });
-    });
-
-    ["ipe","iped"].forEach(function(p){
-        var be=q("#"+p+"-btn-extract"); if(be && !be.__ipeBound){ be.__ipeBound = true; be.addEventListener("click", onExtract); }
-        var br=q("#"+p+"-btn-reroll"); if(br && !br.__ipeBound){ br.__ipeBound = true; br.addEventListener("click", onReroll); }
-        var bj=q("#"+p+"-btn-inject"); if(bj && !bj.__ipeBound){ bj.__ipeBound = true; bj.addEventListener("click", onInject); }
-        var bm=q("#"+p+"-btn-models"); if(bm && !bm.__ipeBound){ bm.__ipeBound = true; bm.addEventListener("click", fetchModels); }
-        var bt=q("#"+p+"-btn-test"); if(bt && !bt.__ipeBound){ bt.__ipeBound = true; bt.addEventListener("click", testConnection); }
-        var bs=q("#"+p+"-btn-stop"); if(bs && !bs.__ipeBound){ bs.__ipeBound = true; bs.addEventListener("click", ipeAbortCurrentRequest); }
-        var bv=q("#"+p+"-btn-save-now"); if(bv && !bv.__ipeBound){ bv.__ipeBound = true; bv.addEventListener("click", ipeForceSaveFromEditors); }
-    });
-
-    var openPanelBtn = q("#iped-open-panel");
-    if (openPanelBtn) {
-        openPanelBtn.addEventListener("click", function(){
-            ipeToggleMiniPanel();
-        });
+        return parts.join("\n\n");
     }
 
-    var resetEntryBtn = q("#iped-reset-entry");
-    if (resetEntryBtn) {
-        resetEntryBtn.addEventListener("click", function(){
-            save("quickEntryLeft", "");
-            save("quickEntryTop", "");
-            var old = q("#ipe-chat-quick-entry");
-            if (old && old.parentNode) {
-                try { old.parentNode.removeChild(old); } catch(e) {}
-            }
-            createChatQuickButton();
-            setStatus("已重置快捷入口位置", "#6ec577");
-        });
-    }
+    function extractPersonaText() {
+        var c;
+        try { c = ctx(); } catch (e) { return ""; }
 
-    var closePanelBtn = q("#ipe-panel-close");
-    if (closePanelBtn) {
-        closePanelBtn.addEventListener("click", function(){
-            var p = q("#ipe-panel");
-            if (p) {
-                p.setAttribute("data-ipe-open", "0");
-                p.classList.remove("visible");
-                p.style.setProperty("display", "none", "important");
-            }
-        });
-    }
+        var parts = [];
 
-    try {
-        var c = ctx();
-        if (c.eventSource && c.event_types && c.event_types.MESSAGE_RECEIVED) {
-            c.eventSource.on(c.event_types.MESSAGE_RECEIVED, onMsgReceived);
-            console.log("[IPE] 已绑定消息事件");
+        function add(label, value) {
+            var s = asCleanText(value, 3000);
+            if (!s) return;
+            // 过滤掉探针里出现的 jQuery 事件对象这类误判。
+            if (s.indexOf("jQuery") >= 0 && s.indexOf("events") >= 0) return;
+            if (s === "{}" || s === "[]") return;
+            parts.push("【" + label + "】\n" + s);
         }
-    } catch(e) { console.log("[IPE] 消息事件绑定跳过"); }
+
+        add("用户名称", c.name2);
+
+        try {
+            var p = c.powerUserSettings || {};
+            add("powerUserSettings.persona_description", p.persona_description);
+            add("powerUserSettings.personaDescription", p.personaDescription);
+            add("powerUserSettings.user_description", p.user_description);
+            add("powerUserSettings.userDescription", p.userDescription);
+        } catch (e1) {}
+
+        try {
+            var rw = rootWin();
+            if (typeof rw.persona_description === "string") add("window.persona_description", rw.persona_description);
+            if (typeof rw.user_description === "string") add("window.user_description", rw.user_description);
+            if (rw.power_user) {
+                add("window.power_user.persona_description", rw.power_user.persona_description);
+                add("window.power_user.user_description", rw.power_user.user_description);
+            }
+        } catch (e2) {}
+
+        return parts.join("\n\n");
+    }
+
+    async function recentContentBlocks(rounds) {
+        var chat;
+        try {
+            chat = await adrDGetFullChatMessagesForRead("recent-content");
+        } catch (e0) {
+            try { chat = ctx().chat; } catch (e1) { return ""; }
+        }
+        if (!chat || !chat.length) return "";
+
+        var limit = rounds * 2;
+        var arr = [];
+        var count = 0;
+
+        for (var i = chat.length - 1; i >= 0 && count < limit; i--) {
+            var m = chat[i];
+            if (!m) continue;
+
+            var roleRaw = String(m.role || "").toLowerCase();
+            var isUser = m.is_user === true || roleRaw === "user";
+            // 全量历史读取时，旧楼层可能因“小幽灵/隐藏助手”被标成 is_system。
+            // 复盘范围要读“真实历史正文”，所以只跳过没有 name 的纯 system 通知，不因 is_system=true 直接丢掉角色/用户楼层。
+            if (roleRaw === "system" && !m.name && !isUser) continue;
+
+            var role = isUser ? "用户" : (m.name || "角色");
+            var raw = m.message;
+            if (raw == null) raw = m.mes;
+            var text = String(raw || "");
+            text = cleanMessage(text);
+
+            var blocks = [];
+            var re = /<content\b[^>]*>([\s\S]*?)<\/content>/gi;
+            var match;
+            while ((match = re.exec(text)) !== null) {
+                var v = (match[1] || "").trim();
+                if (v) blocks.push(v);
+            }
+
+            // 用户消息通常没有 <content>，保留用户原文作为必要上下文，但限制长度。
+            if (!blocks.length && isUser) {
+                var u = text.trim();
+                if (u) blocks.push(u.length > 1200 ? u.slice(0, 1200) + "…" : u);
+            }
+
+            if (blocks.length) {
+                arr.unshift("[" + role + "]\n" + blocks.join("\n\n"));
+            }
+
+            count++;
+        }
+
+        return arr.join("\n\n---\n\n");
+    }
+
+    function buildPreciseContext() {
+        var parts = [];
+        var charText = extractCharacterCardText();
+        var bookText = extractCharacterBookText();
+        var personaText = extractPersonaText();
+        var st = settings();
+
+        if (charText) parts.push("【当前角色卡】\n" + charText);
+        if (bookText) parts.push("【角色卡世界书 / Lorebook】\n" + bookText);
+        if (personaText) parts.push("【User 人设 / Persona】\n" + personaText);
+        if (st.supplementMemory && st.supplementMemory.trim()) {
+            parts.push("【手动补充】\n" + st.supplementMemory.trim());
+        }
+
+        return parts.join("\n\n");
+    }
 
 
-    try {
-        var d = ipeRootDocument ? ipeRootDocument() : document;
-        if (typeof MutationObserver !== "undefined" && d.body && !window.__ipeQuickButtonObserver) {
-            window.__ipeQuickButtonObserver = new MutationObserver(function(){
-                if (cfg().showQuickEntry && !q("#ipe-chat-quick-entry")) {
-                    setTimeout(createChatQuickButton, 100);
+
+    function adrDGetExtraInstruction(type) {
+        try {
+            var el = qForm("adr044-" + type + "-extra");
+            return el ? String(el.value || "").trim() : "";
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function adrDClearExtraInstruction(type) {
+        try {
+            Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-" + type + "-extra")).forEach(function (el) {
+                if (!el) return;
+                el.value = "";
+                try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch (e1) {}
+                try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch (e2) {}
+            });
+            try {
+                syncType(type);
+                adrDSaveLocalBackup(settings());
+            } catch (e3) {}
+        } catch (e4) {}
+    }
+
+    function adrDExtraInstructionBlock(type, explicitExtra) {
+        var extra = String(explicitExtra || adrDGetExtraInstruction(type) || "").trim();
+        if (!extra) return "";
+        return [
+            "【最高优先级一次性补充指令】",
+            "以下是用户本轮临时补充的导演需求。它的优先级高于通用导演框架、模板与常规分析偏好；请第一时间吸收，并围绕它构建本次情感/剧情指导。",
+            "这是一条一次性指令：本次生成后会自动清空。不要把它当作长期设定，不要在后续轮次继续沿用，除非用户再次填写。",
+            extra,
+            "【一次性补充指令结束】"
+        ].join("\n");
+    }
+
+    async function buildPrompt(type, extra) {
+        var r = activeRange();
+        var out = "";
+
+        var extraBlock = adrDExtraInstructionBlock(type, extra);
+        if (extraBlock) {
+            out += extraBlock + "\n\n";
+        }
+
+        var contextText = buildPreciseContext();
+        if (contextText) {
+            out += contextText + "\n\n";
+        }
+
+        var recent = await recentContentBlocks(r);
+        out += "【最近 " + r + " 轮正文｜精准读取】\n" + (recent || "（未提取到 <content> 正文；用户消息会作为上下文保留）") + "\n\n";
+
+        if (type === "plot") {
+            out += "请根据以上内容输出剧情导演方向。只输出方向结果，不要复述分析过程，不要写正文。";
+        } else {
+            out += "请根据以上内容输出情感导演方向。只输出方向结果，不要复述分析过程，不要写正文。";
+        }
+
+        return out;
+    }
+
+    function parseResponse(data) {
+        if (!data) return "";
+
+        if (data.choices && data.choices[0]) {
+            var ch = data.choices[0];
+
+            if (ch.message) {
+                var msg = ch.message;
+                if (typeof msg.content === "string" && msg.content.trim()) return msg.content.trim();
+
+                if (msg.content && Array.isArray(msg.content)) {
+                    var parts = [];
+                    msg.content.forEach(function (p) {
+                        if (!p) return;
+                        if (typeof p === "string") parts.push(p);
+                        else if (p.text) parts.push(p.text);
+                        else if (p.type === "text" && p.text) parts.push(p.text);
+                    });
+                    if (parts.join("").trim()) return parts.join("\n").trim();
+                }
+            }
+
+            if (ch.text) return String(ch.text).trim();
+        }
+
+        if (data.response) return String(data.response).trim();
+        if (data.text) return String(data.text).trim();
+        return "";
+    }
+
+    async function callAPI(type, extra) {
+        var st = settings();
+        var p = prefixOf(type);
+
+        var endpoint = st[p + "ApiEndpoint"] || "";
+        var key = st[p + "ApiKey"] || "";
+        var model = st[p + "Model"] || "";
+        var preset = st[p + "Preset"] || (type === "plot" ? PLOT_PRESET : EMOTION_PRESET);
+
+        if (!endpoint) throw new Error("请先填写 " + labelOf(type) + " API 地址");
+        if (!model) throw new Error("请先填写 " + labelOf(type) + " 模型名");
+
+        var url = chatUrl(endpoint);
+        if (!url) throw new Error("API 地址无效");
+
+        var headers = { "Content-Type": "application/json" };
+        if (key) headers.Authorization = "Bearer " + key;
+
+        adrDAbortWasManual = false;
+        if (typeof AbortController !== "undefined") aborter = new AbortController();
+        else aborter = null;
+        var localAborter = aborter;
+
+        var body = {
+            model: model,
+            messages: [
+                { role: "system", content: preset },
+                { role: "user", content: await buildPrompt(type, extra || "") }
+            ],
+            temperature: 0.6,
+            stream: false
+        };
+
+        var opts = {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(body)
+        };
+        if (localAborter) opts.signal = localAborter.signal;
+
+        var timeoutId = null;
+        var didTimeout = false;
+        if (localAborter && typeof setTimeout === "function") {
+            timeoutId = setTimeout(function () {
+                didTimeout = true;
+                try { localAborter.abort(); } catch (eAbort) {}
+            }, 120000);
+        }
+
+        var res;
+        var raw;
+        try {
+            res = await fetch(url, opts);
+            raw = await res.text();
+        } catch (eFetch) {
+            if (didTimeout && eFetch && eFetch.name === "AbortError") {
+                var timeoutErr = new Error("请求超时，请检查 API、中转站或稍后重试");
+                timeoutErr.name = "TimeoutError";
+                throw timeoutErr;
+            }
+            throw eFetch;
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+
+        if (!res.ok) throw new Error("API " + res.status + "：" + String(raw || "").slice(0, 220));
+
+        var data;
+        try { data = JSON.parse(raw); }
+        catch (e) { throw new Error("API 返回非 JSON：" + raw.slice(0, 180)); }
+
+        var out = parseResponse(data);
+        if (!out) throw new Error("无法解析响应：" + raw.slice(0, 220));
+        return out;
+    }
+
+    function setButtons(type) {
+        ["emotion", "plot"].forEach(function (t) {
+            var g = qForm("adr044-" + t + "-generate");
+            var r = qForm("adr044-" + t + "-reroll");
+            var s = qForm("adr044-" + t + "-stop");
+            var c = qForm("adr044-" + t + "-copy");
+            var inj = qForm("adr044-" + t + "-inject");
+            var pv = qForm("adr044-" + t + "-preview");
+            var has = pv && pv.value;
+
+            if (g) g.disabled = processing;
+            if (r) r.disabled = processing;
+            if (s) s.disabled = !processing;
+            if (c) c.disabled = !has;
+            if (inj) inj.disabled = !has;
+        });
+    }
+
+    async function run(type, extra, opts) {
+        if (processing) return false;
+
+        opts = opts || {};
+        var isAutoRun = !!opts.autoTrigger;
+        var beatKey = opts.beatKey || "";
+
+        syncShared();
+        syncType(type);
+
+        processing = true;
+        setButtons(type);
+        status(type, "正在分析…", "#8ed99d");
+
+        var success = false;
+        var failureKind = "api";
+        var failureMsg = "";
+        try {
+            var out = await callAPI(type, extra || "");
+            setPreview(type, out);
+            adrDClearExtraInstruction(type);
+            status(type, "分析完成 ✓（补充指令已清空）", "#8ed99d");
+
+            var st = settings();
+            var autoKey = type === "plot" ? "autoInjectPlot" : "autoInjectEmotion";
+            if (st[autoKey]) {
+                var ok = isAutoRun ? await injectDirectorAsync(type, out) : injectDirector(type, out);
+                if (ok) {
+                    success = true;
+                    status(type, "分析完成并已注入当前聊天 ✓", "#8ed99d");
+                } else {
+                    success = false;
+                    failureKind = "inject";
+                    failureMsg = "自动注入失败";
+                    status(type, isAutoRun ? "分析完成，但自动注入失败；已保留本拍，稍后自动重试" : "分析完成，但自动注入失败，请手动复制", "#d6b177");
+                }
+            } else {
+                success = true;
+            }
+        } catch (e) {
+            failureMsg = e && e.message ? e.message : String(e);
+            if (e && e.name === "TimeoutError") failureKind = "timeout";
+            else if (e && e.name === "SaveChatError") failureKind = "save";
+            else if (e && e.name === "AbortError" && adrDAbortWasManual) failureKind = "manual-abort";
+            else if (e && e.name === "AbortError") failureKind = "abort";
+            else failureKind = "api";
+
+            var msg = (failureKind === "manual-abort" || failureKind === "abort") ? "请求已打断" : failureMsg;
+            status(type, "失败：" + msg, "#d4726a");
+            success = false;
+        }
+
+        processing = false;
+        aborter = null;
+        setButtons(type);
+
+        if (!success && failureKind !== "manual-abort" && failureKind !== "abort") {
+            adrDReportFailure(failureKind, type, failureMsg, isAutoRun ? beatKey : "");
+        }
+        return success;
+    }
+
+    function abortRun(type) {
+        try {
+            adrDAbortWasManual = true;
+            if (aborter) aborter.abort();
+            status(type, "已打断请求", "#d4726a");
+        } catch (e) {
+            status(type, "打断失败：" + e.message, "#d4726a");
+        }
+        processing = false;
+        aborter = null;
+        setButtons(type);
+    }
+
+    function copyText(type) {
+        var pv = qForm("adr044-" + type + "-preview");
+        var text = pv ? pv.value : "";
+        if (!text) {
+            status(type, "没有内容可复制", "#d4726a");
+            return;
+        }
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
+            else {
+                pv.focus();
+                pv.select();
+                document.execCommand("copy");
+            }
+            status(type, "已复制 ✓", "#8ed99d");
+        } catch (e) {
+            status(type, "复制失败", "#d4726a");
+        }
+    }
+
+    function escapeHtmlForDetails(s) {
+        s = String(s || "");
+        return s
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    function plainMarkerInjection(type, title, body) {
+        // 像生图 image###...### 一样的纯文本包裹。
+        // 不使用任何 HTML 标签/注释，避免干扰酒馆美化正则。
+        return "\n\narrebol_d###\n"
+            + "【暗河红霞 Arrebol D｜" + title + "】\n"
+            + String(body || "").trim()
+            + "\n###";
+    }
+
+    function injectionText(type, text) {
+        var title = type === "plot" ? "剧情导演" : "情感导演";
+        var mode = settings().injectMode || "visible";
+        var body = String(text || "").trim();
+
+        if (mode === "hidden" || mode === "folded") {
+            return plainMarkerInjection(type, title, body);
+        }
+
+        return "\n\narrebol_d_visible###\n【暗河红霞 Arrebol D｜" + title + "】\n" + body + "\n###";
+    }
+
+    function findLastMessageIndex(chat) {
+        if (!chat || !chat.length) return -1;
+
+        for (var i = chat.length - 1; i >= 0; i--) {
+            var m = chat[i];
+            if (!m || m.is_system) continue;
+            var role = String(m.role || "").toLowerCase();
+            if (m.is_user === true || role === "user") continue;
+            if (m.mes && String(m.mes).trim()) return i;
+        }
+
+        // 没有可注入的角色/助手楼层时，宁可不注入，也绝不写到 user input 楼。
+        return -1;
+    }
+
+    function saveChatSafe() {
+        try {
+            var c = ctx();
+            if (typeof c.saveChat === "function") {
+                c.saveChat();
+                return;
+            }
+        } catch (e) {}
+
+        try {
+            var rw = rootWin();
+            if (typeof rw.saveChatConditional === "function") rw.saveChatConditional();
+            else if (typeof rw.saveChat === "function") rw.saveChat();
+        } catch (e2) {}
+    }
+
+    function refreshMessageDom(index) {
+        try {
+            var rw = rootWin();
+
+            if (typeof rw.reloadCurrentChat === "function") {
+                // 太重，先不用。优先改 DOM。
+            }
+
+            var d = rootDoc();
+            var msg = null;
+            var sels = [
+                '#chat .mes[mesid="' + index + '"] .mes_text',
+                '#chat .mes[mesid="' + index + '"] .mes_block .mes_text',
+                '#chat .mes[mesid="' + index + '"]',
+                '#chat .mes[data-mesid="' + index + '"] .mes_text',
+                '#chat .mes[data-mesid="' + index + '"]'
+            ];
+
+            for (var i = 0; i < sels.length; i++) {
+                msg = d.querySelector(sels[i]);
+                if (msg) break;
+            }
+
+            if (msg) {
+                var chat = ctx().chat;
+                var content = chat && chat[index] ? chat[index].mes : "";
+                msg.innerHTML = content;
+            }
+        } catch (e) {}
+    }
+
+
+    function adrDNativeRedrawNow() {
+        try {
+            var rw = rootWin();
+            var c = ctx();
+
+            try {
+                if (typeof rw.reloadCurrentChat === "function") {
+                    rw.reloadCurrentChat();
+                    return true;
+                }
+            } catch (e1) {}
+
+            try {
+                if (typeof c.reloadCurrentChat === "function") {
+                    c.reloadCurrentChat();
+                    return true;
+                }
+            } catch (e2) {}
+
+            try {
+                if (c.eventSource && c.event_types && c.event_types.CHAT_CHANGED) {
+                    c.eventSource.emit(c.event_types.CHAT_CHANGED);
+                    return true;
+                }
+            } catch (e3) {}
+
+            try {
+                if (rw.eventSource && rw.event_types && rw.event_types.CHAT_CHANGED) {
+                    rw.eventSource.emit(rw.event_types.CHAT_CHANGED);
+                    return true;
+                }
+            } catch (e4) {}
+        } catch (e) {}
+
+        return false;
+    }
+
+    function adrDSaveThenRedrawAfterInject() {
+        // v1.9.26：温和可观测保存。
+        // saveChat 若返回 Promise，则显式 reject 才判失败；不可观测时保守视为成功，避免卡死。
+        return new Promise(function (resolve, reject) {
+            try {
+                var c = ctx();
+                var done = false;
+
+                function redrawLater(ms, ok, err) {
+                    setTimeout(function () {
+                        if (done) return;
+                        done = true;
+                        try { adrDNativeRedrawNow(); } catch (eRedraw) {}
+                        if (ok === false) reject(err || new Error("聊天保存失败"));
+                        else resolve(true);
+                    }, ms);
+                }
+
+                try {
+                    if (c && typeof c.saveChat === "function") {
+                        var ret = c.saveChat();
+                        if (ret && typeof ret.then === "function") {
+                            ret.then(function () {
+                                redrawLater(180, true);
+                            }).catch(function (err) {
+                                var e = err instanceof Error ? err : new Error(String(err || "聊天保存失败"));
+                                e.name = "SaveChatError";
+                                redrawLater(180, false, e);
+                            });
+                            return;
+                        }
+                    }
+                } catch (e1) {
+                    e1.name = e1.name || "SaveChatError";
+                    redrawLater(180, false, e1);
+                    return;
+                }
+
+                // 如果 saveChat 不是 Promise，就给移动端文件保存/IndexedDB 一点时间；不可观测不强判失败。
+                redrawLater(1200, true);
+            } catch (e) {
+                console.warn("[Arrebol D] save then redraw failed", e);
+                setTimeout(function () { try { adrDNativeRedrawNow(); } catch (e2) {} }, 1500);
+                resolve(true);
+            }
+        });
+    }
+
+
+    function adrDBlurActiveElement() {
+        try {
+            var d = rootDoc();
+            if (d && d.activeElement && typeof d.activeElement.blur === "function") {
+                d.activeElement.blur();
+                return true;
+            }
+        } catch (e1) {}
+
+        try {
+            var rw = rootWin();
+            if (rw && rw.document && rw.document.activeElement && typeof rw.document.activeElement.blur === "function") {
+                rw.document.activeElement.blur();
+                return true;
+            }
+        } catch (e2) {}
+
+        return false;
+    }
+
+    function adrDWriteDirectorInjection(type, text) {
+        if (!text || !text.trim()) return false;
+
+        try {
+            var c = ctx();
+            var chat = c.chat;
+            if (!chat || !chat.length) return false;
+
+            var idx = findLastMessageIndex(chat);
+            if (idx < 0 || !chat[idx]) return false;
+
+            var add = injectionText(type, text);
+
+            // 移除同类型旧注入，避免最后一条消息越堆越多。
+            var mes = String(chat[idx].mes || "");
+            var startMark = "<!-- ARREBOL_D_START:" + type + " -->";
+            var endMark = "<!-- ARREBOL_D_END:" + type + " -->";
+
+            var startAt = mes.indexOf(startMark);
+            while (startAt >= 0) {
+                var endAt = mes.indexOf(endMark, startAt);
+                if (endAt < 0) break;
+                mes = mes.slice(0, startAt).trimEnd() + mes.slice(endAt + endMark.length);
+                startAt = mes.indexOf(startMark);
+            }
+
+            var startMark2 = "<!-- ARREBOL_D_START:" + type;
+            var endMark2 = "ARREBOL_D_END:" + type + " -->";
+            var startAt2 = mes.indexOf(startMark2);
+            while (startAt2 >= 0) {
+                var endAt2 = mes.indexOf(endMark2, startAt2);
+                if (endAt2 < 0) break;
+                mes = mes.slice(0, startAt2).trimEnd() + mes.slice(endAt2 + endMark2.length);
+                startAt2 = mes.indexOf(startMark2);
+            }
+
+            var visibleName = type === "plot" ? "剧情导演" : "情感导演";
+            var reOldVisible = new RegExp("\\n\\n【(?:红霞导演室|暗河红霞 Arrebol D)(?:｜|\\|)" + visibleName + "】[\\s\\S]*$", "m");
+            mes = mes.replace(reOldVisible, "");
+
+            // 移除旧版纯文本标记注入，避免堆叠。
+            mes = mes.replace(/\n?arrebol_d(?:_visible)?###[\s\S]*?###/g, "").trimEnd();
+
+            chat[idx].mes = mes.trimEnd() + add;
+            return true;
+        } catch (e) {
+            console.error("[Arrebol D] inject write failed", e);
+            return false;
+        }
+    }
+
+    function injectDirector(type, text) {
+        try {
+            var ok = adrDWriteDirectorInjection(type, text);
+            if (!ok) return false;
+            adrDSaveThenRedrawAfterInject().catch(function (e) {
+                try { console.warn("[Arrebol D] async save after manual inject failed", e); } catch (eWarn) {}
+            });
+            return true;
+        } catch (e) {
+            console.error("[Arrebol D] inject failed", e);
+            return false;
+        }
+    }
+
+    async function injectDirectorAsync(type, text) {
+        try {
+            var ok = adrDWriteDirectorInjection(type, text);
+            if (!ok) return false;
+            await adrDSaveThenRedrawAfterInject();
+            return true;
+        } catch (e) {
+            console.error("[Arrebol D] inject async failed", e);
+            if (e && !e.name) e.name = "SaveChatError";
+            throw e;
+        }
+    }
+
+    function localTest(type) {
+        syncAll();
+        var r = activeRange();
+        var title = type === "plot" ? "剧情本地测试" : "情感本地测试";
+        var text = "【" + title + "】\n按钮、读取聊天、写入结果框链路可用。\n\n【读取最近 " + r + " 轮】\n" + (recentChat(r).slice(0, 1200) || "（未读取到聊天内容）");
+        setPreview(type, text);
+        status(type, "本地测试成功 ✓", "#8ed99d");
+        setButtons(type);
+    }
+
+    function pushModel(list, m) {
+        if (!m) return;
+        if (typeof m === "string") { list.push(m); return; }
+        if (m.id) list.push(m.id);
+        else if (m.name) list.push(m.name);
+        else if (m.model) list.push(m.model);
+        else if (m.slug) list.push(m.slug);
+    }
+
+    function extractModels(data) {
+        var list = [];
+
+        if (!data) return list;
+
+        if (Array.isArray(data)) data.forEach(function (m) { pushModel(list, m); });
+        else if (Array.isArray(data.data)) data.data.forEach(function (m) { pushModel(list, m); });
+        else if (Array.isArray(data.models)) data.models.forEach(function (m) { pushModel(list, m); });
+        else if (data.id) pushModel(list, data);
+
+        var seen = {};
+        var out = [];
+        list.forEach(function (x) {
+            x = String(x || "").trim();
+            if (!x || seen[x]) return;
+            seen[x] = true;
+            out.push(x);
+        });
+        out.sort();
+        return out;
+    }
+
+    function fillModelSelect(type, models) {
+        var st = settings();
+        var modelKey = field(type, "model");
+        var current = st[modelKey] || "";
+
+        var sel = qForm("adr044-" + type + "-model-select");
+        if (!sel) return;
+
+        var html = "";
+        if (current) html += '<option value="' + esc(current) + '">' + esc(current) + '（当前）</option>';
+        else html += '<option value="">加载后选择模型</option>';
+
+        models.forEach(function (m) {
+            if (m === current) return;
+            html += '<option value="' + esc(m) + '">' + esc(m) + '</option>';
+        });
+
+        sel.innerHTML = html;
+        if (current) sel.value = current;
+    }
+
+    async function loadModels(type) {
+        syncType(type);
+
+        var st = settings();
+        var p = prefixOf(type);
+        var endpoint = st[p + "ApiEndpoint"] || "";
+        var key = st[p + "ApiKey"] || "";
+
+        if (!endpoint) {
+            status(type, "请先填写 API 地址", "#d4726a");
+            return;
+        }
+
+        var url = modelsUrl(endpoint);
+        if (!url) {
+            status(type, "API 地址无效", "#d4726a");
+            return;
+        }
+
+        var btn = qForm("adr044-" + type + "-load-models");
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = "加载中…";
+        }
+
+        status(type, "正在拉取模型列表…", "#8ed99d");
+
+        try {
+            var headers = {};
+            if (key) headers.Authorization = "Bearer " + key;
+
+            var res = await fetch(url, { method: "GET", headers: headers });
+            var raw = await res.text();
+
+            if (!res.ok) throw new Error("模型接口 " + res.status + "：" + raw.slice(0, 220));
+
+            var data;
+            try { data = JSON.parse(raw); }
+            catch (e) { throw new Error("模型接口返回非 JSON：" + raw.slice(0, 180)); }
+
+            var models = extractModels(data);
+            if (!models.length) throw new Error("没有解析到模型名");
+
+            fillModelSelect(type, models);
+            status(type, "已加载 " + models.length + " 个模型 ✓", "#8ed99d");
+        } catch (e2) {
+            status(type, "加载模型失败：" + (e2.message || String(e2)), "#d4726a");
+        }
+
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "加载模型";
+        }
+    }
+
+    function safeType(v) {
+        if (v === null) return "null";
+        if (v === undefined) return "undefined";
+        if (Array.isArray(v)) return "array(" + v.length + ")";
+        return typeof v;
+    }
+
+    function shortText(v, max) {
+        max = max || 500;
+        try {
+            var s = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+            if (!s) return "";
+            if (s.length > max) return s.slice(0, max) + "…";
+            return s;
+        } catch (e) {
+            try { return String(v).slice(0, max); } catch (_) { return ""; }
+        }
+    }
+
+    function listKeys(obj, max) {
+        max = max || 80;
+        try {
+            if (!obj) return "（无）";
+            var keys = Object.keys(obj);
+            return keys.slice(0, max).join(", ") + (keys.length > max ? " … 共" + keys.length + "项" : "");
+        } catch (e) {
+            return "（无法读取 keys：" + e.message + "）";
+        }
+    }
+
+    function getCurrentCharacterProbe() {
+        var c;
+        try { c = ctx(); } catch (e) { return { error: e.message }; }
+
+        var info = {
+            chid: null,
+            characterId: null,
+            name1: null,
+            charObj: null,
+            source: ""
+        };
+
+        var ids = ["characterId", "this_chid", "chid", "currentCharacterId"];
+        ids.forEach(function (k) {
+            if (c[k] !== undefined && info[k === "characterId" ? "characterId" : "chid"] === null) {
+                if (k === "characterId") info.characterId = c[k];
+                else info.chid = c[k];
+            }
+        });
+
+        var id = info.characterId;
+        if (id === null || id === undefined) id = info.chid;
+
+        try {
+            if (c.characters && id !== null && id !== undefined && c.characters[id]) {
+                info.charObj = c.characters[id];
+                info.source = "ctx.characters[id]";
+            }
+        } catch (e1) {}
+
+        try {
+            if (!info.charObj && c.character) {
+                info.charObj = c.character;
+                info.source = "ctx.character";
+            }
+        } catch (e2) {}
+
+        try {
+            if (!info.charObj && c.characters && Array.isArray(c.characters) && c.name1) {
+                for (var i = 0; i < c.characters.length; i++) {
+                    if (c.characters[i] && c.characters[i].name === c.name1) {
+                        info.charObj = c.characters[i];
+                        info.source = "ctx.characters by name1";
+                        break;
+                    }
+                }
+            }
+        } catch (e3) {}
+
+        try { info.name1 = c.name1 || (info.charObj && info.charObj.name) || ""; } catch (e4) {}
+
+        return info;
+    }
+
+    function extractCoreCharacterText(ch) {
+        if (!ch) return "";
+        var parts = [];
+        var fields = [
+            ["name", "名称"],
+            ["description", "描述"],
+            ["personality", "性格"],
+            ["scenario", "场景"],
+            ["first_mes", "首条消息"],
+            ["mes_example", "示例对话"],
+            ["creator_notes", "创作者注释"],
+            ["system_prompt", "系统提示"],
+            ["post_history_instructions", "后历史指令"]
+        ];
+
+        fields.forEach(function (pair) {
+            var k = pair[0], label = pair[1];
+            if (ch[k]) parts.push("【" + label + "】\n" + String(ch[k]).trim());
+        });
+
+        try {
+            if (ch.data) {
+                fields.forEach(function (pair) {
+                    var k = pair[0], label = pair[1];
+                    if (ch.data[k] && !ch[k]) parts.push("【data." + label + "】\n" + String(ch.data[k]).trim());
+                });
+            }
+        } catch (e) {}
+
+        return parts.join("\n\n");
+    }
+
+    function findPersonaProbe() {
+        var c;
+        try { c = ctx(); } catch (e) { return { error: e.message }; }
+
+        var candidates = [];
+        var keys = [
+            "persona",
+            "persona_description",
+            "personaDescription",
+            "user_description",
+            "userDescription",
+            "power_user",
+            "name2"
+        ];
+
+        keys.forEach(function (k) {
+            try {
+                if (c[k] !== undefined) candidates.push({ key: "ctx." + k, type: safeType(c[k]), value: shortText(c[k], 600) });
+            } catch (e) {}
+        });
+
+        try {
+            var rw = rootWin();
+            ["persona_description", "power_user", "selected_persona", "name2", "user_avatar"].forEach(function (k) {
+                if (rw[k] !== undefined) candidates.push({ key: "window." + k, type: safeType(rw[k]), value: shortText(rw[k], 600) });
+            });
+        } catch (e2) {}
+
+        return candidates;
+    }
+
+    function findWorldProbe() {
+        var c;
+        try { c = ctx(); } catch (e) { return [{ key: "ctx", error: e.message }]; }
+
+        var out = [];
+        var ctxKeys = [
+            "world_info",
+            "worldInfo",
+            "worldInfos",
+            "world_names",
+            "worldNames",
+            "chat_metadata",
+            "chatMetadata",
+            "characters",
+            "groups",
+            "extensionSettings"
+        ];
+
+        ctxKeys.forEach(function (k) {
+            try {
+                if (c[k] !== undefined) out.push({ key: "ctx." + k, type: safeType(c[k]), keys: listKeys(c[k], 40), value: shortText(c[k], 500) });
+            } catch (e) {}
+        });
+
+        try {
+            var rw = rootWin();
+            [
+                "world_info",
+                "worldInfo",
+                "world_names",
+                "world_names_data",
+                "selected_world_info",
+                "chat_metadata",
+                "getWorldInfoPrompt",
+                "getWorldInfoPromptData",
+                "getWorldInfoSettings",
+                "world_info_data"
+            ].forEach(function (k) {
+                if (rw[k] !== undefined) out.push({ key: "window." + k, type: safeType(rw[k]), keys: listKeys(rw[k], 40), value: shortText(rw[k], 500) });
+            });
+        } catch (e2) {}
+
+        return out;
+    }
+
+    function extractContentBlocksFromText(text) {
+        text = String(text || "");
+        text = cleanMessage(text);
+
+        var blocks = [];
+        var re = /<content\b[^>]*>([\s\S]*?)<\/content>/gi;
+        var m;
+        while ((m = re.exec(text)) !== null) {
+            var v = (m[1] || "").trim();
+            if (v) blocks.push(v);
+        }
+
+        return blocks;
+    }
+
+    function contentBlocksProbe(rounds) {
+        var chat;
+        try { chat = ctx().chat; } catch (e) { return { error: e.message, blocks: [] }; }
+        if (!chat || !chat.length) return { blocks: [], lines: ["（未读取到聊天）"] };
+
+        var limit = rounds * 2;
+        var lines = [];
+        var blocks = [];
+        var count = 0;
+
+        for (var i = chat.length - 1; i >= 0 && count < limit; i--) {
+            var msg = chat[i];
+            if (!msg || msg.is_system) continue;
+
+            var role = msg.is_user ? "用户" : (msg.name || "角色");
+            var found = extractContentBlocksFromText(msg.mes);
+
+            if (found.length) {
+                for (var j = 0; j < found.length; j++) {
+                    blocks.unshift({
+                        index: i,
+                        role: role,
+                        text: found[j]
+                    });
+                }
+                lines.unshift("消息 #" + i + " [" + role + "] 提取到 " + found.length + " 段 <content>");
+            } else {
+                lines.unshift("消息 #" + i + " [" + role + "] 无 <content>");
+            }
+
+            count++;
+        }
+
+        return { blocks: blocks, lines: lines };
+    }
+
+    function runContextProbe() {
+        syncAll();
+
+        var c;
+        try { c = ctx(); } catch (e) {
+            setPreview(currentType(), "读取 ctx 失败：" + e.message);
+            return;
+        }
+
+        var charInfo = getCurrentCharacterProbe();
+        var ch = charInfo.charObj;
+        var persona = findPersonaProbe();
+        var worlds = findWorldProbe();
+        var content = contentBlocksProbe(activeRange());
+
+        var out = "";
+        out += "【红霞探针 v1.0.5.6.8.1.3.2】\n";
+        out += "目的：检测酒馆 1.81 当前环境里角色卡 / 世界书 / user 人设 / <content> 所在字段。\n\n";
+
+        out += "【Context 顶层 keys】\n";
+        out += listKeys(c, 120) + "\n\n";
+
+        out += "【当前角色定位】\n";
+        out += "characterId: " + shortText(charInfo.characterId, 100) + "\n";
+        out += "chid/this_chid: " + shortText(charInfo.chid, 100) + "\n";
+        out += "name1/角色名: " + shortText(charInfo.name1, 100) + "\n";
+        out += "角色来源: " + (charInfo.source || "未定位") + "\n";
+        out += "角色对象类型: " + safeType(ch) + "\n";
+        out += "角色对象 keys: " + listKeys(ch, 100) + "\n\n";
+
+        out += "【角色卡核心字段预览】\n";
+        var core = extractCoreCharacterText(ch);
+        out += (core ? core.slice(0, 1800) : "（未提取到常见角色卡字段）") + "\n\n";
+
+        out += "【User 人设 / Persona 候选】\n";
+        if (persona.length) {
+            persona.forEach(function (p) {
+                out += "- " + p.key + " | " + p.type + "\n";
+                if (p.value) out += p.value.slice(0, 500) + "\n";
+            });
+        } else {
+            out += "（未找到明显 persona 字段）\n";
+        }
+        out += "\n";
+
+        out += "【世界书 / Lorebook 候选】\n";
+        if (worlds.length) {
+            worlds.forEach(function (w) {
+                out += "- " + w.key + " | " + w.type + "\n";
+                out += "  keys: " + (w.keys || "（无）") + "\n";
+                if (w.value) out += "  preview: " + String(w.value).replace(/\n/g, " ").slice(0, 500) + "\n";
+            });
+        } else {
+            out += "（未找到明显 world/lorebook 字段）\n";
+        }
+        out += "\n";
+
+        out += "【<content> 提取概览】\n";
+        if (content.error) out += "错误：" + content.error + "\n";
+        out += "提取段数: " + (content.blocks ? content.blocks.length : 0) + "\n";
+        if (content.lines) out += content.lines.slice(0, 80).join("\n") + "\n";
+
+        setPreview(currentType(), out);
+        status(currentType(), "上下文探针完成 ✓ 请复制结果给小g", "#8ed99d");
+        setButtons(currentType());
+    }
+
+    function runContentProbe() {
+        syncAll();
+
+        var result = contentBlocksProbe(activeRange());
+        var out = "";
+        out += "【<content> 精准提取测试】\n";
+        out += "范围：最近 " + activeRange() + " 轮，按消息倒序扫描后恢复顺序。\n\n";
+
+        if (result.error) out += "错误：" + result.error + "\n\n";
+
+        out += "【扫描概览】\n";
+        out += (result.lines && result.lines.length ? result.lines.join("\n") : "（无扫描结果）") + "\n\n";
+
+        out += "【提取正文】\n";
+        if (result.blocks && result.blocks.length) {
+            result.blocks.forEach(function (b, i) {
+                out += "\n--- content #" + (i + 1) + " / 消息#" + b.index + " / " + b.role + " ---\n";
+                out += b.text + "\n";
+            });
+        } else {
+            out += "未提取到 <content>...</content>。如果你的正文没有 content 标签，正式版需要 fallback 策略。\n";
+        }
+
+        setPreview(currentType(), out);
+        status(currentType(), "<content> 提取测试完成 ✓", "#8ed99d");
+        setButtons(currentType());
+    }
+
+
+    function opt(cur, val, label) {
+        return '<option value="' + val + '"' + (String(cur) === String(val) ? " selected" : "") + '>' + label + '</option>';
+    }
+
+    function pageHTML(type) {
+        var st = settings();
+        var p = prefixOf(type);
+        var title = type === "plot" ? "剧情导演" : "情感导演";
+        var autoKey = type === "plot" ? "autoInjectPlot" : "autoInjectEmotion";
+
+        return '<div class="adr044-page" id="adr044-page-' + type + '"' + (st.activeTab === type ? '' : ' style="display:none"') + '>'
+            + '<details open><summary>' + title + '配置</summary>'
+            + '<label>API 地址</label><input type="text" id="adr044-' + type + '-endpoint" value="' + esc(st[p + "ApiEndpoint"] || "") + '" placeholder="https://openrouter.ai/api/v1">'
+            + '<label>API 密钥</label><input type="password" id="adr044-' + type + '-key" value="' + esc(st[p + "ApiKey"] || "") + '" placeholder="sk-...">'
+            + '<label>模型</label><input type="text" id="adr044-' + type + '-model" value="' + esc(st[p + "Model"] || "") + '" placeholder="可以手填，或加载模型">'
+            + '<select id="adr044-' + type + '-model-select"><option value="' + esc(st[p + "Model"] || "") + '">' + (st[p + "Model"] ? esc(st[p + "Model"]) + "（当前）" : "加载后选择模型") + '</option></select>'
+            + '<div class="adr044-actions"><button id="adr044-' + type + '-load-models" type="button">加载模型</button><button id="adr044-' + type + '-save" type="button">保存设置</button></div>'
+            + '<label class="adr044-check"><input type="checkbox" id="adr044-auto-inject-' + type + '"' + (st[autoKey] ? " checked" : "") + '> 生成后自动注入当前聊天</label>'
+            + '<label class="adr044-check"><input type="checkbox" id="adr044-auto-trigger-' + type + '"' + (st[type === "plot" ? "autoTriggerPlot" : "autoTriggerEmotion"] ? " checked" : "") + '> 启用自动触发</label>'
+            + '<label>自动触发间隔</label>'
+            + '<select id="adr044-auto-trigger-range-' + type + '">'
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "10", "每 10 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "20", "每 20 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "30", "每 30 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "50", "每 50 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "custom", "自定义")
+            + '</select>'
+            + '<input type="number" id="adr044-auto-trigger-custom-' + type + '" placeholder="自定义自动触发轮次" value="' + esc(st[type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange"] || "") + '" style="display:' + (String(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"]) === "custom" ? "block" : "none") + '">'
+            + '<div class="adr044-auto-counter" id="adr044-auto-counter-' + type + '">自动触发计数：打开面板后刷新</div>'
+            + '<div class="adr044-note adr044-auto-reroll-note">ℹ️ 触发层重 roll 不会自动再触发；如需基于新回复补导演建议，请点「按补充指令重新分析」手动补一次。</div>'
+            + '<div class="adr044-auto-calibrate-row"><button class="adr044-auto-calibrate" id="adr044-' + type + '-calibrate-auto" type="button">校准当前进度</button></div>'
+            + '</details>'
+
+            + '<details><summary>' + title + '预设</summary>'
+            + '<div class="adr044-template-compact">'
+            + '<select id="adr044-template-select-' + type + '">' + adrDTemplateOptions(type) + '</select>'
+            + '<input id="adr044-template-name-' + type + '" placeholder="新模板名 / 当前模板名">'
+            + '<div class="adr044-template-mini-actions">'
+            + '<button type="button" id="adr044-template-save-' + type + '">保存当前为模板</button>'
+            + '<button type="button" id="adr044-template-delete-' + type + '">删除模板</button>'
+            + '</div>'
+            + '<div class="adr044-template-status" id="adr044-template-status-' + type + '"></div>'
+            + '</div>'
+            + '<textarea id="adr044-' + type + '-preset" rows="8">' + esc(st[p + "Preset"] || "") + '</textarea>'
+            + '</details>'
+
+            + '<details open><summary>' + title + '结果</summary>'
+            + '<div id="adr044-' + type + '-status">请先本地测试，或直接生成导演分析。</div>'
+            + '<textarea id="adr044-' + type + '-preview" rows="8" placeholder="生成结果显示在这里">' + esc(st[p + "Preview"] || "") + '</textarea>'
+            + '<label>补充指令</label><input type="text" id="adr044-' + type + '-extra" placeholder="只影响本次重新分析">'
+            + '<div class="adr044-actions"><button id="adr044-' + type + '-local" type="button">本地测试</button><button id="adr044-' + type + '-generate" type="button">生成导演分析</button></div>'
+            + '<div class="adr044-actions"><button id="adr044-' + type + '-reroll" type="button">按补充指令重新分析</button><button id="adr044-' + type + '-stop" type="button" disabled>打断</button><button id="adr044-' + type + '-copy" type="button">复制</button></div>'
+            + '<div class="adr044-actions"><button id="adr044-' + type + '-inject" type="button">手动注入当前聊天</button></div>'
+            + '</details>'
+            + '</div>';
+    }
+
+    function drawerHTML() {
+        var st = settings();
+
+        return '<div id="adr044-drawer"><div class="inline-drawer">'
+            + '<div class="inline-drawer-toggle inline-drawer-header"><b>🎬 Arrebol D 暗河红霞导演系统 v1.9.25</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>'
+            + '<div class="inline-drawer-content">'
+            + '<div class="adr044-box">'
+            + '<div class="adr044-note">小红霞在线｜ripple & GPT</div>'
+
+            + '<details open><summary>共享设置</summary>'
+            + '<label>复盘范围</label><select id="adr044-range">'
+            + opt(st.range, "10", "最近 10 轮")
+            + opt(st.range, "20", "最近 20 轮")
+            + opt(st.range, "30", "最近 30 轮")
+            + opt(st.range, "50", "最近 50 轮")
+            + opt(st.range, "custom", "自定义")
+            + '</select>'
+            + '<input type="number" id="adr044-custom" placeholder="自定义轮数" value="' + esc(st.customRange || "") + '" style="display:' + (String(st.range) === "custom" ? "block" : "none") + '">'
+            + '<label>角色卡要点 / 世界书 / 当前担心</label>'
+            + '<textarea id="adr044-memory" rows="5" placeholder="这里会同时发给情感导演和剧情导演">' + esc(st.supplementMemory || "") + '</textarea>'
+            + '<div class="adr044-actions"><button id="adr044-probe-context" type="button" onclick="window.ADR044_probeContext&&window.ADR044_probeContext();return false;">检测上下文</button><button id="adr044-probe-content" type="button" onclick="window.ADR044_probeContent&&window.ADR044_probeContent();return false;">测试 &lt;content&gt; 提取</button></div>'
+            + '<div class="adr044-actions"><button id="adr044-preview-precise" type="button">预览精准读取</button></div>'
+            + '<label>注入方式</label><select id="adr044-inject-mode">'
+            + opt(st.injectMode, "visible", "可见文本注入（直接显示）")
+            + opt(st.injectMode, "folded", "纯文本标记注入（推荐外挂正则）")
+            + opt(st.injectMode, "hidden", "纯文本标记注入（推荐外挂正则）")
+            + '</select>'
+            + '<label class="adr044-check"><input type="checkbox" id="adr044-show-floating-window"' + (st.showFloatingWindow ? " checked" : "") + '> 显示小红霞浮窗</label>'
+            + '<label class="adr044-check"><input type="checkbox" id="adr044-show-auto-trigger-popup"' + (st.showAutoTriggerPopup !== false ? " checked" : "") + '> 自动分析前显示提示</label>'
+            + '</details>'
+
+            + '<div class="adr044-tabs">'
+            + '<button id="adr044-tab-emotion" type="button" class="' + (st.activeTab === "plot" ? "" : "active") + '">情感导演</button>'
+            + '<button id="adr044-tab-plot" type="button" class="' + (st.activeTab === "plot" ? "active" : "") + '">剧情导演</button>'
+            + '</div>'
+
+            + pageHTML("emotion")
+            + pageHTML("plot")
+            + '</div>'
+            + '</div></div></div>';
+    }
+
+    function mountDrawer() {
+        if (q("#adr044-drawer")) return;
+
+        var html = drawerHTML();
+
+        try {
+            var jq = rootWin().jQuery || rootWin().$ || window.jQuery || window.$;
+            if (jq) {
+                var target = jq("#extensions_settings2");
+                if (target && target.length) {
+                    target.append(html);
+                    return;
+                }
+            }
+        } catch (e) {}
+
+        var d = rootDoc();
+        var el = d.querySelector("#extensions_settings2");
+        if (el) {
+            var wrap = d.createElement("div");
+            wrap.innerHTML = html;
+            el.appendChild(wrap.firstChild);
+        }
+    }
+
+    function switchTab(type) {
+        type = type === "plot" ? "plot" : "emotion";
+        save("activeTab", type);
+
+        try {
+            var d = rootDoc();
+
+            // 抽屉与浮窗会同时存在，且内部 id 重复。
+            // 所以这里必须同步所有同名节点，不能只 q("#id")。
+            Array.prototype.slice.call(d.querySelectorAll("#adr044-page-emotion, #adr048-page-emotion")).forEach(function (el) {
+                el.style.display = type === "emotion" ? "" : "none";
+            });
+
+            Array.prototype.slice.call(d.querySelectorAll("#adr044-page-plot, #adr048-page-plot")).forEach(function (el) {
+                el.style.display = type === "plot" ? "" : "none";
+            });
+
+            Array.prototype.slice.call(d.querySelectorAll("#adr044-tab-emotion")).forEach(function (el) {
+                el.classList.toggle("active", type === "emotion");
+            });
+
+            Array.prototype.slice.call(d.querySelectorAll("#adr044-tab-plot")).forEach(function (el) {
+                el.classList.toggle("active", type === "plot");
+            });
+
+            adrDRefreshAllFieldsFromSettings();
+        } catch (e) {
+            console.warn("[Arrebol D] switchTab failed", e);
+        }
+    }
+
+
+    function adrDSetAllById(id, value, checked) {
+        try {
+            var nodes = Array.prototype.slice.call(rootDoc().querySelectorAll("#" + id));
+            nodes.forEach(function (el) {
+                if (!el) return;
+                if (el.type === "checkbox") {
+                    el.checked = !!checked;
+                } else {
+                    el.value = value == null ? "" : value;
                 }
             });
-            window.__ipeQuickButtonObserver.observe(d.body, { childList: true, subtree: true });
+        } catch (e) {}
+    }
+
+    function adrDRefreshAllFieldsFromSettings() {
+        try {
+            var st = settings();
+
+            adrDSetAllById("adr044-range", st.range || "30");
+            adrDSetAllById("adr044-custom", st.customRange || "");
+            adrDSetAllById("adr044-memory", st.supplementMemory || "");
+            adrDSetAllById("adr044-inject-mode", st.injectMode || "visible");
+            adrDSetAllById("adr044-show-floating-window", "", st.showFloatingWindow);
+            adrDSetAllById("adr044-show-auto-trigger-popup", "", st.showAutoTriggerPopup !== false);
+
+            ["emotion", "plot"].forEach(function (type) {
+                var p = prefixOf(type);
+                adrDSetAllById("adr044-" + type + "-endpoint", st[p + "ApiEndpoint"] || "");
+                adrDSetAllById("adr044-" + type + "-key", st[p + "ApiKey"] || "");
+                adrDSetAllById("adr044-" + type + "-model", st[p + "Model"] || "");
+                adrDSetAllById("adr044-" + type + "-preset", st[p + "Preset"] || "");
+                adrDSetAllById("adr044-" + type + "-preview", st[p + "Preview"] || "");
+                adrDSetAllById("adr044-auto-inject-" + type, "", type === "plot" ? st.autoInjectPlot : st.autoInjectEmotion);
+                adrDSetAllById("adr044-auto-trigger-" + type, "", type === "plot" ? st.autoTriggerPlot : st.autoTriggerEmotion);
+                adrDSetAllById("adr044-auto-trigger-range-" + type, st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"] || (type === "plot" ? "10" : "20"));
+                adrDSetAllById("adr044-auto-trigger-custom-" + type, st[type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange"] || "");
+            });
+            adrDUpdateAutoCounters();
+        } catch (e) {
+            console.warn("[Arrebol D] refresh fields failed", e);
         }
-    } catch(e) {}
-
-    ipeRefreshTemplateEditors();
-}
-
-function buildInjectTag(desc) {
-    var tpl = ipeGetTemplateValue() || cfg().baseTemplate || "image###{Description}###";
-    return tpl.indexOf("{Description}") >= 0 ? tpl.replace("{Description}", desc) : tpl + desc;
-}
-
-function injectDescToMessage(desc, targetIdx) {
-    var idx = typeof targetIdx === "number" ? targetIdx : currentIdx;
-    if (idx < 0) throw new Error("消息不存在");
-
-    var pv=q("#ipe-preview-text"), pvd=q("#iped-preview-text");
-    if (!desc) desc = (pv&&pv.value)||(pvd&&pvd.value)||currentDesc;
-    if (!desc) throw new Error("没有内容");
-
-    var c = ctx();
-    var msg = c.chat[idx];
-    if (!msg) throw new Error("消息不存在");
-
-    var tag = buildInjectTag(desc);
-    if (String(msg.mes || "").indexOf(tag) >= 0) {
-        return { injected: false, reason: "duplicate", tag: tag };
     }
 
-    msg.mes = String(msg.mes || "").trimEnd() + "\n\n" + tag;
-    if (typeof c.saveChat === "function") c.saveChat();
 
-    var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');
-    if(el && el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>"+esc(tag)+"</p>");
+    var ADR_D_TEMPLATE_KEY = "arrebol_d_prompt_templates_v1";
+    var ADR_D_SELECTED_TEMPLATE_KEY = "arrebol_d_selected_prompt_templates_v1";
 
-    return { injected: true, tag: tag };
-}
-
-function onMsgReceived(idx) {
-    if (!cfg().enabled) return;
-    try {
-        var msg=ctx().chat[idx];
-        if(!msg||msg.is_user) return;
-
-        pendingAutoIdx = idx;
-        currentIdx = idx;
-
-        if (autoTimer) clearTimeout(autoTimer);
-
-        var delay = Number(cfg().autoInjectDelay || 1800);
-        if (delay < 500) delay = 500;
-
-        autoTimer = setTimeout(function() {
-            runPendingAutoExtract();
-        }, delay);
-
-        setStatus("已捕捉新正文，等待自动提取…", "#6ec577");
-    } catch(e){}
-}
-
-function runPendingAutoExtract() {
-    if (pendingAutoIdx < 0) return;
-
-    if (processing) {
-        setTimeout(runPendingAutoExtract, 1200);
-        return;
+    function adrDLoadSelectedTemplates() {
+        try {
+            var s = rootWin().localStorage.getItem(ADR_D_SELECTED_TEMPLATE_KEY) || "";
+            if (!s) return {};
+            return JSON.parse(s) || {};
+        } catch (e) {
+            return {};
+        }
     }
 
-    try {
-        var idx = pendingAutoIdx;
-        pendingAutoIdx = -1;
-
-        var msg = ctx().chat[idx];
-        if (!msg || msg.is_user) return;
-
-        currentIdx = idx;
-        runExtract(msg.mes, "", !!cfg().autoInject, idx);
-    } catch(e) {
-        setStatus("自动提取失败：" + e.message, "#d4726a");
+    function adrDSaveSelectedTemplate(type, name) {
+        try {
+            var obj = adrDLoadSelectedTemplates();
+            obj[type] = String(name || "");
+            rootWin().localStorage.setItem(ADR_D_SELECTED_TEMPLATE_KEY, JSON.stringify(obj));
+        } catch (e) {}
     }
-}
 
-async function onExtract() {
-    if (processing) return;
-    try {
-        var chat=ctx().chat; if(!chat||!chat.length){setStatus("无法读取","#d4726a");return;}
-        for(var i=chat.length-1;i>=0;i--){if(!chat[i].is_user){currentIdx=i;await runExtract(chat[i].mes, "", false, i);return;}}
-        setStatus("未找到 AI 消息","#d4726a");
-    } catch(e){setStatus("错误: "+e.message,"#d4726a");}
-}
+    function adrDSelectedTemplateName(type) {
+        try {
+            var obj = adrDLoadSelectedTemplates();
+            return String(obj[type] || "");
+        } catch (e) {
+            return "";
+        }
+    }
 
-async function runExtract(text, supplement, autoInjectNow, targetIdx) {
-    processing = true;
-    var ball = q("#ipe-ball"); if(ball)ball.classList.add("processing");
-    setStatus("正在提取…","#6ec577"); setBtns(false,false);
-    try {
-        var desc = await callAPI(text, supplement||"");
-        currentDesc = desc; setPreview(desc);
 
-        if (autoInjectNow) {
-            var result = injectDescToMessage(desc, typeof targetIdx === "number" ? targetIdx : currentIdx);
-            if (result && result.injected) {
-                setStatus("提取完成并已自动注入 ✓","#6ec577");
-                setBtns(false,false);
-                var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
-                if(s1)s1.value=""; if(s2)s2.value="";
-                if(ball) ball.classList.remove("has-result");
-            } else {
-                setStatus("提取完成，跳过自动注入（可能已注入）","#6ec577");
-                setBtns(true,true);
-                if(ball) ball.classList.add("has-result");
+    function adrDDefaultTemplateText(type) {
+        try {
+            var st = settings();
+            return String(type === "plot" ? (st.plotPreset || "") : (st.emotionPreset || ""));
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function adrDDefaultTemplates() {
+        return {
+            emotion: [
+                { name: "默认情感导演", text: adrDDefaultTemplateText("emotion") || "你是 RP 情感导演。请阅读最近的聊天内容和用户补充信息，只分析情感曲线与人写正文。" }
+            ],
+            plot: [
+                { name: "默认剧情导演", text: adrDDefaultTemplateText("plot") || "你是 RP 编剧顾问。请阅读角色卡、世界书、记忆与最近聊天内容，分析剧情节奏、事件张力、伏笔管理与场景调度，给出下一阶段的剧情推进方向。你不写正文，只做剧情导航。" }
+            ]
+        };
+    }
+
+    function adrDNormalizeTemplates(raw) {
+        var def = adrDDefaultTemplates();
+        var out = { emotion: [], plot: [] };
+
+        ["emotion", "plot"].forEach(function (type) {
+            var arr = raw && Array.isArray(raw[type]) ? raw[type] : [];
+            arr.forEach(function (it) {
+                if (!it) return;
+                var name = String(it.name || "").trim();
+                var text = String(it.text || "");
+                if (name) out[type].push({ name: name, text: text });
+            });
+            if (!out[type].length) out[type] = def[type];
+        });
+
+        return out;
+    }
+
+    function adrDLoadTemplates() {
+        try {
+            var rw = rootWin();
+            if (rw.__adrDPromptTemplatesCache) return adrDNormalizeTemplates(rw.__adrDPromptTemplatesCache);
+
+            var s = "";
+            try { s = rw.localStorage.getItem(ADR_D_TEMPLATE_KEY) || ""; } catch (e1) {}
+
+            if (!s) {
+                rw.__adrDPromptTemplatesCache = adrDDefaultTemplates();
+                adrDSaveTemplates(rw.__adrDPromptTemplatesCache);
+                return adrDNormalizeTemplates(rw.__adrDPromptTemplatesCache);
             }
-        } else {
-            setStatus("提取完成 — 可编辑后确认注入","#6ec577");
-            setBtns(true,true);
-            if(ball) ball.classList.add("has-result");
+
+            rw.__adrDPromptTemplatesCache = adrDNormalizeTemplates(JSON.parse(s));
+            return adrDNormalizeTemplates(rw.__adrDPromptTemplatesCache);
+        } catch (e) {
+            return adrDDefaultTemplates();
+        }
+    }
+
+    function adrDSaveTemplates(obj) {
+        try {
+            var rw = rootWin();
+            var normalized = adrDNormalizeTemplates(obj);
+            rw.__adrDPromptTemplatesCache = normalized;
+            rw.localStorage.setItem(ADR_D_TEMPLATE_KEY, JSON.stringify(normalized));
+            return true;
+        } catch (e) {
+            console.warn("[Arrebol D] save templates failed", e);
+            return false;
+        }
+    }
+
+    function adrDTemplateOptions(type) {
+        var data = adrDLoadTemplates();
+        var arr = data[type] || [];
+        var selectedName = adrDSelectedTemplateName(type);
+        return arr.map(function (it, idx) {
+            var name = String(it.name || ("模板 " + (idx + 1)));
+            var selected = selectedName && name === selectedName ? ' selected' : '';
+            return '<option value="' + idx + '"' + selected + '>' + esc(name) + '</option>';
+        }).join("");
+    }
+
+    function adrDRefreshTemplateSelects(type, selectedName) {
+        try {
+            if (!selectedName) selectedName = adrDSelectedTemplateName(type);
+            var html = adrDTemplateOptions(type);
+            Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-template-select-" + type)).forEach(function (sel) {
+                sel.innerHTML = html;
+                var matched = false;
+                if (selectedName) {
+                    for (var i = 0; i < sel.options.length; i++) {
+                        if (sel.options[i].textContent === selectedName) {
+                            sel.value = String(i);
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+                if (!matched) sel.value = "0";
+            });
+        } catch (e) {}
+    }
+
+    function adrDTemplateStatus(type, text, color) {
+        try {
+            Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-template-status-" + type)).forEach(function (el) {
+                el.textContent = text || "";
+                if (color) el.style.color = color;
+            });
+        } catch (e) {}
+    }
+
+    function adrDGetPresetBox(type) { return qForm("adr044-" + type + "-preset"); }
+    function adrDGetTemplateSelect(type) { return qForm("adr044-template-select-" + type); }
+    function adrDGetTemplateName(type) { return qForm("adr044-template-name-" + type); }
+
+    function adrDApplyTemplate(type) {
+        adrDResetConfirmAction("delete-template-" + (type === "plot" ? "plot" : "emotion"));
+        var data = adrDLoadTemplates();
+        var sel = adrDGetTemplateSelect(type);
+        var idx = sel ? Number(sel.value) : 0;
+        var item = data[type] && data[type][idx];
+
+        if (!item) {
+            adrDTemplateStatus(type, "没有找到模板", "#e28a9c");
+            return;
         }
 
-        if(ball){ball.classList.remove("processing");}
-        var s=q("#ipe-section-preview"); if(s)s.classList.remove("collapsed");
-    } catch(e) {
-        console.error("[IPE]",e);
-        var msg = e && e.name === "AbortError" ? "请求已被打断" : e.message;
-        setStatus("失败: "+msg,"#d4726a");
-        setBtns(true,false); if(ball)ball.classList.remove("processing");
-    }
-    ipeAbortController = null;
-    ipeSetStopButtonsState(false);
-    processing = false;
-}
-
-async function onReroll() {
-    if(processing||currentIdx<0) return;
-    try{var msg=ctx().chat[currentIdx];if(!msg)return;
-    var sup=q("#ipe-supplement");var supd=q("#iped-supplement");
-    await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", false, currentIdx);}catch(e){}
-}
-
-function onInject() {
-    if(currentIdx<0) return;
-    try {
-        var result = injectDescToMessage("", currentIdx);
-        if (result && result.injected) {
-            setStatus("已注入 ✓","#6ec577"); setBtns(false,false);
-            var ball=q("#ipe-ball"); if(ball)ball.classList.remove("has-result");
-            var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
-            if(s1)s1.value=""; if(s2)s2.value="";
-            console.log("[IPE] 注入 #"+currentIdx);
-        } else {
-            setStatus("已存在相同注入，跳过","#6ec577");
+        var preset = adrDGetPresetBox(type);
+        if (preset) {
+            preset.value = String(item.text || "");
+            try { preset.dispatchEvent(new Event("input", { bubbles: true })); } catch (e) {}
         }
-    } catch(e){console.error("[IPE]",e);setStatus("注入失败: "+e.message,"#d4726a");}
-}
 
-function init() {
-    if (initialized) return;
-    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; console.log("[IPE] ✓ 已加载"); }
-    catch(e) { console.error("[IPE] 初始化失败:",e); }
-}
+        var name = adrDGetTemplateName(type);
+        if (name) name.value = String(item.name || "");
 
-function waitAndInit() {
-    if (typeof SillyTavern === "undefined" || !SillyTavern.getContext) {
-        setTimeout(waitAndInit, 300); return;
+        try {
+            syncType(type);
+            adrDSaveLocalBackup(settings());
+        } catch (e2) {}
+
+        adrDSaveSelectedTemplate(type, item.name);
+        adrDTemplateStatus(type, "已切换：" + item.name, "#8ed99d");
     }
-    try {
-        var c = SillyTavern.getContext();
-        c.eventSource.on(c.event_types.APP_READY, function(){ setTimeout(init, 100); });
-    } catch(e) { setTimeout(init, 2000); }
-}
 
-waitAndInit();
+    function adrDSaveCurrentTemplate(type) {
+        adrDResetConfirmAction("delete-template-" + (type === "plot" ? "plot" : "emotion"));
+        var nameBox = adrDGetTemplateName(type);
+        var preset = adrDGetPresetBox(type);
+        var name = nameBox ? String(nameBox.value || "").trim() : "";
+        var text = preset ? String(preset.value || "") : "";
+
+        if (!name) {
+            adrDTemplateStatus(type, "请先写模板名", "#e28a9c");
+            return;
+        }
+
+        var data = adrDLoadTemplates();
+        var arr = data[type] || [];
+        var found = -1;
+
+        arr.forEach(function (it, idx) {
+            if (String(it.name || "") === name) found = idx;
+        });
+
+        if (found >= 0) arr[found] = { name: name, text: text };
+        else arr.push({ name: name, text: text });
+
+        data[type] = arr;
+        adrDSaveTemplates(data);
+        adrDSaveSelectedTemplate(type, name);
+        adrDRefreshTemplateSelects(type, name);
+        adrDTemplateStatus(type, found >= 0 ? "已更新：" + name : "已新增：" + name, "#8ed99d");
+    }
+
+    var adrDConfirmActionState = {};
+
+    function adrDResetConfirmAction(key) {
+        try {
+            var item = adrDConfirmActionState[key];
+            if (!item) return;
+            if (item.timer) clearTimeout(item.timer);
+            if (item.btn && item.originalText !== undefined) item.btn.textContent = item.originalText;
+            delete adrDConfirmActionState[key];
+        } catch (e) {}
+    }
+
+    function adrDTwoStepConfirm(key, btn, confirmText, hintText, hintFn, actionFn) {
+        try {
+            var now = Date.now();
+            var old = adrDConfirmActionState[key];
+            if (old && old.ready && old.until && now <= old.until) {
+                adrDResetConfirmAction(key);
+                try { actionFn(); } finally { adrDResetConfirmAction(key); }
+                return true;
+            }
+
+            adrDResetConfirmAction(key);
+            var original = btn ? String(btn.textContent || "") : "";
+            var item = {
+                ready: true,
+                btn: btn || null,
+                originalText: original,
+                until: now + 4500,
+                timer: null
+            };
+            if (btn) btn.textContent = confirmText;
+            item.timer = setTimeout(function () { adrDResetConfirmAction(key); }, 4500);
+            adrDConfirmActionState[key] = item;
+            if (typeof hintFn === "function") hintFn(hintText);
+            return false;
+        } catch (e) {
+            try { actionFn(); } catch (e2) {}
+            return true;
+        }
+    }
+
+    function adrDRequestDeleteCurrentTemplate(type, btn) {
+        type = type === "plot" ? "plot" : "emotion";
+        return adrDTwoStepConfirm(
+            "delete-template-" + type,
+            btn || qForm("adr044-template-delete-" + type),
+            "确定删除？",
+            "再点一次确认删除模板",
+            function (msg) { adrDTemplateStatus(type, msg, "#d6a26a"); },
+            function () { adrDDeleteCurrentTemplate(type); }
+        );
+    }
+
+    function adrDRequestCalibrateAutoBaseline(type, btn) {
+        type = type === "plot" ? "plot" : "emotion";
+        return adrDTwoStepConfirm(
+            "calibrate-auto-" + type,
+            btn || qForm("adr044-" + type + "-calibrate-auto"),
+            "确定校准？",
+            "再点一次确认校准当前进度",
+            function (msg) { status(type, msg, "#d6a26a"); },
+            function () { adrDCalibrateAutoBaseline(type); }
+        );
+    }
+
+    function adrDDeleteCurrentTemplate(type) {
+        var data = adrDLoadTemplates();
+        var sel = adrDGetTemplateSelect(type);
+        var idx = sel ? Number(sel.value) : -1;
+        var arr = data[type] || [];
+
+        if (!arr[idx]) {
+            adrDTemplateStatus(type, "没有选中的模板", "#e28a9c");
+            return;
+        }
+
+        if (arr.length <= 1) {
+            adrDTemplateStatus(type, "至少保留一个模板", "#e28a9c");
+            return;
+        }
+
+        var name = arr[idx].name;
+        arr.splice(idx, 1);
+        data[type] = arr;
+        adrDSaveTemplates(data);
+        adrDSaveSelectedTemplate(type, arr[0] ? arr[0].name : "");
+        adrDRefreshTemplateSelects(type);
+        adrDResetConfirmAction("delete-template-" + (type === "plot" ? "plot" : "emotion"));
+        adrDTemplateStatus(type, "已删除：" + name, "#f0b36a");
+    }
+
+    function adrDBindCompactTemplateControls() {
+        try {
+            ["emotion", "plot"].forEach(function (type) {
+                Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-template-select-" + type)).forEach(function (sel) {
+                    if (!sel) return;
+                    try {
+                        var data = adrDLoadTemplates();
+                        var item = data[type] && data[type][Number(sel.value)];
+                        var nameInput = adrDGetTemplateName(type);
+                        if (nameInput && item && !nameInput.value) nameInput.value = item.name || "";
+                    } catch (e0) {}
+
+                    if (sel.__adrDTemplateSelectBound) return;
+                    sel.__adrDTemplateSelectBound = true;
+                    sel.addEventListener("change", function () {
+                        adrDApplyTemplate(type);
+                    }, true);
+                });
+
+                Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-template-save-" + type)).forEach(function (btn) {
+                    if (!btn || btn.__adrDTemplateSaveBound) return;
+                    btn.__adrDTemplateSaveBound = true;
+                    btn.addEventListener("touchstart", function (ev) {
+                        adrDMarkButtonTouchStart(btn, ev);
+                    }, { capture: true, passive: true });
+                    btn.addEventListener("touchmove", function (ev) {
+                        adrDMarkButtonTouchMove(btn, ev);
+                    }, { capture: true, passive: true });
+                    btn.addEventListener("click", function (ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (adrDShouldIgnoreButtonTap(btn, ev)) return;
+                        adrDSaveCurrentTemplate(type);
+                    }, true);
+                    btn.addEventListener("touchend", function (ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (adrDShouldIgnoreButtonTap(btn, ev)) return;
+                        adrDSaveCurrentTemplate(type);
+                    }, true);
+                });
+
+                Array.prototype.slice.call(rootDoc().querySelectorAll("#adr044-template-delete-" + type)).forEach(function (btn) {
+                    if (!btn || btn.__adrDTemplateDeleteBound) return;
+                    btn.__adrDTemplateDeleteBound = true;
+                    btn.addEventListener("touchstart", function (ev) {
+                        adrDMarkButtonTouchStart(btn, ev);
+                    }, { capture: true, passive: true });
+                    btn.addEventListener("touchmove", function (ev) {
+                        adrDMarkButtonTouchMove(btn, ev);
+                    }, { capture: true, passive: true });
+                    btn.addEventListener("click", function (ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (adrDShouldIgnoreButtonTap(btn, ev)) return;
+                        adrDRequestDeleteCurrentTemplate(type, btn);
+                    }, true);
+                    btn.addEventListener("touchend", function (ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (adrDShouldIgnoreButtonTap(btn, ev)) return;
+                        adrDRequestDeleteCurrentTemplate(type, btn);
+                    }, true);
+                });
+            });
+        } catch (e) {}
+    }
+
+
+    function adrDIsTouchLikeEvent(ev) {
+        return !!(ev && (ev.type === "touchend" || ev.type === "pointerup"));
+    }
+
+    function adrDMarkButtonTouchStart(el, ev) {
+        try {
+            var p = null;
+            if (ev && ev.touches && ev.touches.length) p = ev.touches[0];
+            else if (ev) p = ev;
+            el.__adrDTapStart = {
+                x: Number(p && p.clientX) || 0,
+                y: Number(p && p.clientY) || 0,
+                t: Date.now(),
+                moved: false
+            };
+        } catch (e) {}
+    }
+
+    function adrDMarkButtonTouchMove(el, ev) {
+        try {
+            var s = el.__adrDTapStart;
+            if (!s) return;
+            var p = null;
+            if (ev && ev.touches && ev.touches.length) p = ev.touches[0];
+            else if (ev) p = ev;
+            var dx = Math.abs((Number(p && p.clientX) || 0) - s.x);
+            var dy = Math.abs((Number(p && p.clientY) || 0) - s.y);
+            if (dx > 12 || dy > 12) s.moved = true;
+        } catch (e) {}
+    }
+
+    function adrDShouldIgnoreButtonTap(el, ev) {
+        try {
+            var now = Date.now();
+
+            // 防 iOS touchend 后补发 click 造成重复触发。
+            if (ev && ev.type === "click" && el.__adrDLastTouchEndAt && now - el.__adrDLastTouchEndAt < 650) {
+                return true;
+            }
+
+            if (adrDIsTouchLikeEvent(ev)) {
+                el.__adrDLastTouchEndAt = now;
+                var s = el.__adrDTapStart;
+                el.__adrDTapStart = null;
+                if (s && s.moved) return true;
+            }
+
+            // 很短时间内重复点击同一按钮，视为抖动。
+            if (el.__adrDLastAcceptedTapAt && now - el.__adrDLastAcceptedTapAt < 450) {
+                return true;
+            }
+
+            el.__adrDLastAcceptedTapAt = now;
+            return false;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function bindDirect() {
+        try {
+            if (!rootWin().adrDStableAutoSaveBound) {
+                rootWin().adrDStableAutoSaveBound = true;
+                rootDoc().addEventListener("input", function (ev) {
+                    var t = ev && ev.target;
+                    if (!t || !t.id || t.id.indexOf("adr044-") !== 0) return;
+                    try {
+                        syncShared();
+                        if (t.id.indexOf("adr044-emotion-") === 0) syncType("emotion");
+                        if (t.id.indexOf("adr044-plot-") === 0) syncType("plot");
+                        adrDSaveLocalBackup(settings());
+                        adrDUpdateAutoCounters();
+                    } catch (e) {}
+                }, true);
+                rootDoc().addEventListener("change", function (ev) {
+                    var t = ev && ev.target;
+                    if (!t || !t.id || t.id.indexOf("adr044-") !== 0) return;
+                    try {
+                        syncShared();
+                        if (t.id.indexOf("adr044-emotion-") === 0) syncType("emotion");
+                        if (t.id.indexOf("adr044-plot-") === 0) syncType("plot");
+                        adrDSaveLocalBackup(settings());
+                        adrDUpdateAutoCounters();
+                    } catch (e) {}
+                }, true);
+            }
+        } catch (eStableBind) {}
+
+        var ids = {};
+
+        ids["adr044-tab-emotion"] = function () { switchTab("emotion"); };
+        ids["adr044-tab-plot"] = function () { switchTab("plot"); };
+        ids["adr044-probe-context"] = function () { runContextProbe(); };
+        ids["adr044-probe-content"] = function () { runContentProbe(); };
+        ids["adr044-preview-precise"] = function () { runPrecisePreview(); };
+
+        ["emotion", "plot"].forEach(function (type) {
+            ids["adr044-" + type + "-local"] = function () { localTest(type); };
+            ids["adr044-" + type + "-generate"] = function () { run(type, ""); };
+            ids["adr044-" + type + "-reroll"] = function () {
+                var extra = qForm("adr044-" + type + "-extra");
+                run(type, extra ? extra.value : "");
+            };
+            ids["adr044-" + type + "-stop"] = function () { abortRun(type); };
+            ids["adr044-" + type + "-copy"] = function () { copyText(type); };
+            ids["adr044-" + type + "-load-models"] = function () { loadModels(type); };
+            ids["adr044-" + type + "-save"] = function () {
+                adrDForceSaveSettings(type);
+                status(type, "设置已保存 ✓", "#8ed99d");
+            };
+            ids["adr044-" + type + "-calibrate-auto"] = function () { adrDRequestCalibrateAutoBaseline(type); };
+            ids["adr044-" + type + "-inject"] = function () {
+                syncType(type);
+                var pv = qForm("adr044-" + type + "-preview");
+                var text = pv ? pv.value : "";
+                if (!text) {
+                    status(type, "没有内容可注入", "#d4726a");
+                    return;
+                }
+                var ok = injectDirector(type, text);
+                status(type, ok ? "已注入当前聊天 ✓" : "注入失败", ok ? "#8ed99d" : "#d4726a");
+            };
+        });
+
+        Object.keys(ids).forEach(function (id) {
+            var nodes = [];
+            try {
+                nodes = Array.prototype.slice.call(rootDoc().querySelectorAll("#" + id));
+            } catch (e) {
+                var one = q("#" + id);
+                if (one) nodes = [one];
+            }
+
+            nodes.forEach(function (el) {
+                if (!el || el.__adr044Bound) return;
+                el.__adr044Bound = true;
+
+                el.addEventListener("touchstart", function (ev) {
+                    adrDMarkButtonTouchStart(el, ev);
+                }, { capture: true, passive: true });
+
+                el.addEventListener("touchmove", function (ev) {
+                    adrDMarkButtonTouchMove(el, ev);
+                }, { capture: true, passive: true });
+
+                el.addEventListener("click", function (ev) {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                    if (adrDShouldIgnoreButtonTap(el, ev)) return;
+                    adrDBlurActiveElement();
+                    ids[id]();
+                }, true);
+
+                el.addEventListener("touchend", function (ev) {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                    if (adrDShouldIgnoreButtonTap(el, ev)) return;
+                    adrDBlurActiveElement();
+                    ids[id]();
+                }, true);
+            });
+        });
+
+        var range = qForm("adr044-range");
+        if (range && !range.__adr044Bound) {
+            range.__adr044Bound = true;
+            range.addEventListener("change", function () {
+                save("range", range.value);
+                var custom = qForm("adr044-custom");
+                if (custom) custom.style.display = range.value === "custom" ? "block" : "none";
+                saveNow();
+            });
+        }
+
+        var mode = qForm("adr044-inject-mode");
+        if (mode && !mode.__adr044Bound) {
+            mode.__adr044Bound = true;
+            mode.addEventListener("change", function () {
+                save("injectMode", mode.value || "visible");
+                saveNow();
+            });
+        }
+
+        var showFab = qForm("adr044-show-floating-window");
+        if (showFab && !showFab.__adr044Bound) {
+            showFab.__adr044Bound = true;
+            showFab.addEventListener("change", function () {
+                save("showFloatingWindow", !!showFab.checked);
+                saveNow();
+                if (showFab.checked) adr048EnsureFabLater();
+                else adr048RemoveFab();
+            });
+        }
+
+        var showAutoPopup = qForm("adr044-show-auto-trigger-popup");
+        if (showAutoPopup && !showAutoPopup.__adr044Bound) {
+            showAutoPopup.__adr044Bound = true;
+            showAutoPopup.addEventListener("change", function () {
+                save("showAutoTriggerPopup", !!showAutoPopup.checked);
+                saveNow();
+            });
+        }
+
+        ["emotion", "plot"].forEach(function (type) {
+            var modelSelect = qForm("adr044-" + type + "-model-select");
+            if (modelSelect && !modelSelect.__adr044Bound) {
+                modelSelect.__adr044Bound = true;
+                modelSelect.addEventListener("change", function () {
+                    var modelInput = qForm("adr044-" + type + "-model");
+                    if (modelInput) modelInput.value = modelSelect.value;
+                    save(field(type, "model"), modelSelect.value || "");
+                    saveNow();
+                    status(type, "已选择模型：" + (modelSelect.value || "空"), "#8ed99d");
+                });
+            }
+
+            var auto = qForm("adr044-auto-inject-" + type);
+            if (auto && !auto.__adr044Bound) {
+                auto.__adr044Bound = true;
+                auto.addEventListener("change", function () {
+                    save(type === "plot" ? "autoInjectPlot" : "autoInjectEmotion", !!auto.checked);
+                    saveNow();
+                });
+            }
+
+            var autoTrigger = qForm("adr044-auto-trigger-" + type);
+            if (autoTrigger && !autoTrigger.__adr044Bound) {
+                autoTrigger.__adr044Bound = true;
+                autoTrigger.addEventListener("change", function () {
+                    save(type === "plot" ? "autoTriggerPlot" : "autoTriggerEmotion", !!autoTrigger.checked);
+                    saveNow();
+                    adrDResetAutoTriggerBaseline("toggle-" + type);
+                    adrDScheduleAutoTriggerCheck("toggle-" + type);
+                });
+            }
+
+            var autoRange = qForm("adr044-auto-trigger-range-" + type);
+            if (autoRange && !autoRange.__adr044Bound) {
+                autoRange.__adr044Bound = true;
+                autoRange.addEventListener("change", function () {
+                    save(type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange", autoRange.value || (type === "plot" ? "10" : "20"));
+                    var custom = qForm("adr044-auto-trigger-custom-" + type);
+                    if (custom) custom.style.display = autoRange.value === "custom" ? "block" : "none";
+                    saveNow();
+                    adrDResetAutoTriggerBaseline("range-" + type);
+                    adrDScheduleAutoTriggerCheck("range-" + type);
+                });
+            }
+
+            var autoCustom = qForm("adr044-auto-trigger-custom-" + type);
+            if (autoCustom && !autoCustom.__adr044Bound) {
+                autoCustom.__adr044Bound = true;
+                autoCustom.addEventListener("input", function () {
+                    save(type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange", Number(autoCustom.value || 0));
+                    saveNow();
+                });
+                autoCustom.addEventListener("change", function () {
+                    adrDResetAutoTriggerBaseline("custom-" + type);
+                    adrDScheduleAutoTriggerCheck("custom-" + type);
+                });
+            }
+        });
+
+        var map = {
+            "adr044-custom": "customRange",
+            "adr044-memory": "supplementMemory"
+        };
+
+        ["emotion", "plot"].forEach(function (type) {
+            map["adr044-" + type + "-endpoint"] = field(type, "apiEndpoint");
+            map["adr044-" + type + "-key"] = field(type, "apiKey");
+            map["adr044-" + type + "-model"] = field(type, "model");
+            map["adr044-" + type + "-preset"] = field(type, "preset");
+            map["adr044-" + type + "-preview"] = field(type, "preview");
+        });
+
+        Object.keys(map).forEach(function (id) {
+            var el = qForm(id);
+            if (!el || el.__adr044InputBound) return;
+            el.__adr044InputBound = true;
+            el.addEventListener("input", function () {
+                if (map[id] === "customRange") save(map[id], Number(el.value || 0));
+                else save(map[id], el.value || "");
+            });
+        });
+    }
+
+    async function runPrecisePreview() {
+        syncAll();
+        var out = "";
+        out += "【红霞精准读取预览 v1.0.5.6.8.3】\n";
+        out += "以下内容就是下一次发送给副 API 的主要上下文来源。\n\n";
+        out += buildPreciseContext() || "（未读取到角色卡 / 世界书 / user 人设补充）";
+        out += "\n\n【最近 " + activeRange() + " 轮正文｜<content>精准读取】\n";
+        out += await recentContentBlocks(activeRange()) || "（未提取到正文）";
+        setPreview(currentType(), out);
+        status(currentType(), "精准读取预览完成 ✓", "#8ed99d");
+        setButtons(currentType());
+    }
+
+
+    function installProbeGlobals() {
+        try {
+            var w = rootWin();
+            w.ADR044_probeContext = function () {
+                try { runContextProbe(); } catch (e) {
+                    try { alert("检测上下文失败：" + (e.message || String(e))); } catch (_) {}
+                }
+            };
+            w.ADR044_previewPrecise = function () { try { runPrecisePreview(); } catch (e) { try { alert("预览精准读取失败：" + (e.message || String(e))); } catch (_) {} } };
+            w.ADR044_probeContent = function () {
+                try { runContentProbe(); } catch (e) {
+                    try { alert("测试 content 失败：" + (e.message || String(e))); } catch (_) {}
+                }
+            };
+        } catch (e) {}
+    }
+
+    function installProbeDelegation() {
+        try {
+            var d = rootDoc();
+            if (d.__adr044ProbeDelegated) return;
+            d.__adr044ProbeDelegated = true;
+
+            function handle(ev) {
+                var t = ev.target;
+                if (!t) return;
+
+                var hit = null;
+                try { hit = t.closest("#adr044-probe-context,#adr044-probe-content"); }
+                catch (e) { hit = null; }
+
+                if (!hit) return;
+
+                try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+
+                if (hit.id === "adr044-probe-context") runContextProbe();
+                if (hit.id === "adr044-probe-content") runContentProbe();
+            }
+
+            d.addEventListener("click", handle, true);
+            d.addEventListener("touchend", handle, true);
+            d.addEventListener("pointerup", handle, true);
+        } catch (e) {}
+    }
+
+
+    function adr048IsPopupOpen() {
+        try {
+            var p = rootDoc().querySelector("#adr048-popup-panel");
+            return !!(p && p.getAttribute("data-open") === "1");
+        } catch (e) { return false; }
+    }
+
+    function qForm(id) {
+        try {
+            if (adr048IsPopupOpen()) {
+                var p = rootDoc().querySelector("#adr048-popup-panel");
+                if (p) {
+                    var el = p.querySelector("#" + id);
+                    if (el) return el;
+                }
+            }
+        } catch (e) {}
+
+        try {
+            var el2 = rootDoc().querySelector("#" + id);
+            if (el2) return el2;
+        } catch (e2) {}
+
+        try { return document.querySelector("#" + id); } catch (e3) {}
+        return null;
+    }
+
+
+    function adr048PageHTML(type) {
+        var st = settings();
+        var p = prefixOf(type);
+        var title = type === "plot" ? "剧情导演" : "情感导演";
+        var autoKey = type === "plot" ? "autoInjectPlot" : "autoInjectEmotion";
+
+        return '<div class="adr048-page" id="adr048-page-' + type + '"' + (st.activeTab === type ? '' : ' style="display:none"') + '>'
+            + '<div class="adr048-section"><div class="adr048-summary">' + title + '配置</div>'
+            + '<label>API 地址</label><input type="text" id="adr044-' + type + '-endpoint" value="' + esc(st[p + "ApiEndpoint"] || "") + '" placeholder="https://openrouter.ai/api/v1">'
+            + '<label>API 密钥</label><input type="password" id="adr044-' + type + '-key" value="' + esc(st[p + "ApiKey"] || "") + '" placeholder="sk-...">'
+            + '<label>模型</label><input type="text" id="adr044-' + type + '-model" value="' + esc(st[p + "Model"] || "") + '" placeholder="可以手填，或加载模型">'
+            + '<select id="adr044-' + type + '-model-select"><option value="' + esc(st[p + "Model"] || "") + '">' + (st[p + "Model"] ? esc(st[p + "Model"]) + "（当前）" : "加载后选择模型") + '</option></select>'
+            + '<div class="adr048-actions"><button id="adr044-' + type + '-load-models" type="button">加载模型</button><button id="adr044-' + type + '-save" type="button">保存设置</button></div>'
+            + '<label class="adr048-check"><input type="checkbox" id="adr044-auto-inject-' + type + '"' + (st[autoKey] ? " checked" : "") + '> 生成后自动注入当前聊天</label>'
+            + '<label class="adr048-check"><input type="checkbox" id="adr044-auto-trigger-' + type + '"' + (st[type === "plot" ? "autoTriggerPlot" : "autoTriggerEmotion"] ? " checked" : "") + '> 启用自动触发</label>'
+            + '<label>自动触发间隔</label>'
+            + '<select id="adr044-auto-trigger-range-' + type + '">'
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "10", "每 10 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "20", "每 20 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "30", "每 30 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "50", "每 50 个助手正文轮次")
+            + opt(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"], "custom", "自定义")
+            + '</select>'
+            + '<input type="number" id="adr044-auto-trigger-custom-' + type + '" placeholder="自定义自动触发轮次" value="' + esc(st[type === "plot" ? "autoTriggerPlotCustomRange" : "autoTriggerEmotionCustomRange"] || "") + '" style="display:' + (String(st[type === "plot" ? "autoTriggerPlotRange" : "autoTriggerEmotionRange"]) === "custom" ? "block" : "none") + '">'
+            + '<div class="adr044-auto-counter" id="adr044-auto-counter-' + type + '">自动触发计数：打开面板后刷新</div>'
+            + '<div class="adr048-note adr048-auto-reroll-note">ℹ️ 触发层重 roll 不会自动再触发；如需基于新回复补导演建议，请点「按补充指令重新分析」手动补一次。</div>'
+            + '<div class="adr044-auto-calibrate-row"><button class="adr044-auto-calibrate" id="adr044-' + type + '-calibrate-auto" type="button">校准当前进度</button></div>'
+            + '</div>'
+
+            + '<div class="adr048-section"><div class="adr048-summary">' + title + '预设</div>'
+            + '<div class="adr044-template-compact">'
+            + '<select id="adr044-template-select-' + type + '">' + adrDTemplateOptions(type) + '</select>'
+            + '<input id="adr044-template-name-' + type + '" placeholder="新模板名 / 当前模板名">'
+            + '<div class="adr044-template-mini-actions">'
+            + '<button type="button" id="adr044-template-save-' + type + '">保存当前为模板</button>'
+            + '<button type="button" id="adr044-template-delete-' + type + '">删除模板</button>'
+            + '</div>'
+            + '<div class="adr044-template-status" id="adr044-template-status-' + type + '"></div>'
+            + '</div>'
+            + '<textarea id="adr044-' + type + '-preset" rows="8">' + esc(st[p + "Preset"] || "") + '</textarea>'
+            + '</div>'
+
+            + '<div class="adr048-section"><div class="adr048-summary">' + title + '结果</div>'
+            + '<div id="adr044-' + type + '-status" class="adr048-status">请先本地测试，或直接生成导演分析。</div>'
+            + '<textarea id="adr044-' + type + '-preview" rows="8" placeholder="生成结果显示在这里">' + esc(st[p + "Preview"] || "") + '</textarea>'
+            + '<label>补充指令</label><input type="text" id="adr044-' + type + '-extra" placeholder="只影响本次重新分析">'
+            + '<div class="adr048-actions"><button id="adr044-' + type + '-local" type="button">本地测试</button><button id="adr044-' + type + '-generate" type="button">生成导演分析</button></div>'
+            + '<div class="adr048-actions"><button id="adr044-' + type + '-reroll" type="button">按补充指令重新分析</button><button id="adr044-' + type + '-stop" type="button" disabled>打断</button><button id="adr044-' + type + '-copy" type="button">复制</button></div>'
+            + '<div class="adr048-actions"><button id="adr044-' + type + '-inject" type="button">手动注入当前聊天</button></div>'
+            + '</div>'
+            + '</div>';
+    }
+
+    function adr048PanelHTML() {
+        var st = settings();
+
+        return '<div id="adr048-popup-panel" data-open="0">'
+            + '<div id="adr048-popup-shell">'
+            + '<div id="adr048-popup-head">'
+            + '<div><b>🎬 Arrebol D 暗河红霞导演系统</b><div id="adr048-popup-sub">小红霞在线｜ripple & GPT</div></div>'
+            + '<button type="button" id="adr048-popup-close">×</button>'
+            + '</div>'
+            + '<div id="adr048-popup-body">'
+            + '<div class="adr048-note">小红霞已就绪。自动触发、手动导演、纯文本注入与本地设置保存均已启用。<br>由 ripple & GPT 收尾维护。</div>'
+
+            + '<div class="adr048-section"><div class="adr048-summary">共享设置</div>'
+            + '<label>复盘范围</label><select id="adr044-range">'
+            + opt(st.range, "10", "最近 10 轮")
+            + opt(st.range, "20", "最近 20 轮")
+            + opt(st.range, "30", "最近 30 轮")
+            + opt(st.range, "50", "最近 50 轮")
+            + opt(st.range, "custom", "自定义")
+            + '</select>'
+            + '<input type="number" id="adr044-custom" placeholder="自定义轮数" value="' + esc(st.customRange || "") + '" style="display:' + (String(st.range) === "custom" ? "block" : "none") + '">'
+            + '<label>角色卡要点 / 世界书 / 当前担心</label>'
+            + '<textarea id="adr044-memory" rows="5" placeholder="这里会同时发给情感导演和剧情导演">' + esc(st.supplementMemory || "") + '</textarea>'
+            + '<div class="adr048-actions"><button id="adr044-probe-context" type="button">检测上下文</button><button id="adr044-probe-content" type="button">测试 &lt;content&gt; 提取</button></div>'
+            + '<div class="adr048-actions"><button id="adr044-preview-precise" type="button">预览精准读取</button></div>'
+            + '<label>注入方式</label><select id="adr044-inject-mode">'
+            + opt(st.injectMode, "visible", "可见文本注入（直接显示）")
+            + opt(st.injectMode, "folded", "纯文本标记注入（推荐外挂正则）")
+            + opt(st.injectMode, "hidden", "纯文本标记注入（推荐外挂正则）")
+            + '</select>'
+            + '<label class="adr048-check"><input type="checkbox" id="adr044-show-floating-window"' + (st.showFloatingWindow ? " checked" : "") + '> 显示小红霞浮窗</label>'
+            + '<label class="adr048-check"><input type="checkbox" id="adr044-show-auto-trigger-popup"' + (st.showAutoTriggerPopup !== false ? " checked" : "") + '> 自动分析前显示提示</label>'
+            + '</div>'
+
+            + '<div class="adr048-tabs">'
+            + '<button id="adr044-tab-emotion" type="button" class="' + (st.activeTab === "plot" ? "" : "active") + '">情感导演</button>'
+            + '<button id="adr044-tab-plot" type="button" class="' + (st.activeTab === "plot" ? "active" : "") + '">剧情导演</button>'
+            + '</div>'
+
+            + adr048PageHTML("emotion")
+            + adr048PageHTML("plot")
+            + '</div>'
+            + '</div>'
+            + '</div>';
+    }
+
+
+    function adr048CreatePopupPanel() {
+        try {
+            var d = rootDoc();
+            if (!d) return;
+
+            var old = d.querySelector("#adr048-popup-panel");
+            if (old) return;
+
+            var wrap = d.createElement("div");
+            wrap.innerHTML = adr048PanelHTML();
+            var panel = wrap.firstChild;
+
+            (d.body || d.documentElement).appendChild(panel);
+
+            adr048BindPopupPanel();
+            bindDirect();
+        } catch (e) {
+            console.error("[ADR0483] create popup panel failed", e);
+        }
+    }
+
+
+    function adr048OpenPopupPanel() {
+        try { switchTab(settings().activeTab || "emotion"); adrDRefreshAllFieldsFromSettings(); } catch (eOpenRefresh) {}
+
+        try {
+            var d = rootDoc();
+
+            // 每次打开浮窗前重建面板，避免抽屉/浮窗两套 DOM 不同步。
+            try {
+                var oldPanel = d.querySelector("#adr048-popup-panel");
+                if (oldPanel && oldPanel.parentNode) oldPanel.parentNode.removeChild(oldPanel);
+            } catch (e0) {}
+
+            adr048CreatePopupPanel();
+            setTimeout(adrDBindCompactTemplateControls, 120);
+            adrDRefreshAllFieldsFromSettings();
+
+            var p = d.querySelector("#adr048-popup-panel");
+            var shell = d.querySelector("#adr048-popup-shell");
+            var body = d.querySelector("#adr048-popup-body");
+
+            if (!p || !shell) {
+                try { alert("暗河红霞面板壳未创建成功"); } catch (_) {}
+                return;
+            }
+
+            p.setAttribute("data-open", "1");
+
+            adr048SetImportant(p, "display", "block");
+            adr048SetImportant(p, "visibility", "visible");
+            adr048SetImportant(p, "opacity", "1");
+            adr048SetImportant(p, "pointer-events", "auto");
+            adr048SetImportant(p, "position", "fixed");
+            adr048SetImportant(p, "left", "0");
+            adr048SetImportant(p, "right", "0");
+            adr048SetImportant(p, "top", "0");
+            adr048SetImportant(p, "bottom", "0");
+            adr048SetImportant(p, "width", "100vw");
+            adr048SetImportant(p, "height", "100vh");
+            adr048SetImportant(p, "z-index", "2147483646");
+            adr048SetImportant(p, "background", "rgba(0,0,0,.25)");
+
+            adr048SetImportant(shell, "display", "flex");
+            adr048SetImportant(shell, "flex-direction", "column");
+            adr048SetImportant(shell, "visibility", "visible");
+            adr048SetImportant(shell, "opacity", "1");
+            adr048SetImportant(shell, "pointer-events", "auto");
+            adr048SetImportant(shell, "position", "fixed");
+            adr048SetImportant(shell, "left", "10px");
+            adr048SetImportant(shell, "right", "10px");
+            adr048SetImportant(shell, "top", "64px");
+            adr048SetImportant(shell, "bottom", "64px");
+            adr048SetImportant(shell, "width", "auto");
+            adr048SetImportant(shell, "height", "auto");
+            adr048SetImportant(shell, "min-height", "360px");
+            adr048SetImportant(shell, "max-height", "calc(100vh - 128px)");
+            adr048SetImportant(shell, "z-index", "2147483647");
+            adr048SetImportant(shell, "overflow", "hidden");
+            adr048SetImportant(shell, "background", "rgba(31,31,35,.98)");
+            adr048SetImportant(shell, "color", "#f2f2f2");
+            adr048SetImportant(shell, "border", "1px solid rgba(255,255,255,.18)");
+            adr048SetImportant(shell, "border-radius", "14px");
+            adr048SetImportant(shell, "box-shadow", "0 14px 42px rgba(0,0,0,.48)");
+
+            if (body) {
+                adr048SetImportant(body, "display", "block");
+                adr048SetImportant(body, "visibility", "visible");
+                adr048SetImportant(body, "opacity", "1");
+                adr048SetImportant(body, "flex", "1 1 auto");
+                adr048SetImportant(body, "overflow", "auto");
+                adr048SetImportant(body, "-webkit-overflow-scrolling", "touch");
+                adr048SetImportant(body, "padding", "10px 12px 16px");
+                adr048SetImportant(body, "min-height", "260px");
+            }
+
+            adr048BindPopupPanel();
+            bindDirect();
+
+            try { if (body) body.scrollTop = 0; } catch (e1) {}
+        } catch (e) {
+            console.error("[ADR0483] open popup failed", e);
+            try { alert("暗河红霞面板打开失败：" + (e.message || String(e))); } catch (_) {}
+        }
+    }
+
+    function adr048ClosePopupPanel() {
+        try {
+            var p = rootDoc().querySelector("#adr048-popup-panel");
+            if (!p) return;
+            p.setAttribute("data-open", "0");
+            adr048SetImportant(p, "display", "none");
+            adr048SetImportant(p, "visibility", "hidden");
+            adr048SetImportant(p, "opacity", "0");
+            adr048SetImportant(p, "pointer-events", "none");
+        } catch (e) {}
+    }
+
+    function adr048BindPopupPanel() {
+        try {
+            var d = rootDoc();
+            var close = d.querySelector("#adr048-popup-close");
+            if (close && !close.__adr048Bound) {
+                close.__adr048Bound = true;
+                close.addEventListener("click", function (ev) {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                    adr048ClosePopupPanel();
+                }, true);
+                close.addEventListener("touchend", function (ev) {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                    adr048ClosePopupPanel();
+                }, true);
+            }
+        } catch (e) {}
+    }
+
+    function adr048RemoveOldFloatingBits(forceAll) {
+        try {
+            var d = rootDoc();
+            var old = d.querySelectorAll("#adr048-fab");
+            for (var i = 0; i < old.length; i++) {
+                try {
+                    if (forceAll || old[i].getAttribute("data-adr048-owned-fab") === ADR048_FAB_INSTANCE_ID) old[i].remove();
+                } catch (e) {}
+            }
+        } catch (e2) {}
+    }
+
+    function adr048SetImportant(el, key, value) {
+        try { el.style.setProperty(key, value, "important"); }
+        catch(e) { try { el.style[key] = value; } catch(_) {} }
+    }
+
+
+
+    function adr048RemoveFab() {
+        try {
+            var d = rootDoc();
+            var list = d.querySelectorAll("#adr048-fab");
+            for (var i = 0; i < list.length; i++) {
+                try { if (list[i].parentNode) list[i].parentNode.removeChild(list[i]); } catch (e) {}
+            }
+        } catch (e) {}
+    }
+
+    function adr048InstallFabOwner() {
+        try {
+            var w = rootWin();
+            var old = w[ADR048_FAB_REGISTRY_KEY];
+            if (old && old.instanceId !== ADR048_FAB_INSTANCE_ID && typeof old.stop === "function") {
+                try { old.stop(); } catch (e) {}
+            }
+            w[ADR048_FAB_REGISTRY_KEY] = {
+                instanceId: ADR048_FAB_INSTANCE_ID,
+                stop: function () {
+                    try {
+                        if (w.__adr0481AnchorTimer) {
+                            clearInterval(w.__adr0481AnchorTimer);
+                            w.__adr0481AnchorTimer = null;
+                        }
+                        if (w.__adr048FabObserver) {
+                            try { w.__adr048FabObserver.disconnect(); } catch (e0) {}
+                            w.__adr048FabObserver = null;
+                        }
+                    } catch (e) {}
+                    try { adr048RemoveFab(); } catch (e2) {}
+                }
+            };
+        } catch (e3) {}
+    }
+
+    function adr048GetFabSavedPosition() {
+        try {
+            var st = settings();
+            var left = Number(st.fabLeft);
+            var top = Number(st.fabTop);
+            if (Number.isFinite(left) && Number.isFinite(top)) return { left: left, top: top };
+        } catch (e) {}
+        return null;
+    }
+
+    function adr048ClampPoint(left, top, width, height) {
+        try {
+            var w = rootWin() || window;
+            var vw = Number(w.innerWidth) || 360;
+            var vh = Number(w.innerHeight) || 640;
+            width = Number(width) || 78;
+            height = Number(height) || 32;
+            return {
+                left: Math.max(4, Math.min(vw - width - 4, Number(left) || 0)),
+                top: Math.max(4, Math.min(vh - height - 4, Number(top) || 0))
+            };
+        } catch (e) {
+            return { left: Number(left) || 12, top: Number(top) || 148 };
+        }
+    }
+
+    function adr048ApplyFabPosition(btn, pos, isSaved) {
+        try {
+            if (!btn) return;
+            if (pos && Number.isFinite(Number(pos.left)) && Number.isFinite(Number(pos.top))) {
+                var fixed = isSaved ? adr048ClampPoint(Number(pos.left), Number(pos.top), 78, 32) : pos;
+                adr048SetImportant(btn, "left", Math.round(fixed.left) + "px");
+                adr048SetImportant(btn, "top", Math.round(fixed.top) + "px");
+                adr048SetImportant(btn, "right", "auto");
+                adr048SetImportant(btn, "bottom", "auto");
+                btn.setAttribute("data-user-moved", "1");
+                return;
+            }
+            adr048SetImportant(btn, "left", "auto");
+            adr048SetImportant(btn, "top", "auto");
+            adr048SetImportant(btn, "right", "12px");
+            adr048SetImportant(btn, "bottom", "148px");
+        } catch (e) {}
+    }
+
+    function adr048SaveFabPosition(btn) {
+        try {
+            if (!btn) return;
+            var r = btn.getBoundingClientRect();
+            if (!r || r.width <= 0 || r.height <= 0) return;
+            var pos = adr048ClampPoint(r.left, r.top, r.width, r.height);
+            save("fabLeft", Math.round(pos.left));
+            save("fabTop", Math.round(pos.top));
+            try { adrDSaveLocalBackup(settings()); } catch (e0) {}
+        } catch (e) {}
+    }
+
+    function adr048ShouldShowFab() {
+        try {
+            return settings().showFloatingWindow !== false;
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function adr048CreateFab() {
+        try {
+            var d = rootDoc();
+            if (!d) return;
+
+            if (!adr048ShouldShowFab()) {
+                adr048RemoveFab();
+                return;
+            }
+
+            var btn = d.querySelector("#adr048-fab");
+            if (btn) return;
+
+            btn = d.createElement("button");
+            btn.id = "adr048-fab";
+            btn.setAttribute("data-adr048-owned-fab", ADR048_FAB_INSTANCE_ID);
+            btn.type = "button";
+            btn.textContent = "🎞️ARB";
+            btn.title = "Arrebol D 小红霞";
+            btn.setAttribute("aria-label", "Arrebol D 小红霞");
+
+            function setImp(k, v) { adr048SetImportant(btn, k, v); }
+            setImp("position", "fixed");
+            setImp("z-index", "2147483647");
+            setImp("display", "inline-flex");
+            setImp("align-items", "center");
+            setImp("justify-content", "center");
+            setImp("width", "78px");
+            setImp("height", "32px");
+            setImp("min-width", "78px");
+            setImp("min-height", "32px");
+            setImp("padding", "0 12px");
+            setImp("border-radius", "999px");
+            setImp("border", "1px solid rgba(255,255,255,.36)");
+            setImp("background", "rgba(255, 196, 218, .72)");
+            setImp("backdrop-filter", "blur(8px)");
+            setImp("-webkit-backdrop-filter", "blur(8px)");
+            setImp("color", "rgba(95, 42, 65, .88)");
+            setImp("-webkit-text-fill-color", "rgba(95, 42, 65, .88)");
+            setImp("font-size", "13px");
+            setImp("font-weight", "800");
+            setImp("line-height", "32px");
+            setImp("box-shadow", "0 4px 12px rgba(255, 122, 162, .13)");
+            setImp("cursor", "grab");
+            setImp("pointer-events", "auto");
+            setImp("user-select", "none");
+            setImp("-webkit-user-select", "none");
+            setImp("touch-action", "none");
+            setImp("white-space", "nowrap");
+            setImp("visibility", "visible");
+            setImp("opacity", "1");
+            setImp("transform", "translateZ(0)");
+            btn.setAttribute("data-anchor", "own-lazy-fixed");
+
+            (d.body || d.documentElement).appendChild(btn);
+            adr048ApplyFabPosition(btn, adr048GetFabSavedPosition(), true);
+
+            var dragging = false;
+            var moved = false;
+            var sx = 0, sy = 0, sl = 0, st = 0;
+
+            function point(ev) {
+                if (ev.touches && ev.touches.length) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+                if (ev.changedTouches && ev.changedTouches.length) return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
+                return { x: ev.clientX || 0, y: ev.clientY || 0 };
+            }
+
+            function startDrag(ev) {
+                var p = point(ev);
+                var r = btn.getBoundingClientRect();
+                dragging = true;
+                moved = false;
+                sx = p.x; sy = p.y; sl = r.left; st = r.top;
+                setImp("cursor", "grabbing");
+                try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
+            }
+
+            function moveDrag(ev) {
+                if (!dragging) return;
+                var p = point(ev);
+                var dx = p.x - sx;
+                var dy = p.y - sy;
+                if (Math.abs(dx) + Math.abs(dy) > 10) moved = true;
+                var r = btn.getBoundingClientRect();
+                var pos = adr048ClampPoint(sl + dx, st + dy, r.width || 78, r.height || 32);
+                setImp("left", Math.round(pos.left) + "px");
+                setImp("top", Math.round(pos.top) + "px");
+                setImp("right", "auto");
+                setImp("bottom", "auto");
+                btn.setAttribute("data-user-moved", "1");
+                try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
+            }
+
+            function endDrag(ev) {
+                if (!dragging) return;
+                dragging = false;
+                setImp("cursor", "grab");
+                if (moved) {
+                    adr048SaveFabPosition(btn);
+                } else {
+                    setTimeout(function () {
+                        try { adr048OpenPopupPanel(); } catch (e) { console.error(e); }
+                    }, 30);
+                }
+                try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
+            }
+
+            btn.addEventListener("mousedown", startDrag, { passive: false });
+            btn.addEventListener("touchstart", startDrag, { passive: false });
+            d.addEventListener("mousemove", moveDrag, { passive: false });
+            d.addEventListener("mouseup", endDrag, { passive: false });
+            d.addEventListener("touchmove", moveDrag, { passive: false });
+            d.addEventListener("touchend", endDrag, { passive: false });
+            d.addEventListener("touchcancel", endDrag, { passive: false });
+
+            function hardOpen(ev) {
+                try { ev.preventDefault(); ev.stopPropagation(); } catch(e) {}
+                setTimeout(function () {
+                    try { adr048OpenPopupPanel(); } catch (e2) { console.error(e2); }
+                }, 20);
+                return false;
+            }
+            btn.onclick = hardOpen;
+            btn.addEventListener("click", hardOpen, true);
+        } catch (e2) {
+            console.error("[ADR0481] create lazy fab failed", e2);
+        }
+    }
+
+    function adr048EnsureFabLater() {
+        adr048InstallFabOwner();
+        adr048CreatePopupPanel();
+        setTimeout(adrDBindCompactTemplateControls, 120);
+        if (!adr048ShouldShowFab()) {
+            adr048RemoveFab();
+            return;
+        }
+        adr048CreateFab();
+        setTimeout(adr048CreateFab, 400);
+        setTimeout(adr048CreateFab, 900);
+        setTimeout(adr048CreateFab, 1600);
+        setTimeout(adr048CreateFab, 2600);
+        setTimeout(adr048CreateFab, 4200);
+
+        try {
+            var w = rootWin();
+            var d = rootDoc();
+            if (!w.__adr048FabObserver && typeof MutationObserver === "function" && d && d.body) {
+                var pending = false;
+                w.__adr048FabObserver = new MutationObserver(function () {
+                    if (pending) return;
+                    pending = true;
+                    setTimeout(function () {
+                        pending = false;
+                        try {
+                            if (adr048ShouldShowFab() && !d.querySelector("#adr048-fab")) adr048CreateFab();
+                        } catch (e) {}
+                    }, 120);
+                });
+                w.__adr048FabObserver.observe(d.body, { childList: true, subtree: true });
+            }
+        } catch (e2) {}
+    }
+
+
+
+    var adrDAutoTriggerTimer = null;
+    var adrDLastChatLengthSeen = -1;
+    var adrDAutoTriggerRunning = false;
+    // v1.0.5.6.8.3.5：页面加载后短安全期。自动触发可以读数/对齐，但绝不生成注入，堵住 iOS 刷新抢跑竞态。
+    // v1.0.5.6.8.3.6：启动安全期内彻底只读，不创建/覆盖 baseline，避免面板刷新把 1/30 写成 0/30。
+    // v1.0.5.6.8.3.9：partial 小读数保护 + 自动触发吞触发修复。角色总数只应单调增加；count < base 一律视作未加载全，不允许下拉 baseline。
+    var ADR_D_AUTO_STARTUP_GRACE_MS = 20000;
+    var adrDAutoScriptLoadedAt = Date.now();
+
+    function adrDInStartupAutoGrace() {
+        return Date.now() - adrDAutoScriptLoadedAt < ADR_D_AUTO_STARTUP_GRACE_MS;
+    }
+
+    function adrDChatKey() {
+        try {
+            var c = ctx();
+            if (typeof c.getCurrentChatId === "function") {
+                var x = c.getCurrentChatId();
+                if (x) return String(x);
+            }
+            if (c.chatId) return String(c.chatId);
+            return String(c.characterId || "char") + "::" + String(c.name1 || "chat");
+        } catch (e) {
+            return "unknown-chat";
+        }
+    }
+
+
+    function adrDIsUnstableChatKey(key) {
+        var k = String(key || "");
+        if (!k) return true;
+        if (k === "unknown-chat") return true;
+        if (k === "char::chat") return true;
+        if (k.indexOf("undefined") >= 0) return true;
+        if (k.indexOf("null") >= 0) return true;
+        return false;
+    }
+
+    function adrDChatKeyReady() {
+        try {
+            var c = ctx();
+            if (typeof c.getCurrentChatId === "function") {
+                var x = c.getCurrentChatId();
+                return !!x && !adrDIsUnstableChatKey(String(x));
+            }
+            if (c.chatId) return !adrDIsUnstableChatKey(String(c.chatId));
+            // 旧环境没有稳定 chat-id API 时，只能使用原 fallback key，保持兼容。
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // v1.0.5.6.8.3：自动触发计数“换眼睛”。
+    // 计数公式仍然是 count - baseline；只把 count 的读取源从当前前端窗口，优先换成 TavernHelper 全量历史。
+    // v1.0.5.6.8.3.1：全量计数粘滞保护。成功取得过一次全量后，瞬时失败不再回退窗口计数，避免 source 抖动清空进度。
+    // v1.0.5.6.8.3.2：冷启动闸门。有 TavernHelper 全量能力时，首次全量成功前不触发、不写 baseline，避免刷新冷窗口误触发。
+    // v1.0.5.6.8.3.3：首次被动判定安全网，发现脏 baseline 只对齐不注入。
+    // v1.0.5.6.8.3.5：chatKey 稳定前不落盘/不触发；启动 20 秒内禁自动注入；注入落点只允许助手楼。
+    var ADR_D_FULL_COUNT_MODE = "full-chat-v1";
+    var ADR_D_STICKY_FULL = true;
+    var adrDFullCountCache = { count: null, source: "window", lastMessageId: -1, updatedAt: 0, loading: false, messages: [], everFull: false };
+
+    function adrDGetTavernHelper() {
+        try { if (typeof TavernHelper !== "undefined" && TavernHelper) return TavernHelper; } catch (e0) {}
+        try { var rw = rootWin(); if (rw && rw.TavernHelper) return rw.TavernHelper; } catch (e1) {}
+        try { if (window.parent && window.parent.TavernHelper) return window.parent.TavernHelper; } catch (e2) {}
+        return null;
+    }
+
+    function adrDWindowAssistantRoundCount() {
+        var chat;
+        try { chat = ctx().chat; } catch (e) { return 0; }
+        if (!chat || !chat.length) return 0;
+
+        var n = 0;
+        for (var i = 0; i < chat.length; i++) {
+            var m = chat[i];
+            if (!m || m.is_system || m.is_user) continue;
+            var text = cleanMessage(m.mes || "");
+            if (!text.trim()) continue;
+            n++;
+        }
+        return n;
+    }
+
+    function adrDCountOneFullHistoryMessage(m) {
+        if (!m) return 0;
+
+        var role = String(m.role || "").toLowerCase();
+        var isUser = m.is_user === true || role === "user";
+        if (isUser) return 0;
+
+        // 真 system 通知一般没有角色名；隐藏助手楼层可能被标记为 system，但仍带 name / message。
+        // 为了让“小幽灵/隐藏楼层”也进入真实角色回复数，只有“role=system 且无 name”才跳过。
+        if (role === "system" && !m.name) return 0;
+
+        var raw = m.message;
+        if (raw == null) raw = m.mes;
+        var text = cleanMessage(raw || "");
+        return text.trim() ? 1 : 0;
+    }
+
+    async function adrDRefreshFullAssistantRoundCount(reason) {
+        if (adrDFullCountCache.loading) return Number(adrDFullCountCache.count) || adrDWindowAssistantRoundCount();
+
+        var th = adrDGetTavernHelper();
+        if (!th || typeof th.getChatMessages !== "function") {
+            if (ADR_D_STICKY_FULL && adrDFullCountCache.everFull && Number.isFinite(Number(adrDFullCountCache.count))) {
+                try { console.warn("[Arrebol D] full history source temporarily unavailable; keep sticky full cache", reason || ""); } catch (eStickyLog0) {}
+                adrDFullCountCache.updatedAt = Date.now();
+                return Number(adrDFullCountCache.count) || 0;
+            }
+            adrDFullCountCache.count = adrDWindowAssistantRoundCount();
+            adrDFullCountCache.source = "window";
+            try { adrDFullCountCache.messages = (ctx().chat || []).slice(); } catch (eMsgs0) { adrDFullCountCache.messages = []; }
+            adrDFullCountCache.updatedAt = Date.now();
+            return adrDFullCountCache.count;
+        }
+
+        adrDFullCountCache.loading = true;
+        try {
+            var lastId;
+            if (typeof th.getLastMessageId === "function") {
+                lastId = Number(th.getLastMessageId());
+            } else {
+                try { lastId = (ctx().chat || []).length - 1; } catch (e0) { lastId = -1; }
+            }
+
+            if (!Number.isFinite(lastId) || lastId < 0) {
+                adrDFullCountCache.count = 0;
+                adrDFullCountCache.source = "full";
+                adrDFullCountCache.lastMessageId = -1;
+                adrDFullCountCache.messages = [];
+                adrDFullCountCache.everFull = true;
+                adrDFullCountCache.updatedAt = Date.now();
+                return 0;
+            }
+
+            var messages = await th.getChatMessages("0-" + lastId, { include_swipes: false });
+            if (!Array.isArray(messages)) messages = [];
+            adrDFullCountCache.messages = messages;
+
+            var n = 0;
+            for (var i = 0; i < messages.length; i++) {
+                n += adrDCountOneFullHistoryMessage(messages[i]);
+            }
+
+            adrDFullCountCache.count = n;
+            adrDFullCountCache.source = "full";
+            adrDFullCountCache.lastMessageId = lastId;
+            adrDFullCountCache.everFull = true;
+            adrDFullCountCache.updatedAt = Date.now();
+            try { console.log("[Arrebol D] full history count", n, "lastId=", lastId, "reason=", reason || ""); } catch (eLog) {}
+            return n;
+        } catch (e) {
+            if (ADR_D_STICKY_FULL && adrDFullCountCache.everFull && Number.isFinite(Number(adrDFullCountCache.count))) {
+                console.warn("[Arrebol D] full history count failed; keep sticky full cache", e);
+                adrDFullCountCache.updatedAt = Date.now();
+                return Number(adrDFullCountCache.count) || 0;
+            }
+            console.warn("[Arrebol D] full history count failed; fallback to window count", e);
+            adrDFullCountCache.count = adrDWindowAssistantRoundCount();
+            adrDFullCountCache.source = "window";
+            try { adrDFullCountCache.messages = (ctx().chat || []).slice(); } catch (eMsgs0) { adrDFullCountCache.messages = []; }
+            adrDFullCountCache.updatedAt = Date.now();
+            return adrDFullCountCache.count;
+        } finally {
+            adrDFullCountCache.loading = false;
+        }
+    }
+
+    function adrDQueueFullAssistantRoundCountRefresh(reason) {
+        try {
+            adrDRefreshFullAssistantRoundCount(reason || "queued").then(function () {
+                try { adrDUpdateAutoCounters(); } catch (e) {}
+            });
+        } catch (e) {}
+    }
+
+    async function adrDGetFullChatMessagesForRead(reason) {
+        var th = adrDGetTavernHelper();
+        if (th && typeof th.getChatMessages === "function") {
+            var lastId = -1;
+            try {
+                if (typeof th.getLastMessageId === "function") lastId = Number(th.getLastMessageId());
+            } catch (e0) {}
+
+            var hasFreshFullCache = adrDFullCountCache &&
+                adrDFullCountCache.source === "full" &&
+                Array.isArray(adrDFullCountCache.messages) &&
+                adrDFullCountCache.messages.length &&
+                (lastId < 0 || Number(adrDFullCountCache.lastMessageId) === lastId);
+
+            if (!hasFreshFullCache) {
+                await adrDRefreshFullAssistantRoundCount(reason || "full-read");
+            }
+
+            if (adrDFullCountCache && adrDFullCountCache.source === "full" && Array.isArray(adrDFullCountCache.messages)) {
+                return adrDFullCountCache.messages;
+            }
+        }
+
+        if (ADR_D_STICKY_FULL && adrDFullCountCache && adrDFullCountCache.everFull && Array.isArray(adrDFullCountCache.messages)) {
+            return adrDFullCountCache.messages;
+        }
+        try { return (ctx().chat || []).slice(); } catch (e1) { return []; }
+    }
+
+    function adrDAssistantRoundCount() {
+        // 同步入口保留：UI/旧函数可继续调用。优先返回全量缓存；未就绪时回退当前窗口并异步刷新。
+        if (adrDFullCountCache && adrDFullCountCache.source === "full" && Number.isFinite(Number(adrDFullCountCache.count))) {
+            return Number(adrDFullCountCache.count);
+        }
+        adrDQueueFullAssistantRoundCountRefresh("lazy-count");
+        return adrDWindowAssistantRoundCount();
+    }
+
+    function adrDCountSourceLabel() {
+        try {
+            if (adrDFullCountCache.source === "full") return "全量历史";
+            return "当前窗口/等待全量";
+        } catch (e) {
+            return "当前窗口";
+        }
+    }
+
+    function adrDCurrentCountMode() {
+        return adrDFullCountCache && adrDFullCountCache.source === "full" ? ADR_D_FULL_COUNT_MODE : "window-v1";
+    }
+
+    function adrDCountReady() {
+        // 没有 TavernHelper 全量能力时，window 计数就是当前环境的权威来源，保持旧行为。
+        var th = adrDGetTavernHelper();
+        if (!th || typeof th.getChatMessages !== "function") return true;
+        // 有全量能力时，必须等本次页面生命周期里首次 full 成功后，才允许触发/写 baseline。
+        return !!(adrDFullCountCache && adrDFullCountCache.source === "full");
+    }
+
+    function adrDCurrentMessageTailForPoll() {
+        var th = adrDGetTavernHelper();
+        try {
+            if (th && typeof th.getLastMessageId === "function") return Number(th.getLastMessageId()) + 1;
+        } catch (e) {}
+        try { return (ctx().chat || []).length || 0; } catch (e2) { return 0; }
+    }
+
+
+    function adrDSetCounterText(type, text) {
+        try {
+            var d = rootDoc();
+            var id = "adr044-auto-counter-" + type;
+            var nodes = Array.prototype.slice.call(d.querySelectorAll("#" + id));
+            nodes.forEach(function (el) {
+                if (el) el.textContent = text;
+            });
+        } catch (e) {}
+    }
+
+
+    var ADR_D_AUTO_STATE_KEY = "arrebol_d_auto_trigger_state_v1";
+    var ADR_D_AUTO_LAST_KEY = "arrebol_d_auto_trigger_last_key_v1";
+    // v1.0.5.6.8.3.3：刷新后首次被动判定安全网。
+    // 如果本次会话第一次被动 auto-check 发现 count-base 已经越过阈值，优先判定为脏 baseline，静默对齐，不抢跑注入。
+    var adrDFirstPassiveAutoCheckDone = {};
+
+    function adrDIsPassiveAutoCheck(reason) {
+        var r = String(reason || "");
+        // 用户主动改开关/间隔/自定义间隔时，不吞掉其有意触发；其它事件/轮询/刷新均视为被动检查。
+        if (/^(toggle|range|custom)-/.test(r)) return false;
+        return true;
+    }
+
+    function adrDFirstPassKey(type) {
+        return String(adrDChatKey ? adrDChatKey() : "chat") + "::" + String(type || "emotion");
+    }
+
+    function adrDIsReloadLikeAutoCheck(reason) {
+        // v1.9.0：运行期补洞。脏 gap 兜底前已有“离谱差值”与“每聊天每会话一次”守卫。
+        // 这里保持宽松 true，避免 SillyTavern 不同事件名导致脏 baseline 无法自愈。
+        return true;
+    }
+
+    function adrDIsDirtyBaselineGap(count, base, n) {
+        // v1.0.5.6.8.3.9：first-pass / startup grace 只兜“离谱脏 baseline”，不吞正常跨阈值。
+        // 正常触发通常 gap == n，或最多超出少量；若超出间隔 20 条以上，才视为旧 baseline/口径迁移污染。
+        if (!Number.isFinite(Number(n)) || Number(n) <= 0) return false;
+        if (!Number.isFinite(Number(count)) || !Number.isFinite(Number(base))) return false;
+        var gap = Number(count) - Number(base);
+        if (gap < Number(n)) return false;
+        return (gap - Number(n)) >= 20;
+    }
+
+    function adrDShouldAlignDirtyBaselineOnFirstPassiveCheck(type, count, base, n, reason, inStartupGrace) {
+        if (!adrDIsPassiveAutoCheck(reason)) return false;
+        if (!adrDIsDirtyBaselineGap(count, base, n)) return false;
+
+        // 启动 grace 仍然可以兜脏 baseline，但不能一刀切吞正常触发。
+        if (inStartupGrace) return true;
+
+        // 非 grace 时，只在真正换聊/载入的首次被动检查兜一次脏 baseline。
+        if (!adrDIsReloadLikeAutoCheck(reason)) return false;
+        var key = adrDFirstPassKey(type);
+        if (adrDFirstPassiveAutoCheckDone[key]) return false;
+        adrDFirstPassiveAutoCheckDone[key] = true;
+        return true;
+    }
+
+    function adrDAutoStateKeyFor(key, type) {
+        return String(key || "chat") + "::" + String(type || "emotion");
+    }
+
+    // 只读读取 auto state：不创建新 key、不迁移、不落盘。
+    // 用于页面刚加载的安全期，避免 UI 计数面板为了显示而把旧进度写成 0。
+    function adrDPeekAutoState(type) {
+        try {
+            var all = adrDAutoStateAll();
+            var key = adrDAutoStateKey(type);
+            var item = all[key];
+            if (item && typeof item === "object" && Number.isFinite(Number(item.base))) return item;
+
+            var last = adrDAutoLastKeys();
+            var lastKey = last[type];
+            var prev = lastKey ? all[lastKey] : null;
+            if (prev && typeof prev === "object" && Number.isFinite(Number(prev.base))) return prev;
+        } catch (e) {}
+        return null;
+    }
+
+    function adrDAutoBroadKey() {
+        try {
+            var c = ctx();
+            var cid = "";
+            try { cid = c.characterId != null ? String(c.characterId) : ""; } catch (e0) {}
+            var cname = "";
+            try { cname = c.name2 || ""; } catch (e1) {}
+            try {
+                if (!cname && c.characters && c.characterId != null && c.characters[c.characterId]) {
+                    cname = c.characters[c.characterId].name || "";
+                }
+            } catch (e2) {}
+            return "char::" + (cid || cname || "unknown");
+        } catch (e) {
+            return "char::unknown";
+        }
+    }
+
+    function adrDAutoLastKeys() {
+        try {
+            var s = rootWin().localStorage.getItem(ADR_D_AUTO_LAST_KEY) || "{}";
+            var obj = JSON.parse(s);
+            return obj && typeof obj === "object" ? obj : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function adrDSaveAutoLastKey(type, key) {
+        try {
+            var obj = adrDAutoLastKeys();
+            obj[type] = String(key || "");
+            rootWin().localStorage.setItem(ADR_D_AUTO_LAST_KEY, JSON.stringify(obj));
+        } catch (e) {}
+    }
+
+
+    function adrDAutoStateAll() {
+        try {
+            var s = rootWin().localStorage.getItem(ADR_D_AUTO_STATE_KEY) || "{}";
+            var obj = JSON.parse(s);
+            return obj && typeof obj === "object" ? obj : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function adrDSaveAutoStateAll(obj) {
+        try {
+            rootWin().localStorage.setItem(ADR_D_AUTO_STATE_KEY, JSON.stringify(obj || {}));
+        } catch (e) {}
+    }
+
+    function adrDAutoStateKey(type) {
+        return adrDAutoStateKeyFor(adrDChatKey ? adrDChatKey() : "chat", type);
+    }
+
+    function adrDGetAutoState(type, count) {
+        if (!adrDChatKeyReady()) {
+            return { base: Number(count) || 0, updatedAt: Date.now(), broad: adrDAutoBroadKey(), mode: adrDCurrentCountMode ? adrDCurrentCountMode() : "pending-chat-key", pendingChatKey: true, temporary: true };
+        }
+        var all = adrDAutoStateAll();
+        var key = adrDAutoStateKey(type);
+        var broad = adrDAutoBroadKey();
+        var item = all[key];
+
+        if (item && typeof item === "object" && Number.isFinite(Number(item.base))) {
+            if (!item.broad) item.broad = broad;
+            // v1.0.5.6.8.3：从窄窗口计数迁移到全量历史计数与复盘时，只校准一次 baseline。
+            // 否则旧 base 很小、全量 count 很大，会导致安装后立刻误触发。
+            if (adrDCurrentCountMode && adrDCurrentCountMode() === ADR_D_FULL_COUNT_MODE && item.mode !== ADR_D_FULL_COUNT_MODE) {
+                var oldBaseForMode = Number(item.base);
+                var currentCountForMode = Number(count) || 0;
+                // 从窗口口径迁移到全量口径时，通常要贴齐当前全量 count，避免旧小 base 误触发。
+                // 但如果当前 count 反而小于旧 base，说明读到了 partial 小数；这时绝不下拉 baseline。
+                var migratedBase = (Number.isFinite(oldBaseForMode) && oldBaseForMode >= 0 && oldBaseForMode > currentCountForMode)
+                    ? oldBaseForMode
+                    : currentCountForMode;
+                item = { base: migratedBase, updatedAt: Date.now(), broad: broad, mode: ADR_D_FULL_COUNT_MODE, migratedFromMode: item.mode || "window-v1" };
+                all[key] = item;
+                adrDSaveAutoStateAll(all);
+            }
+            adrDSaveAutoLastKey(type, key);
+            return item;
+        }
+
+        // v1.0.5.6.8.1：注入后的 reload 可能导致 chatKey 改变。
+        // 如果还是同一个角色卡，就迁移上一把计数状态，不重新归零。
+        var last = adrDAutoLastKeys();
+        var lastKey = last[type];
+        var prev = lastKey ? all[lastKey] : null;
+        if (prev && typeof prev === "object" && Number.isFinite(Number(prev.base))) {
+            var prevBroad = prev.broad || broad;
+            var prevBase = Number(prev.base);
+            var c = Number(count) || 0;
+            if (prevBroad === broad && prevBase >= 0) {
+                // count 可能是聊天重载瞬间的 partial 小读数；即使 prevBase > count，也要保住旧 base，不下拉归零。
+                item = { base: prevBase, updatedAt: Date.now(), broad: broad, migratedFrom: lastKey, mode: adrDCurrentCountMode ? adrDCurrentCountMode() : "window-v1" };
+                all[key] = item;
+                adrDSaveAutoStateAll(all);
+                adrDSaveAutoLastKey(type, key);
+                return item;
+            }
+        }
+
+        item = { base: Number(count) || 0, updatedAt: Date.now(), broad: broad, mode: adrDCurrentCountMode ? adrDCurrentCountMode() : "window-v1" };
+        all[key] = item;
+        adrDSaveAutoStateAll(all);
+        adrDSaveAutoLastKey(type, key);
+        return item;
+    }
+
+    function adrDSetAutoBaseline(type, count) {
+        if (!adrDChatKeyReady()) return false;
+        var all = adrDAutoStateAll();
+        var key = adrDAutoStateKey(type);
+        var broad = adrDAutoBroadKey();
+        all[key] = { base: Number(count) || 0, updatedAt: Date.now(), broad: broad, mode: adrDCurrentCountMode ? adrDCurrentCountMode() : "window-v1" };
+        adrDSaveAutoStateAll(all);
+        adrDSaveAutoLastKey(type, key);
+    }
+
+    function adrDAdvanceAutoBaseline(type, count) {
+        adrDSetAutoBaseline(type, count);
+    }
+
+    async function adrDCalibrateAutoBaseline(type) {
+        try {
+            type = type === "plot" ? "plot" : "emotion";
+            if (!adrDChatKeyReady()) {
+                status(type, "聊天还在加载，稍等几秒再校准", "#d6a26a");
+                adrDUpdateAutoCounters();
+                return false;
+            }
+
+            var count = await adrDRefreshFullAssistantRoundCount("manual-calibrate:" + type);
+            if (!adrDCountReady()) {
+                status(type, "全量历史还没读完，稍等几秒再校准", "#d6a26a");
+                adrDUpdateAutoCounters();
+                return false;
+            }
+
+            adrDSetAutoBaseline(type, count);
+            try {
+                var st = settings();
+                st.lastAutoTriggerChatKey = adrDChatKey();
+                if (type === "plot") {
+                    st.lastAutoTriggerPlotCount = count;
+                    st.lastAutoTriggerPlotAt = Date.now();
+                } else {
+                    st.lastAutoTriggerEmotionCount = count;
+                    st.lastAutoTriggerEmotionAt = Date.now();
+                }
+                saveNow();
+                adrDPersistAutoBaselineFields(st);
+            } catch (ePersist) {}
+
+            adrDUpdateAutoCounters();
+            status(type, "已校准当前进度：从当前总数 " + count + " 重新计数 ✓", "#8ed99d");
+            adrDToast("小红霞已校准当前进度");
+            return true;
+        } catch (e) {
+            console.error("[Arrebol D] manual auto baseline calibrate failed", e);
+            try { status(type === "plot" ? "plot" : "emotion", "校准失败，请稍后再试", "#d4726a"); } catch (eStatus) {}
+            return false;
+        }
+    }
+
+    function adrDAutoCounterText(type) {
+        try {
+            var st = settings();
+            var enabled = type === "plot" ? !!st.autoTriggerPlot : !!st.autoTriggerEmotion;
+            var label = type === "plot" ? "剧情导演" : "情感导演";
+            var count = adrDAssistantRoundCount();
+            var n = autoTriggerRange(type);
+
+            if (!enabled) {
+                return label + "：自动触发未开启";
+            }
+
+            if (!Number.isFinite(n) || n <= 0) {
+                return label + "：自动触发间隔未设置";
+            }
+
+            if (!adrDCountReady()) {
+                return label + "：当前总数 " + count + " 条｜视野：" + adrDCountSourceLabel() + "｜等待首次全量历史读取，暂不累积/触发";
+            }
+
+            if (!adrDChatKeyReady()) {
+                return label + "：当前总数 " + count + " 条｜视野：" + adrDCountSourceLabel() + "｜等待聊天标识稳定，暂不落盘/触发";
+            }
+
+            if (adrDInStartupAutoGrace && adrDInStartupAutoGrace()) {
+                var peek = adrDPeekAutoState(type);
+                var peekBase = peek && Number.isFinite(Number(peek.base)) ? Number(peek.base) : count;
+                if (!Number.isFinite(peekBase) || peekBase < 0) peekBase = count;
+                // 若 count < base，多半是页面重载/楼层未加载全的 partial 小读数；显示 0，但保留 base，不下拉。
+                var peekPassed = Math.max(0, count - peekBase);
+                var peekLeft = Math.max(0, n - peekPassed);
+                var peekMode = peek && peek.mode ? String(peek.mode) : (adrDCurrentCountMode ? adrDCurrentCountMode() : "startup-readonly");
+                return label + "：当前总数 " + count + " 条｜视野：" + adrDCountSourceLabel() + "｜已新增 " + peekPassed + " / " + n + " 条角色回复｜距离下次还差 " + peekLeft + " 条｜base " + peekBase + "(" + peekMode + ")｜启动保护中";
+            }
+
+            var state = adrDGetAutoState(type, count);
+            var base = Number(state.base);
+            if (!Number.isFinite(base) || base < 0) {
+                base = count;
+                adrDSetAutoBaseline(type, count);
+            }
+            // count < base 代表当前读数不可信（聊天重载/只读到一半），只显示 0，不把 baseline 拉下来。
+            var passed = Math.max(0, count - base);
+            var left = Math.max(0, n - passed);
+            var modeText = state && state.mode ? String(state.mode) : (adrDCurrentCountMode ? adrDCurrentCountMode() : "unknown");
+            return label + "：当前总数 " + count + " 条｜视野：" + adrDCountSourceLabel() + "｜已新增 " + passed + " / " + n + " 条角色回复｜距离下次还差 " + left + " 条｜base " + base + "(" + modeText + ")";
+        } catch (e) {
+            return "自动触发计数：读取失败";
+        }
+    }
+
+    function adrDUpdateAutoCounters() {
+        try {
+            adrDSetCounterText("emotion", adrDAutoCounterText("emotion"));
+            adrDSetCounterText("plot", adrDAutoCounterText("plot"));
+        } catch (e) {}
+    }
+
+
+    function adrDShouldSchedulePendingAutoRetry() {
+        // v1.9.26：楼层尾长不变时，也要给“已到 N 但失败保拍”的待触发拍子一次退避重试机会。
+        // 只读检查，不创建/下拉 baseline，不参与 dirty-gap/no-shrink 数学。
+        try {
+            if (adrDAutoTriggerRunning || processing) return false;
+            if (!adrDCountReady() || !adrDChatKeyReady()) return false;
+            if (adrDInStartupAutoGrace && adrDInStartupAutoGrace()) return false;
+
+            var st = settings();
+            var count = adrDAssistantRoundCount();
+            var now = Date.now();
+            var types = ["emotion", "plot"];
+
+            for (var i = 0; i < types.length; i++) {
+                var type = types[i];
+                var enabled = type === "plot" ? !!st.autoTriggerPlot : !!st.autoTriggerEmotion;
+                if (!enabled) continue;
+                var n = autoTriggerRange(type);
+                if (!Number.isFinite(n) || n <= 0) continue;
+                var state = adrDPeekAutoState(type);
+                if (!state || !Number.isFinite(Number(state.base))) continue;
+                var base = Number(state.base);
+                if (count < base) continue; // partial 小读数，绝不重试。
+                if (count - base < n) continue;
+
+                var beatKey = adrDAutoBeatKey(type, count, n);
+                var retry = adrDAutoRetryByBeat[beatKey];
+                if (!retry || !Number.isFinite(Number(retry.nextAt)) || now >= Number(retry.nextAt)) {
+                    return true;
+                }
+            }
+        } catch (e) {}
+        return false;
+    }
+
+
+    function adrDPersistAutoBaselineFields(source) {
+        try {
+            var st = source || settings();
+            var backup = {};
+            try { backup = adrDLoadLocalBackup ? (adrDLoadLocalBackup() || {}) : {}; } catch (e0) { backup = {}; }
+
+            [
+                "lastAutoTriggerChatKey",
+                "lastAutoTriggerEmotionCount",
+                "lastAutoTriggerPlotCount",
+                "lastAutoTriggerAt",
+                "lastAutoTriggerEmotionAt",
+                "lastAutoTriggerPlotAt"
+            ].forEach(function (k) {
+                if (Object.prototype.hasOwnProperty.call(st, k)) backup[k] = st[k];
+            });
+
+            adrDSaveLocalBackup(backup);
+            return true;
+        } catch (e) {
+            try { adrDSaveLocalBackup(settings()); } catch (e2) {}
+            return false;
+        }
+    }
+
+    function adrDResetAutoTriggerBaseline(reason) {
+        try {
+            var st = settings();
+            var key = adrDChatKey();
+            var count = adrDAssistantRoundCount();
+
+            st.lastAutoTriggerChatKey = key;
+
+            if (!Number.isFinite(Number(st.lastAutoTriggerEmotionCount)) || Number(st.lastAutoTriggerEmotionCount) < 0) {
+                st.lastAutoTriggerEmotionCount = count;
+                adrDAdvanceAutoBaseline("emotion", count);
+            }
+            if (!Number.isFinite(Number(st.lastAutoTriggerPlotCount)) || Number(st.lastAutoTriggerPlotCount) < 0) {
+                st.lastAutoTriggerPlotCount = count;
+                adrDAdvanceAutoBaseline("plot", count);
+            }
+
+            saveNow();
+            adrDPersistAutoBaselineFields(st);
+            adrDUpdateAutoCounters();
+            console.log("[Arrebol D] auto trigger baseline", reason, key, count);
+        } catch (e) {}
+    }
+
+    function adrDScheduleAutoTriggerCheck(reason) {
+        try {
+            if (adrDAutoTriggerTimer) clearTimeout(adrDAutoTriggerTimer);
+            adrDAutoTriggerTimer = setTimeout(function () {
+                adrDCheckAutoTrigger(reason || "scheduled");
+            }, 4200);
+        } catch (e) {}
+    }
+
+    async function adrDCheckAutoTrigger(reason) {
+        if (adrDAutoTriggerRunning || processing) return;
+
+        try {
+            var st = settings();
+            if (!st.autoTriggerEmotion && !st.autoTriggerPlot) {
+                adrDUpdateAutoCounters();
+                return;
+            }
+
+            var count = await adrDRefreshFullAssistantRoundCount("auto-check:" + (reason || ""));
+            if (!adrDCountReady()) {
+                try { console.log("[Arrebol D] auto trigger waits for first full history count", reason || ""); } catch (eReadyLog) {}
+                adrDUpdateAutoCounters();
+                return;
+            }
+
+            if (!adrDChatKeyReady()) {
+                try { console.log("[Arrebol D] auto trigger waits for stable chat key", reason || ""); } catch (eKeyLog) {}
+                adrDUpdateAutoCounters();
+                return;
+            }
+
+            var inStartupGrace = adrDInStartupAutoGrace();
+            // v1.0.5.6.8.3.9：启动 grace 不再作为“总开关”吞掉自动触发。
+            // 真正需要静默对齐的，只应是 gap 离谱的脏 baseline；正常 gap >= N 必须继续触发。
+
+            var nEmotion = autoTriggerRange("emotion");
+            var nPlot = autoTriggerRange("plot");
+            var toRun = [];
+
+            // v1.0.5.6.8.1：自动触发判断完全改用独立 auto state。
+            // 情感和剧情各有自己的 baseline，互不影响。
+            if (st.autoTriggerEmotion && nEmotion > 0) {
+                var emotionState = adrDGetAutoState("emotion", count);
+                var emotionBase = Number(emotionState.base);
+                if (!Number.isFinite(emotionBase) || emotionBase < 0) {
+                    emotionBase = count;
+                    adrDSetAutoBaseline("emotion", count);
+                }
+                // 如果 count < base，说明当前可能是 partial 小读数。保住 base，不下拉；count-base 为负，自然不会触发。
+
+                if (adrDShouldAlignDirtyBaselineOnFirstPassiveCheck("emotion", count, emotionBase, nEmotion, reason, inStartupGrace)) {
+                    // 刷新/重挂载后的首次被动检查若已越阈值，视为旧 baseline 与全量 count 不一致：只对齐，不注入。
+                    adrDAdvanceAutoBaseline("emotion", count);
+                    st.lastAutoTriggerEmotionCount = count;
+                    st.lastAutoTriggerEmotionAt = Date.now();
+                    try { console.warn("[Arrebol D] align dirty emotion baseline on first passive check", { count: count, base: emotionBase, n: nEmotion, reason: reason || "" }); } catch (eFirstEmotion) {}
+                } else if (count - emotionBase >= nEmotion) {
+                    // v1.9.23：不要在 run() 前推进 baseline。API/网络失败时必须保留这一拍，避免失败丢拍后再罚等 N。
+                    toRun.push({ type: "emotion", n: nEmotion, count: count, beatKey: adrDAutoBeatKey("emotion", count, nEmotion) });
+                }
+            }
+
+            if (st.autoTriggerPlot && nPlot > 0) {
+                var plotState = adrDGetAutoState("plot", count);
+                var plotBase = Number(plotState.base);
+                if (!Number.isFinite(plotBase) || plotBase < 0) {
+                    plotBase = count;
+                    adrDSetAutoBaseline("plot", count);
+                }
+                // 如果 count < base，说明当前可能是 partial 小读数。保住 base，不下拉；count-base 为负，自然不会触发。
+
+                if (adrDShouldAlignDirtyBaselineOnFirstPassiveCheck("plot", count, plotBase, nPlot, reason, inStartupGrace)) {
+                    // 刷新/重挂载后的首次被动检查若已越阈值，视为旧 baseline 与全量 count 不一致：只对齐，不注入。
+                    adrDAdvanceAutoBaseline("plot", count);
+                    st.lastAutoTriggerPlotCount = count;
+                    st.lastAutoTriggerPlotAt = Date.now();
+                    try { console.warn("[Arrebol D] align dirty plot baseline on first passive check", { count: count, base: plotBase, n: nPlot, reason: reason || "" }); } catch (eFirstPlot) {}
+                } else if (count - plotBase >= nPlot) {
+                    // v1.9.23：不要在 run() 前推进 baseline。API/网络失败时必须保留这一拍，避免失败丢拍后再罚等 N。
+                    toRun.push({ type: "plot", n: nPlot, count: count, beatKey: adrDAutoBeatKey("plot", count, nPlot) });
+                }
+            }
+
+            st.lastAutoTriggerChatKey = adrDChatKey();
+            saveNow();
+            try { adrDPersistAutoBaselineFields(st); } catch (ePersist) {}
+            adrDUpdateAutoCounters();
+
+            if (!toRun.length) return;
+
+            var isPendingRetryCheck = String(reason || "").indexOf("pending-retry") >= 0;
+            if (!isPendingRetryCheck && settings().showAutoTriggerPopup !== false) adrDAutoTriggerPopup(toRun, count);
+            adrDAutoTriggerRunning = true;
+            for (var i = 0; i < toRun.length; i++) {
+                var item = toRun[i];
+                var type = item.type;
+                var n = item.n;
+                var triggerCount = Number(item.count);
+                if (!Number.isFinite(triggerCount) || triggerCount < 0) triggerCount = count;
+                var beatKey = item.beatKey || adrDAutoBeatKey(type, triggerCount, n);
+                var extra = "自动触发：已新增约 " + n + " 个助手正文轮次。请基于当前精准读取上下文输出下一阶段方向。";
+                console.log("[Arrebol D] auto triggering", type, "reason=", reason, "count=", triggerCount, "N=", n);
+                var okRun = await run(type, extra, { autoTrigger: true, beatKey: beatKey });
+                if (okRun) {
+                    var stAfter = settings();
+                    adrDAdvanceAutoBaseline(type, triggerCount);
+                    stAfter.lastAutoTriggerChatKey = adrDChatKey();
+                    if (type === "plot") {
+                        stAfter.lastAutoTriggerPlotCount = triggerCount;
+                        stAfter.lastAutoTriggerPlotAt = Date.now();
+                    } else {
+                        stAfter.lastAutoTriggerEmotionCount = triggerCount;
+                        stAfter.lastAutoTriggerEmotionAt = Date.now();
+                    }
+                    saveNow();
+                    try { adrDPersistAutoBaselineFields(stAfter); } catch (ePersistAfter) {}
+                    try { adrDUpdateAutoCounters(); } catch (eCountersAfter) {}
+                        adrDNoteAutoRetryResult(beatKey, true);
+                } else {
+                    adrDNoteAutoRetryResult(beatKey, false);
+                    try { console.warn("[Arrebol D] auto trigger run failed; baseline not advanced", { type: type, count: triggerCount, n: n, reason: reason || "" }); } catch (eWarnRun) {}
+                }
+            }
+        } catch (e) {
+            console.error("[Arrebol D] auto trigger check failed", e);
+        }
+
+        adrDAutoTriggerRunning = false;
+        try { adrDUpdateAutoCounters(); } catch (e2) {}
+    }
+
+    function adrDInstallAutoTriggerWatchers() {
+        try {
+            var c = ctx();
+            var es = c.eventSource;
+            var types = c.event_types || c.eventTypes || {};
+
+            function on(name) {
+                try {
+                    var ev = types[name];
+                    if (es && ev && typeof es.on === "function") {
+                        es.on(ev, function () { adrDScheduleAutoTriggerCheck(name); });
+                    }
+                } catch (e) {}
+            }
+
+            ["MESSAGE_RECEIVED", "MESSAGE_SENT", "GENERATION_ENDED", "CHAT_CHANGED", "CHAT_LOADED"].forEach(on);
+        } catch (e) {}
+
+        try {
+            if (!rootWin().__arrebolDAutoTriggerPoll) {
+                rootWin().__arrebolDAutoTriggerPoll = setInterval(function () {
+                    try {
+                        var len = adrDCurrentMessageTailForPoll();
+                        if (adrDLastChatLengthSeen >= 0 && len !== adrDLastChatLengthSeen) {
+                            adrDQueueFullAssistantRoundCountRefresh("poll-tail-change");
+                            adrDScheduleAutoTriggerCheck("poll-chat-length");
+                        } else if (adrDShouldSchedulePendingAutoRetry()) {
+                            adrDQueueFullAssistantRoundCountRefresh("poll-pending-retry");
+                            adrDScheduleAutoTriggerCheck("pending-retry");
+                        }
+                        adrDLastChatLengthSeen = len;
+                        adrDUpdateAutoCounters();
+                    } catch (e) {}
+                }, 9000);
+            }
+        } catch (e2) {}
+
+        // v1.0.5.6.8.1：页面刷新/插件重新挂载时不主动重置自动触发基线。
+        // 基线只在开关/间隔改变或真正切换聊天时重置。
+        setTimeout(adrDUpdateAutoCounters, 1200);
+    }
+
+
+    function adrDInstallTabFallbackOnly() {
+        try {
+            if (rootWin().__adrDTabFallbackOnlyInstalled) return;
+            rootWin().__adrDTabFallbackOnlyInstalled = true;
+
+            function handle(ev) {
+                try {
+                    var t = ev.target;
+                    while (t && t !== rootDoc()) {
+                        if (t.id === "adr044-tab-emotion" || t.id === "adr044-tab-plot") {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            switchTab(t.id === "adr044-tab-plot" ? "plot" : "emotion");
+                            return false;
+                        }
+                        t = t.parentNode;
+                    }
+                } catch (e) {}
+            }
+
+            rootDoc().addEventListener("click", handle, true);
+            rootDoc().addEventListener("touchend", handle, true);
+        } catch (e2) {
+            console.warn("[Arrebol D] install tab fallback failed", e2);
+        }
+    }
+
+
+    function adrDTypeFromButtonId(id) {
+        if (!id) return settings().activeTab || "emotion";
+        if (id.indexOf("adr044-plot-") === 0 || id.indexOf("-plot") >= 0) return "plot";
+        if (id.indexOf("adr044-emotion-") === 0 || id.indexOf("-emotion") >= 0) return "emotion";
+        return settings().activeTab || "emotion";
+    }
+
+    function adrDHandleAnyButtonId(id) {
+        try {
+            if (!id || id.indexOf("adr044-") !== 0) return false;
+
+            // tab 已由 tab fallback 处理，这里也兜底一次。
+            if (id === "adr044-tab-emotion") {
+                switchTab("emotion");
+                return true;
+            }
+            if (id === "adr044-tab-plot") {
+                switchTab("plot");
+                return true;
+            }
+
+            if (id === "adr044-probe-context") {
+                runContextProbe();
+                return true;
+            }
+            if (id === "adr044-probe-content") {
+                runContentProbe();
+                return true;
+            }
+            if (id === "adr044-preview-precise") {
+                runPrecisePreview();
+                return true;
+            }
+
+            var type = adrDTypeFromButtonId(id);
+
+            if (id === "adr044-" + type + "-local") {
+                localTest(type);
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-generate") {
+                syncAll();
+                run(type, "");
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-reroll") {
+                syncType(type);
+                var extra = qForm("adr044-" + type + "-extra");
+                run(type, extra ? extra.value : "");
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-stop") {
+                abortRun(type);
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-copy") {
+                copyText(type);
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-load-models") {
+                syncType(type);
+                loadModels(type);
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-save") {
+                adrDForceSaveSettings(type);
+                status(type, "设置已保存 ✓", "#8ed99d");
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-calibrate-auto") {
+                adrDRequestCalibrateAutoBaseline(type);
+                return true;
+            }
+
+            if (id === "adr044-" + type + "-inject") {
+                syncType(type);
+                var pv = qForm("adr044-" + type + "-preview");
+                var text = pv ? pv.value : "";
+                if (!text) {
+                    status(type, "没有内容可注入", "#d4726a");
+                    return true;
+                }
+                var ok = injectDirector(type, text);
+                status(type, ok ? "已注入当前聊天 ✓" : "注入失败", ok ? "#8ed99d" : "#d4726a");
+                return true;
+            }
+        } catch (e) {
+            console.error("[Arrebol D] all-button fallback failed", e);
+            try {
+                var t2 = id && id.indexOf("plot") >= 0 ? "plot" : "emotion";
+                status(t2, "按钮执行失败：" + (e.message || e), "#d4726a");
+            } catch (e2) {}
+            return true;
+        }
+
+        return false;
+    }
+
+    function adrDInstallAllButtonFallback() {
+        try {
+            if (rootWin().__adrDAllButtonFallbackInstalled) return;
+            rootWin().__adrDAllButtonFallbackInstalled = true;
+
+            function handle(ev) {
+                try {
+                    var t = ev.target;
+                    while (t && t !== rootDoc()) {
+                        if (t.id && t.id.indexOf("adr044-") === 0) {
+                            var tag = String(t.tagName || "").toLowerCase();
+                            // 输入框/选择框不拦截，否则会影响输入。
+                            if (tag === "input" || tag === "textarea" || tag === "select" || tag === "option") return;
+
+                            var ok = adrDHandleAnyButtonId(t.id);
+                            if (ok) {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                return false;
+                            }
+                        }
+                        t = t.parentNode;
+                    }
+                } catch (e) {
+                    console.warn("[Arrebol D] all-button fallback listener failed", e);
+                }
+            }
+
+            rootDoc().addEventListener("click", handle, true);
+            rootDoc().addEventListener("touchend", handle, true);
+        } catch (e2) {
+            console.warn("[Arrebol D] install all-button fallback failed", e2);
+        }
+    }
+
+    function init() {
+        if (initialized) return;
+        initialized = true;
+
+        try {
+            settings();
+            mountDrawer();
+            installProbeGlobals();
+            installProbeDelegation();
+            bindDirect();
+            adrDBindCompactTemplateControls();
+            adrDInstallTabFallbackOnly();
+            adrDInstallAllButtonFallback();
+            switchTab(settings().activeTab || "emotion");
+            adr048CreatePopupPanel();
+            setTimeout(adrDBindCompactTemplateControls, 120);
+            adr048EnsureFabLater();
+            adrDInstallAutoTriggerWatchers();
+            adrDQueueFullAssistantRoundCountRefresh("init");
+            adrDUpdateAutoCounters();
+            setTimeout(adrDUpdateAutoCounters, 800);
+            setTimeout(bindDirect, 500);
+            setTimeout(adrDBindCompactTemplateControls, 650);
+            setTimeout(bindDirect, 1500);
+            setTimeout(bindDirect, 3000);
+            console.log("[ADR044] dual drawer loaded");
+        } catch (e) {
+            console.error("[ADR044] init failed", e);
+        }
+    }
+
+    function wait() {
+        if (typeof SillyTavern === "undefined" || !SillyTavern.getContext) {
+            setTimeout(wait, 300);
+            return;
+        }
+
+        try {
+            var c = SillyTavern.getContext();
+            if (c.eventSource && c.event_types && c.event_types.APP_READY) {
+                c.eventSource.on(c.event_types.APP_READY, function () {
+                    setTimeout(init, 100);
+                });
+            }
+            setTimeout(init, 1800);
+        } catch (e) {
+            setTimeout(init, 1200);
+        }
+    }
+
+    wait();
+})();
