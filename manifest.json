@@ -1,11 +1,11 @@
 {
-  "display_name": "Arrebol D 暗河红霞导演系统",
-  "loading_order": 22,
+  "display_name": "Image Prompt Extractor",
+  "loading_order": 100,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "ripple & GPT",
-  "version": "1.9.26",
-  "description": "Arrebol D 小红霞导演插件｜1.9.26 trigger retry strict success：自动触发严格成功语义、失败首报、保拍退避重试｜ripple & GPT"
+  "author": "江",
+  "version": "1.8.5.2",
+  "description": "从 RP 正文提取场景描述，通过独立 API 生成生图提示词并注入正文"
 }
