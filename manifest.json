@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "ripple & GPT & Claude",
-  "version": "1.9.2",
-  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.2：挂账接入副 AI（共用 API 预设池、各选各的），新增 User 指令（聊天级、最高优先级）、挂账规则预设、本卡要点预设、手动重挂与自动挂账开关；输出格式由代码强制锁定；生图管线一字未动。"
+  "version": "1.9.3",
+  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.3：重新挂账移到账本编辑区、操作键留出右手余量与更大点击面；1.9.2 的副 AI 管线、User 指令、预设系统不变；生图管线一字未动。"
 }

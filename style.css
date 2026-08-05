@@ -189,3 +189,37 @@
     background: rgba(255,255,255,.62);
     color: #46525E;
 }
+
+
+/* ============================================================
+   🐚 v1.9.3 右手余量 · UI-only
+   手机上右手拇指常在屏幕右缘活动，按钮贴边容易误触；
+   iOS 侧滑返回也在右缘。面板右侧留一指缝（沿用 Arrebol 的 20px），
+   操作行再多留 6px，滑动时不会蹭到按钮。
+   ============================================================ */
+
+.ipe-preview-actions {
+    padding-right: 6px;
+}
+.ipe-tabs {
+    padding-right: 18px;
+}
+
+@media (max-width: 480px) {
+    /* 右缘让出一指缝：拇指滑动区与 iOS 侧滑返回都在这儿 */
+    .ipe-panel {
+        left: 8px;
+        right: 20px;
+    }
+    /* 按钮加高，指腹落点更稳 */
+    .ipe-btn {
+        min-height: 38px;
+    }
+    .ipe-tab {
+        min-height: 40px;
+    }
+    .ipe-preview-actions {
+        padding-right: 8px;
+        gap: 10px;
+    }
+}

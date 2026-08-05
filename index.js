@@ -2630,6 +2630,9 @@ function createPanel() {
             '<button id="ipe-ledger-save" class="ipe-btn ipe-btn-primary" type="button">保存账本</button>'+
             '<button id="ipe-ledger-reload" class="ipe-btn" type="button">重新读取</button>'+
         '</div>'+
+        '<div class="ipe-preview-actions">'+
+            '<button id="ipe-ledger-run" class="ipe-btn ipe-btn-primary" type="button">\uD83E\uDD16 重新挂账（读最后一楼）</button>'+
+        '</div>'+
         '<div id="ipe-ledger-status" class="ipe-preview-status" style="margin-top:6px">\u2014</div>'+
         '<label style="margin-top:8px">楼层年龄（只读）</label>'+
         '<pre id="ipe-ledger-age" class="ipe-ledger-age"></pre>'+
@@ -2639,7 +2642,6 @@ function createPanel() {
         '<label>挂账用哪套 API<select id="ipe-ledger-api"></select></label>'+
         '<div class="ipe-hint" style="margin-bottom:6px">共用生图页那份 API 预设池；这里只选用哪一套，互不影响。</div>'+
         '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
-            '<button id="ipe-ledger-run" class="ipe-btn ipe-btn-primary" type="button">重新挂账（读最后一楼）</button>'+
             '<button id="ipe-ledger-test" class="ipe-btn" type="button">测试连接</button>'+
         '</div>'+
         '<div style="color:#888;font-size:12px;margin-bottom:8px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动挂账（每来一楼跑一次） <input type="checkbox" id="ipe-ledger-auto"></label></div>'+
@@ -2744,14 +2746,15 @@ function createDrawer() {
     h += '<textarea id="iped-ledger-text" class="text_pole" rows="5" placeholder="左肩刀伤&#10;答应她周末去看展"></textarea>';
     h += '<label>\u26A0\uFE0F User 指令（压过账本与副 AI 的判断）</label>';
     h += '<textarea id="iped-ledger-order" class="text_pole" rows="2" placeholder="例：伤先别好，我还要写"></textarea>';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-ledger-save" class="menu_button" value="保存账本"><input type="button" id="iped-ledger-reload" class="menu_button" value="重新读取"></div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-save" class="menu_button" value="保存账本"><input type="button" id="iped-ledger-reload" class="menu_button" value="重新读取"></div>';
+    h += '<div style="display:flex;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-run" class="menu_button" style="flex:1" value="\uD83E\uDD16 重新挂账（读最后一楼）"></div>';
     h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0">\u2014</div>';
     h += '<label>楼层年龄（只读）</label>';
     h += '<pre id="iped-ledger-age" class="ipe-ledger-age"></pre>';
     h += '<small style="color:#888">账本存在本聊天里；切换聊天会各用各的。</small>';
     h += '<hr><small><b>\uD83E\uDD16 副 AI（谁来记账）</b></small>';
     h += '<label>挂账用哪套 API</label><select id="iped-ledger-api" class="text_pole"></select>';
-    h += '<div style="display:flex;gap:6px;margin:6px 0"><input type="button" id="iped-ledger-run" class="menu_button" value="重新挂账"><input type="button" id="iped-ledger-test" class="menu_button" value="测试连接"></div>';
+    h += '<div style="display:flex;gap:6px;margin:6px 0;padding-right:6px"><input type="button" id="iped-ledger-test" class="menu_button" style="flex:1" value="测试连接"></div>';
     h += '<div style="margin-bottom:6px"><label>自动挂账（每来一楼跑一次） <input type="checkbox" id="iped-ledger-auto"></label></div>';
     h += '<label>挂账规则预设</label><select id="iped-ledger-prompt-slot" class="text_pole"></select>';
     h += '<label>预设名称</label><input type="text" id="iped-ledger-prompt-name" class="text_pole" placeholder="例：修仙 / 爱情 / 大世界">';
