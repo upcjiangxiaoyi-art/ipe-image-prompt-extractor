@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "ripple & GPT & Claude",
-  "version": "1.9.0",
-  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.0：新增挂账页（浮窗/抽屉双版面），账本按聊天独立存档（chat_metadata 主档 + 本地镜像）；生图管线一字未动。"
+  "version": "1.9.1",
+  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.1：挂账新增贴耳注入（setExtensionPrompt 通道，不占楼层、一轮一换、深度可调），账本按聊天独立存档；生图管线一字未动。"
 }

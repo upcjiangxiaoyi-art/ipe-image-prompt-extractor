@@ -32,7 +32,9 @@ const DEFAULTS = {
     baseTemplateName2: "预设2",
     baseTemplateName3: "预设3",
     baseTemplateName4: "预设4",
-    activeTab: "image"
+    activeTab: "image",
+    ledgerEpEnabled: true,
+    ledgerEpDepth: 2
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -480,12 +482,79 @@ function ipeLedgerSaveFromEditor(which) {
     if (!el) { ipeLedgerStatus("找不到编辑框", "#d4726a"); return; }
     var next = ipeLedgerFromText(el.value, null);
     var r = ipeLedgerSave(next);
-    ipeLedgerRefreshEditors();
+    ipeLedgerSync();
     if (r.meta || r.ls) {
         ipeLedgerStatus("已保存 \u2713  主档" + (r.meta ? "\u2713" : "\u2717") + " 镜像" + (r.ls ? "\u2713" : "\u2717"), "#6ec577");
     } else {
         ipeLedgerStatus("保存失败：主档和镜像都没写进去", "#d4726a");
     }
+}
+
+/* ============================================================
+   🐚 贴耳 · 扩展提示词通道
+   移植自 Arrebol D 的 adrDApplyFloatPrompt：EPT/EPR 大小写双写法
+   都兜住，不同酒馆版本都能落地。
+   只注入「当前这一份」，不进聊天记录，下一轮自动换新。
+   ============================================================ */
+
+function ipeLedgerEpDepth() {
+    var d = Number(cfg().ledgerEpDepth);
+    if (!Number.isFinite(d) || d < 0) d = 2;
+    if (d > 99) d = 99;
+    return Math.round(d);
+}
+
+// 给模型读的原文：纯文本、短行、无 HTML 标签。
+// 形状故意跟楼里那份 <details> 完全不同，掐掉模仿诱因。
+function ipeLedgerEpText() {
+    var st = ipeLedgerRead();
+    if (!st.entries.length) return "";
+    var now = ipeFloorNo();
+    var lines = st.entries.map(function(e){
+        var age = (e.since >= 0) ? Math.max(0, now - e.since) : -1;
+        var tail = (age < 0) ? "" : "（第" + e.since + "楼起，已" + age + "楼）";
+        return "\u00b7 " + e.text + tail;
+    });
+    return "\u3010\u6302\u8d26\u00b7\u7cfb\u7edf\u8bb0\u5f55\u00b7\u53ea\u8bfb\u3011\n"
+         + "\u4e0b\u5217\u4e3a\u5f53\u524d\u672a\u7ed3\u6e05\u4e8b\u9879\uff0c\u4f9b\u53d9\u4e8b\u8fde\u8d2f\u4f7f\u7528\u3002\u4e0d\u8981\u590d\u8ff0\uff0c\u4e0d\u8981\u4eff\u5199\u672c\u5757\u683c\u5f0f\u3002\n"
+         + lines.join("\n");
+}
+
+function ipeLedgerApplyEP() {
+    try {
+        var c = ctx();
+        if (typeof c.setExtensionPrompt !== "function") return false;
+        var EPT  = c.extensionPromptTypes || c.extension_prompt_types || {};
+        var pos  = EPT.IN_CHAT != null ? EPT.IN_CHAT : 1;
+        var EPR  = c.extensionPromptRoles || c.extension_prompt_roles || {};
+        var role = EPR.SYSTEM != null ? EPR.SYSTEM : 0;
+        var text = cfg().ledgerEpEnabled ? ipeLedgerEpText() : "";
+        c.setExtensionPrompt(IPE_LEDGER_EP_KEY, String(text || ""), pos, ipeLedgerEpDepth(), false, role);
+        return true;
+    } catch(e) { return false; }
+}
+
+function ipeLedgerRefreshEpPreview() {
+    var on   = cfg().ledgerEpEnabled !== false;
+    var text = on ? ipeLedgerEpText() : "";
+    var show = !on ? "（贴耳已关闭，不会注入任何内容）"
+             : (text ? text : "（账本为空，本轮不注入）");
+    ["ipe-ledger-ep-preview","iped-ledger-ep-preview"].forEach(function(id){
+        var el = q("#" + id); if (el) el.textContent = show;
+    });
+    ["ipe-ledger-ep-enabled","iped-ledger-ep-enabled"].forEach(function(id){
+        var el = q("#" + id); if (el && el.checked !== on) el.checked = on;
+    });
+    ["ipe-ledger-ep-depth","iped-ledger-ep-depth"].forEach(function(id){
+        var el = q("#" + id); if (el) el.value = String(ipeLedgerEpDepth());
+    });
+}
+
+// 落盘 → 贴耳 → 刷预览，一条龙。任何改动都走这里，不会漏同步。
+function ipeLedgerSync() {
+    ipeLedgerApplyEP();
+    ipeLedgerRefreshEditors();
+    ipeLedgerRefreshEpPreview();
 }
 
 /* ---- Tab 切换：浮窗与抽屉各切各的容器，互不影响 ---- */
@@ -502,7 +571,7 @@ function ipeSetActiveTab(tab) {
             else b.classList.remove("ipe-tab-on");
         });
     } catch(e) {}
-    if (tab === "ledger") ipeLedgerRefreshEditors();
+    if (tab === "ledger") { ipeLedgerRefreshEditors(); ipeLedgerRefreshEpPreview(); }
 }
 
 function ipeGetApiProfiles() {
@@ -1785,7 +1854,7 @@ function createUI() {
     createDrawer();
     bindAll();
     setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); }, 120);
-    setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerRefreshEditors(); }, 160);
+    setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerSync(); }, 160);
 }
 
 function ipeForcePanelVisible() {
@@ -2289,7 +2358,13 @@ function createPanel() {
         '<div id="ipe-ledger-status" class="ipe-preview-status" style="margin-top:6px">\u2014</div>'+
         '<label style="margin-top:8px">楼层年龄（只读）</label>'+
         '<pre id="ipe-ledger-age" class="ipe-ledger-age"></pre>'+
-        '<div class="ipe-hint">账本存在本聊天里（chat_metadata 主档 + 本地镜像）。切换聊天会各用各的。</div>',
+        '<div class="ipe-hint">账本存在本聊天里（chat_metadata 主档 + 本地镜像）。切换聊天会各用各的。</div>'+
+        '<hr style="border:none;border-top:1px solid rgba(255,255,255,.10);margin:12px 0">'+
+        '<div style="color:#888;font-size:12px;margin-bottom:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">贴耳注入（模型读得到，楼里读不到） <input type="checkbox" id="ipe-ledger-ep-enabled"></label></div>'+
+        '<label>注入深度<select id="ipe-ledger-ep-depth"></select></label>'+
+        '<label style="margin-top:6px">贴耳预览（模型实际读到的原文）</label>'+
+        '<pre id="ipe-ledger-ep-preview" class="ipe-ledger-age"></pre>'+
+        '<div class="ipe-hint">走扩展提示词通道，不占楼层、不进聊天记录，一轮一换。深度越小越靠近最新一楼。</div>',
         "ledger");
 
     h += '</div><div class="ipe-footer">by ' + IPE_CREDITS + '</div>';
@@ -2371,6 +2446,12 @@ function createDrawer() {
     h += '<label>楼层年龄（只读）</label>';
     h += '<pre id="iped-ledger-age" class="ipe-ledger-age"></pre>';
     h += '<small style="color:#888">账本存在本聊天里；切换聊天会各用各的。</small>';
+    h += '<hr>';
+    h += '<div style="margin-bottom:6px"><label>贴耳注入（模型读得到，楼里读不到） <input type="checkbox" id="iped-ledger-ep-enabled"></label></div>';
+    h += '<label>注入深度</label><select id="iped-ledger-ep-depth" class="text_pole"></select>';
+    h += '<label>贴耳预览（模型实际读到的原文）</label>';
+    h += '<pre id="iped-ledger-ep-preview" class="ipe-ledger-age"></pre>';
+    h += '<small style="color:#888">走扩展提示词通道，不占楼层、不进聊天记录，一轮一换。</small>';
     h += '</div>';
     h += '<div style="margin-top:8px;color:#666;font-size:11px;text-align:right">by ' + IPE_CREDITS + '</div></div></div></div>';
 
@@ -2830,19 +2911,56 @@ function bindAll() {
         });
     });
 
-    // 换聊天 → 账本跟着换
+    // 深度下拉：0-10 填充 + 切换即生效
+    ["ipe-ledger-ep-depth","iped-ledger-ep-depth"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        if (!el.options || !el.options.length) {
+            var html = "";
+            for (var i = 0; i <= 10; i++) html += '<option value="'+i+'">'+i+(i===2?"（默认）":"")+'</option>';
+            el.innerHTML = html;
+        }
+        el.value = String(ipeLedgerEpDepth());
+        el.addEventListener("change", function(){
+            save("ledgerEpDepth", Number(el.value) || 0);
+            ipeLedgerSync();
+            ipeLedgerStatus("注入深度已改为 " + ipeLedgerEpDepth(), "#6ec577");
+        });
+    });
+
+    ["ipe-ledger-ep-enabled","iped-ledger-ep-enabled"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.checked = cfg().ledgerEpEnabled !== false;
+        el.addEventListener("change", function(){
+            save("ledgerEpEnabled", !!el.checked);
+            ipeLedgerSync();
+            ipeLedgerStatus(el.checked ? "贴耳已开启" : "贴耳已关闭（注入内容已清空）", "#6ec577");
+        });
+    });
+
+    // 换聊天 → 账本跟着换 + 重贴耳
     try {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
                 setTimeout(function(){
-                    ipeLedgerRefreshEditors();
+                    ipeLedgerSync();
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
                 }, 200);
             });
             console.log("[IPE] 已绑定换聊天事件");
         }
     } catch(e) { console.log("[IPE] 换聊天事件绑定跳过"); }
+
+    // 每来一楼刷新一次楼层年龄（独立监听，不动生图那条 onMsgReceived）
+    try {
+        var cm = ctx();
+        if (cm.eventSource && cm.event_types && cm.event_types.MESSAGE_RECEIVED) {
+            cm.eventSource.on(cm.event_types.MESSAGE_RECEIVED, function(){
+                setTimeout(ipeLedgerSync, 300);
+            });
+            console.log("[IPE] 挂账已绑定消息事件");
+        }
+    } catch(e) {}
 
     ipeRefreshTemplateEditors();
 }
