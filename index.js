@@ -561,7 +561,7 @@ function ipeLedgerReportBlock() {
         re.lastIndex = 0;
         var hit;
         while ((hit = re.exec(txt)) !== null) {
-            var body = String(hit[1] || "").trim();
+            var body = ipeLedgerStripImageTag(String(hit[1] || "")).trim();
             if (body) picked.push(body);
         }
     }
@@ -599,6 +599,37 @@ function ipeLedgerHistoryBlock() {
 }
 
 /* ---- 投喂拼装：段落标题只做定位，不声明优先级 ---- */
+/* 生图会把 image###…### 追加进 msg.mes。有 <content> 标签的楼不受影响
+   （只取标签内），没有标签的楼会兜底返回整条，那串英文 tag 就混进挂账正文了。
+   这里按用户当前所有生图模板的字面前后缀剥掉，模板改了也跟着变。 */
+function ipeLedgerStripImageTag(text) {
+    var out = String(text || "");
+    var tpls = [];
+    try {
+        var list = ipeGetBaseTemplates();
+        if (Array.isArray(list)) list.forEach(function(x){ if (x && x.value) tpls.push(String(x.value)); });
+    } catch(e) {}
+    try { if (cfg().baseTemplate) tpls.push(String(cfg().baseTemplate)); } catch(e) {}
+    tpls.push("image###{Description}###");
+
+    var seen = {};
+    for (var i = 0; i < tpls.length; i++) {
+        var t = tpls[i];
+        if (!t || seen[t]) continue;
+        seen[t] = true;
+        var k = t.indexOf("{Description}");
+        if (k < 0) continue;
+        var pre = t.slice(0, k), suf = t.slice(k + "{Description}".length);
+        if (!pre && !suf) continue;
+        var esc = function(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
+        try {
+            var re = new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + (suf ? esc(suf) : "$"), "g");
+            out = out.replace(re, "");
+        } catch(e) {}
+    }
+    return out;
+}
+
 function ipeLedgerBuildUser(text, extra) {
     var st = ipeLedgerRead();
     var u = "";
@@ -618,7 +649,7 @@ function ipeLedgerBuildUser(text, extra) {
     if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0\u3011\n" + his + "\n\n";
 
     u += "\u3010\u5f53\u524d\u697c\u5c42\u3011\u7b2c " + ipeFloorNo() + " \u697c\n\n";
-    u += "\u3010\u672c\u8f6e\u6b63\u6587\u3011\n" + ipeTrimSourceText(text);
+    u += "\u3010\u672c\u8f6e\u6b63\u6587\u3011\n" + ipeTrimSourceText(ipeLedgerStripImageTag(text));
     ipeLedgerLastUserChars = u.length;
     return u;
 }
