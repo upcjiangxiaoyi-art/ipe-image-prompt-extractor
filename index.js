@@ -38,6 +38,7 @@ const DEFAULTS = {
     ledgerApiProfile: "",
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
+    ledgerTagOpen: "<ledger>", ledgerTagClose: "</ledger>",
     ledgerInlineShow: true,
     ledgerPromptPresetsJson: "", activeLedgerPrompt: "lp_1",
     ledgerNotePresetsJson: "",   activeLedgerNote: "ln_1",
@@ -501,20 +502,36 @@ function ipeLedgerRollback(idx) {
    ============================================================ */
 
 /* ---- 代码持有的最小协议：仅此两条 ---- */
-var IPE_LEDGER_TAG_OPEN  = "<ledger>";
-var IPE_LEDGER_TAG_CLOSE = "</ledger>";
+var IPE_LEDGER_TAG_DEFAULT_OPEN  = "<ledger>";
+var IPE_LEDGER_TAG_DEFAULT_CLOSE = "</ledger>";
+
+/* 定界符可配：预设本来就输出 <掛帳>…</掛帳> 的，把这两项设成一样，
+   插件就不再套第二层。中间是什么形状代码照旧一个字不看。 */
+function ipeLedgerTagOpen()  { return String(cfg().ledgerTagOpen  || IPE_LEDGER_TAG_DEFAULT_OPEN); }
+function ipeLedgerTagClose() { return String(cfg().ledgerTagClose || IPE_LEDGER_TAG_DEFAULT_CLOSE); }
+
+// 标签按字面转义；尖括号形式容忍内部空格，非尖括号（###账本### / 【账本】）原样匹配
+function ipeLedgerTagRe(tag) {
+    var t = String(tag || "").trim();
+    if (!t) return null;
+    var esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    esc = esc.replace(/^</, "<\\s*").replace(/>$/, "\\s*>").replace(/\//g, "\\s*\\/\\s*");
+    return new RegExp(esc, "i");
+}
 var IPE_LEDGER_SENTINEL  = "NO_CHANGE";
-var IPE_LEDGER_PROTOCOL_NOTE = [
+function ipeLedgerProtocolNote() { return [
     "记什么、分几层、什么格式，全归你的预设，代码一概不看。",
     "",
     "手动挂账（点「重新挂账」）：副 AI 说什么原样给你看，你点采用或重 roll。",
     "没有任何拦截和判定——你人在这儿，你就是校验器。",
     "",
     "自动挂账（挂机连跑、没人看屏幕时）才需要机器合同：",
-    "① 输出包在 " + IPE_LEDGER_TAG_OPEN + " … " + IPE_LEDGER_TAG_CLOSE + " 之间；",
-    "② 无变化时输出 " + IPE_LEDGER_TAG_OPEN + IPE_LEDGER_SENTINEL + IPE_LEDGER_TAG_CLOSE + "。",
-    "这两句插件会自动附在你的预设末尾；你自己写了就不再附加。"
-].join("\n");
+    "① 输出包在 " + ipeLedgerTagOpen() + " … " + ipeLedgerTagClose() + " 之间；",
+    "② 无变化时输出 " + ipeLedgerTagOpen() + IPE_LEDGER_SENTINEL + ipeLedgerTagClose() + "。",
+    "这两句插件会自动附在你的预设末尾；你自己写了就不再附加。",
+    "",
+    "定界符可以在「高级设置」里改成你预设本来就在用的标签（比如 <掛帳>），改了就不用套两层。"
+].join("\n"); }
 
 /* ---- report 摘要层：定界符按字面转义，不让用户直接写正则 ---- */
 function ipeEscRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -663,8 +680,6 @@ async function ipeLedgerCallAPI(text) {
      3 只有闭标签  取它前面全部
      4 一个都没有  整段兜底（配合缩水保护 + 状态栏明示）
    标签匹配大小写不敏感、容忍空格，`< / LEDGER >` 也认。            */
-var IPE_LEDGER_RE_OPEN  = /<\s*ledger\s*>/i;
-var IPE_LEDGER_RE_CLOSE = /<\s*\/\s*ledger\s*>/i;
 var IPE_LEDGER_MIN_LEN  = 30;   // 兜底且账本原本为空时的长度地板，挡住"我不能协助"这类短回复
 
 function ipeLedgerExtract(txt) {
@@ -674,8 +689,10 @@ function ipeLedgerExtract(txt) {
     // 机械剥壳：markdown 围栏
     var s1 = s0.replace(/^\s*```[a-zA-Z]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
 
-    var mo = s1.match(IPE_LEDGER_RE_OPEN);
-    var mc = s1.match(IPE_LEDGER_RE_CLOSE);
+    var reO = ipeLedgerTagRe(ipeLedgerTagOpen());
+    var reC = ipeLedgerTagRe(ipeLedgerTagClose());
+    var mo = reO ? s1.match(reO) : null;
+    var mc = reC ? s1.match(reC) : null;
 
     if (mo && mc && mc.index > mo.index) {
         return { text: s1.slice(mo.index + mo[0].length, mc.index).trim(), level: 1 };
@@ -985,22 +1002,22 @@ var IPE_LEDGER_PROMPT_V1 = [
 
 // 预设里有没有教副 AI 用 <ledger> 包起来
 function ipeLedgerPromptHasTag(v) {
-    return String(v || "").indexOf(IPE_LEDGER_TAG_OPEN) >= 0;
+    return String(v || "").indexOf(ipeLedgerTagOpen()) >= 0;
 }
 
 // 只包裹，零语义：不说记什么、不说分几层、不说什么格式。
 // 跟生图的 image###...### 同一个性质，只保证输出能被找到。
 // 预设里已经自己写了 <ledger> 就跳过，不重复叮嘱。
-var IPE_LEDGER_WRAP_HINT = [
+function ipeLedgerWrapHint() { return [
     "",
     "【输出包裹 · 仅此一条】",
-    "把上面要求你产出的全部内容，完整包在 " + IPE_LEDGER_TAG_OPEN + " 和 " + IPE_LEDGER_TAG_CLOSE + " 之间，标签外不要写任何东西。",
-    "本轮完全没有变化时，输出 " + IPE_LEDGER_TAG_OPEN + IPE_LEDGER_SENTINEL + IPE_LEDGER_TAG_CLOSE + "。"
-].join("\n");
+    "把上面要求你产出的全部内容，完整包在 " + ipeLedgerTagOpen() + " 和 " + ipeLedgerTagClose() + " 之间，标签外不要写任何东西。",
+    "本轮完全没有变化时，输出 " + ipeLedgerTagOpen() + IPE_LEDGER_SENTINEL + ipeLedgerTagClose() + "。"
+].join("\n"); }
 
 function ipeLedgerSystemText() {
     var v = ipeLedgerPromptValue();
-    return ipeLedgerPromptHasTag(v) ? v : (v + "\n" + IPE_LEDGER_WRAP_HINT);
+    return ipeLedgerPromptHasTag(v) ? v : (v + "\n" + ipeLedgerWrapHint());
 }
 
 // v1 → v2 预设升级：只在逐字相同时替换，跑一次
@@ -1163,6 +1180,8 @@ function ipeLedgerRefreshBotEditors() {
      ["iped-ledger-rep-open", String(cfg().ledgerReportOpen || "<report>")],
      ["ipe-ledger-rep-close", String(cfg().ledgerReportClose || "</report>")],
      ["iped-ledger-rep-close", String(cfg().ledgerReportClose || "</report>")],
+     ["ipe-ledger-tag-open", ipeLedgerTagOpen()], ["iped-ledger-tag-open", ipeLedgerTagOpen()],
+     ["ipe-ledger-tag-close", ipeLedgerTagClose()], ["iped-ledger-tag-close", ipeLedgerTagClose()],
      ["ipe-ledger-rep-floors", String(cfg().ledgerReportFloors == null ? 10 : cfg().ledgerReportFloors)],
      ["iped-ledger-rep-floors", String(cfg().ledgerReportFloors == null ? 10 : cfg().ledgerReportFloors)]
     ].forEach(function(pr){
@@ -1185,7 +1204,7 @@ function ipeLedgerRefreshBotEditors() {
         var el = q("#" + id); if (el) el.checked = cfg().ledgerInlineShow !== false;
     });
     ["ipe-ledger-protocol","iped-ledger-protocol"].forEach(function(id){
-        var el = q("#" + id); if (el) el.textContent = IPE_LEDGER_PROTOCOL_NOTE;
+        var el = q("#" + id); if (el) el.textContent = ipeLedgerProtocolNote();
     });
     // 预设里没教 <ledger> → 必然对不上协议，提前喊出来，别等跑失败四次才发现
     var lacks = !ipeLedgerPromptHasTag(pv.value || "");
@@ -1193,8 +1212,8 @@ function ipeLedgerRefreshBotEditors() {
         var el = q("#" + id); if (!el) return;
         el.style.color = "#888";
         el.textContent = lacks
-            ? "\u2139\uFE0F 这份预设没提 " + IPE_LEDGER_TAG_OPEN + "，插件已自动在末尾附上包裹说明（只管包裹，不管你记什么）。想自己控制措辞就在预设里写一次，插件即刻让位。"
-            : "\u2713 这份预设自己写了 " + IPE_LEDGER_TAG_OPEN + "，插件不再附加任何内容。";
+            ? "\u2139\uFE0F 这份预设没提 " + ipeLedgerTagOpen() + "，插件已自动在末尾附上包裹说明（只管包裹，不管你记什么）。想自己控制措辞就在预设里写一次，插件即刻让位。"
+            : "\u2713 这份预设自己写了 " + ipeLedgerTagOpen() + "，插件不再附加任何内容。";
     });
     var need = q("#ipe-ledger-size") || q("#iped-ledger-size");
     if (need) {
@@ -3075,6 +3094,10 @@ function createPanel() {
             '<label>摘要起始标签<input type="text" id="ipe-ledger-rep-open" placeholder="&lt;report&gt;"></label>'+
             '<label>摘要结束标签<input type="text" id="ipe-ledger-rep-close" placeholder="&lt;/report&gt;"></label>'+
             '<label>让它看最近几版账本<select id="ipe-ledger-vn"></select></label>'+
+            '<div class="ipe-hint" style="margin-top:8px">下面两格一般不用动。只有当你的预设本来就在用别的标签（比如 &lt;掛帳&gt;）时，改成一样的就不用套两层。</div>'+
+            '<label>账本起始标签<input type="text" id="ipe-ledger-tag-open" placeholder="&lt;ledger&gt;"></label>'+
+            '<label>账本结束标签<input type="text" id="ipe-ledger-tag-close" placeholder="&lt;/ledger&gt;"></label>'+
+            '<div class="ipe-preview-actions" style="margin-top:2px"><button id="ipe-ledger-tag-reset" class="ipe-btn" type="button">恢复成 &lt;ledger&gt;</button></div>'+
             '<div id="ipe-ledger-size" class="ipe-hint" style="margin-top:6px"></div>'+
         '</div></details>'+
         '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
@@ -3216,6 +3239,10 @@ function createDrawer() {
     h += '<label>摘要起始标签</label><input type="text" id="iped-ledger-rep-open" class="text_pole" placeholder="&lt;report&gt;">';
     h += '<label>摘要结束标签</label><input type="text" id="iped-ledger-rep-close" class="text_pole" placeholder="&lt;/report&gt;">';
     h += '<label>让它看最近几版账本</label><select id="iped-ledger-vn" class="text_pole"></select>';
+    h += '<small style="color:#888">下面两格一般不用动。预设本来就在用别的标签时改成一样的即可。</small>';
+    h += '<label>账本起始标签</label><input type="text" id="iped-ledger-tag-open" class="text_pole" placeholder="&lt;ledger&gt;">';
+    h += '<label>账本结束标签</label><input type="text" id="iped-ledger-tag-close" class="text_pole" placeholder="&lt;/ledger&gt;">';
+    h += '<div style="margin-top:6px"><input type="button" id="iped-ledger-tag-reset" class="menu_button" value="恢复成 &lt;ledger&gt;"></div>';
     h += '<div id="iped-ledger-size" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
     h += '<div style="margin-bottom:6px"><label>自动挂账（每来一楼跑一次） <input type="checkbox" id="iped-ledger-auto"></label></div>';
@@ -3759,6 +3786,26 @@ function bindAll() {
             save(pr[1], String(el.value || ""));
             ipeLedgerRefreshBotEditors();
             ipeLedgerStatus("摘要定界符已更新", "#6ec577");
+        });
+    });
+    [["ipe-ledger-tag-open","ledgerTagOpen"],["iped-ledger-tag-open","ledgerTagOpen"],
+     ["ipe-ledger-tag-close","ledgerTagClose"],["iped-ledger-tag-close","ledgerTagClose"]].forEach(function(pr){
+        var el = q("#" + pr[0]); if (!el) return;
+        el.addEventListener("change", function(){
+            var v = String(el.value || "").trim();
+            if (!v) { ipeLedgerStatus("标签不能留空，已还原", "#c9a227"); ipeLedgerRefreshBotEditors(); return; }
+            save(pr[1], v);
+            ipeLedgerRefreshBotEditors();
+            ipeLedgerStatus("账本标签已改为 " + ipeLedgerTagOpen() + " … " + ipeLedgerTagClose(), "#6ec577");
+        });
+    });
+    ["ipe-ledger-tag-reset","iped-ledger-tag-reset"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.addEventListener("click", function(){
+            save("ledgerTagOpen", IPE_LEDGER_TAG_DEFAULT_OPEN);
+            save("ledgerTagClose", IPE_LEDGER_TAG_DEFAULT_CLOSE);
+            ipeLedgerRefreshBotEditors();
+            ipeLedgerStatus("已恢复成 " + IPE_LEDGER_TAG_DEFAULT_OPEN, "#6ec577");
         });
     });
     ["ipe-ledger-vn","iped-ledger-vn"].forEach(function(id){
