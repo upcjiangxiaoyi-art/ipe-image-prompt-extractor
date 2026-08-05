@@ -736,8 +736,8 @@ function ipeLedgerShowPreview(text, bare) {
     });
     ["ipe-ledger-preview-tip","iped-ledger-preview-tip"].forEach(function(id){
         var el = q("#" + id); if (el) el.textContent = bare
-            ? "副 AI 没写包裹，这是它的原话。可以直接改，改完点采用；也可以在下面补一句再重 roll。"
-            : "可以直接在上面改，改完点采用；不满意就在下面补一句，再点重 roll。";
+            ? "副 AI 没写包裹，这是它的原话。可以直接改，改完点采用；也可以回上面「额外说一句」补一句再重 roll。"
+            : "可以直接在上面改，改完点采用；不满意就回上面「额外说一句」补一句，再点重 roll。";
     });
 }
 function ipeLedgerHidePreview() {
@@ -3091,14 +3091,14 @@ function createPanel() {
             '<button id="ipe-ledger-save" class="ipe-btn ipe-btn-primary" type="button">保存账本</button>'+
             '<button id="ipe-ledger-reload" class="ipe-btn" type="button">重新读取</button>'+
         '</div>'+
-        '<div class="ipe-preview-actions">'+
+        '<label style="margin-top:8px">\uD83D\uDCAC 这次额外说一句（可留空；只对下一次挂账有效）</label>'+
+        '<textarea id="ipe-ledger-extra" rows="2" placeholder="例：伤挂了八轮了，这轮该写好转；念想那层别凑满三条"></textarea>'+
+        '<div class="ipe-preview-actions" style="margin-top:6px">'+
             '<button id="ipe-ledger-run" class="ipe-btn ipe-btn-primary" type="button">\uD83E\uDD16 重新挂账（读最后一楼，先给你看）</button>'+
         '</div>'+
         '<div id="ipe-ledger-preview-box" style="display:none;margin-top:8px">'+
             '<label>\uD83D\uDC40 副 AI 刚才说了什么（可直接改）</label>'+
             '<textarea id="ipe-ledger-preview" rows="10"></textarea>'+
-            '<label style="margin-top:8px">\uD83D\uDCAC 这次额外说一句（只这一发有效，重 roll 时带上）</label>'+
-            '<textarea id="ipe-ledger-extra" rows="2" placeholder="例：伤挂了八轮了，这轮该写好转；念想那层别凑满三条"></textarea>'+
             '<div class="ipe-preview-actions" style="margin-top:6px">'+
                 '<button id="ipe-ledger-adopt" class="ipe-btn ipe-btn-primary" type="button">\u2713 采用</button>'+
                 '<button id="ipe-ledger-reroll" class="ipe-btn" type="button">\uD83C\uDFB2 重 roll</button>'+
@@ -3254,12 +3254,12 @@ function createDrawer() {
     h += '<label>\u26A0\uFE0F User 指令（压过账本与副 AI 的判断）</label>';
     h += '<textarea id="iped-ledger-order" class="text_pole" rows="2" placeholder="例：伤先别好，我还要写"></textarea>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-save" class="menu_button" value="保存账本"><input type="button" id="iped-ledger-reload" class="menu_button" value="重新读取"></div>';
-    h += '<div style="display:flex;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-run" class="menu_button" style="flex:1" value="\uD83E\uDD16 重新挂账（读最后一楼）"></div>';
+    h += '<label>\uD83D\uDCAC 这次额外说一句（可留空；只对下一次挂账有效）</label>';
+    h += '<textarea id="iped-ledger-extra" class="text_pole" rows="2" placeholder="例：伤挂了八轮了，这轮该写好转"></textarea>';
+    h += '<div style="display:flex;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-run" class="menu_button" style="flex:1" value="\uD83E\uDD16 重新挂账（读最后一楼，先给你看）"></div>';
     h += '<div id="iped-ledger-preview-box" style="display:none;margin-top:8px">';
     h += '<label>\uD83D\uDC40 副 AI 刚才说了什么（可直接改）</label>';
     h += '<textarea id="iped-ledger-preview" class="text_pole" rows="8"></textarea>';
-    h += '<label>\uD83D\uDCAC 这次额外说一句（只这一发有效）</label>';
-    h += '<textarea id="iped-ledger-extra" class="text_pole" rows="2" placeholder="例：伤挂了八轮了，这轮该写好转"></textarea>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-adopt" class="menu_button" value="\u2713 采用"><input type="button" id="iped-ledger-reroll" class="menu_button" value="\uD83C\uDFB2 重 roll"><input type="button" id="iped-ledger-preview-close" class="menu_button" value="收起"></div>';
     h += '<div id="iped-ledger-preview-tip" style="color:#888;font-size:11px;margin-top:4px"></div>';
     h += '</div>';
