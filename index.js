@@ -799,7 +799,7 @@ function ipeLedgerClearExtra() {
 }
 
 async function ipeLedgerRunManual() {
-    if (ipeLedgerBusy) { ipeLedgerStatus("上一次还没跑完", "#c9a227"); return; }
+    if (ipeLedgerBusy) { ipeLedgerStatus("上一次还在跑，等它一下", "#c9a227"); return; }
     var msg = null;
     try {
         var chat = ctx().chat;
@@ -810,8 +810,8 @@ async function ipeLedgerRunManual() {
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
 
-    ipeLedgerBusy = true;
-    ipeLedgerStatus("正在挂账…", "#6ec577");
+    ipeLedgerSetBusy(true);
+    ipeLedgerStatus("正在挂账…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var ex  = ipeLedgerExtraOnce();
         var out = await ipeLedgerCallAPI(msg.mes, ex);
@@ -822,12 +822,28 @@ async function ipeLedgerRunManual() {
     } catch(e) {
         ipeLedgerStatus("挂账失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
     } finally {
-        ipeLedgerBusy = false;
+        ipeLedgerSetBusy(false);
     }
 }
 
 var ipeLedgerBusy = false;
 var ipeLedgerFailStreak = 0;
+var ipeLedgerStaleWarned = false;
+
+/* 副 AI 在跑的这几秒，贴耳里还是上一份账本。
+   这一发要是现在发出去，Gemini 读到的就落后一楼。
+   拦不住，但必须让人看得见——所以球转起来、状态行说话、真发了还再喊一次。 */
+function ipeLedgerSetBusy(on) {
+    ipeLedgerBusy = !!on;
+    if (on) ipeLedgerStaleWarned = false;
+    try {
+        var ball = q("#ipe-ball");
+        if (ball) {
+            if (on) ball.classList.add("ipe-ledger-busy");
+            else ball.classList.remove("ipe-ledger-busy");
+        }
+    } catch(e) {}
+}
 var ipeLedgerPending = null;      // 缩水拦截暂存，点「强制采用」才落盘
 
 function ipeLedgerShowForce(on) {
@@ -852,10 +868,10 @@ async function ipeLedgerRun(targetIdx, silent) {
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
 
-    ipeLedgerBusy = true;
+    ipeLedgerSetBusy(true);
     ipeLedgerPending = null;
     ipeLedgerShowForce(false);
-    ipeLedgerStatus("正在挂账…", "#6ec577");
+    ipeLedgerStatus("自动挂账中…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var out = await ipeLedgerCallAPI(msg.mes);
         var got = ipeLedgerExtract(out);
@@ -907,7 +923,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         ipeLedgerFailStreak++;
         ipeLedgerStatus("挂账失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
     } finally {
-        ipeLedgerBusy = false;
+        ipeLedgerSetBusy(false);
     }
 }
 
@@ -4078,6 +4094,23 @@ function bindAll() {
             console.log("[IPE] 已绑定换聊天事件");
         }
     } catch(e) { console.log("[IPE] 换聊天事件绑定跳过"); }
+
+    // 账本还在跑就发了下一条 → 这一发的贴耳落后一楼，喊出来
+    try {
+        var cs = ctx();
+        if (cs.eventSource && cs.event_types) {
+            ["GENERATION_STARTED","MESSAGE_SENT"].forEach(function(evName){
+                var ev = cs.event_types[evName];
+                if (!ev) return;
+                cs.eventSource.on(ev, function(){
+                    if (!ipeLedgerBusy || ipeLedgerStaleWarned) return;
+                    ipeLedgerStaleWarned = true;
+                    ipeLedgerStatus("\u26A0\uFE0F 账本还没记完你就发了——这一发 Gemini 读到的是上一楼的账本。"
+                        + "记完会自动补上，下一发就是新的。", "#c9a227");
+                });
+            });
+        }
+    } catch(e) {}
 
     // 每来一楼刷新一次楼层年龄（独立监听，不动生图那条 onMsgReceived）
     try {
