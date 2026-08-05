@@ -192,34 +192,38 @@
 
 
 /* ============================================================
-   🐚 v1.9.3 右手余量 · UI-only
-   手机上右手拇指常在屏幕右缘活动，按钮贴边容易误触；
-   iOS 侧滑返回也在右缘。面板右侧留一指缝（沿用 Arrebol 的 20px），
-   操作行再多留 6px，滑动时不会蹭到按钮。
+   🐚 v1.9.4 右手余量 · UI-only
+   手机上右手拇指的活动带大约占屏幕右侧 1/4，滑动时会蹭到按钮；
+   iOS 侧滑返回也在同一条边。
+
+   ★ 要调宽窄只改下面这一个数：--ipe-thumb  ★
+     太窄（还会误触）→ 调大；按钮太挤 → 调小。
    ============================================================ */
 
+.ipe-panel {
+    --ipe-thumb: 12px;          /* 桌面端不需要留 */
+}
+
 .ipe-preview-actions {
-    padding-right: 6px;
+    padding-right: var(--ipe-thumb);
 }
 .ipe-tabs {
-    padding-right: 18px;
+    padding-right: calc(var(--ipe-thumb) * 0.7);
 }
 
 @media (max-width: 480px) {
-    /* 右缘让出一指缝：拇指滑动区与 iOS 侧滑返回都在这儿 */
     .ipe-panel {
+        --ipe-thumb: 60px;      /* ← 手机端拇指余量。加上区块 16px + 面板 20px ≈ 屏幕右缘 96px */
         left: 8px;
         right: 20px;
     }
-    /* 按钮加高，指腹落点更稳 */
-    .ipe-btn {
-        min-height: 38px;
-    }
-    .ipe-tab {
-        min-height: 40px;
-    }
-    .ipe-preview-actions {
-        padding-right: 8px;
-        gap: 10px;
+    /* 指腹落点加大，少一点擦边 */
+    .ipe-btn  { min-height: 40px; }
+    .ipe-tab  { min-height: 42px; }
+    .ipe-preview-actions { gap: 10px; }
+
+    /* 抽屉里的操作行同样留缝 */
+    #ipe-drawer [data-ipe-tab] > div[style*="display:flex"] {
+        padding-right: 44px !important;
     }
 }

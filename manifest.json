@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "ripple & GPT & Claude",
-  "version": "1.9.3",
-  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.3：重新挂账移到账本编辑区、操作键留出右手余量与更大点击面；1.9.2 的副 AI 管线、User 指令、预设系统不变；生图管线一字未动。"
+  "version": "1.9.4",
+  "description": "🐚 小海螺（Info & Prompt Extractor）｜生图提取 + 挂账双管线。1.9.4：重新挂账移到账本编辑区、操作键右手余量改为变量 --ipe-thumb（手机端 60px，一处可调），点击面加大；1.9.2 的副 AI 管线、User 指令、预设系统不变；生图管线一字未动。"
 }
