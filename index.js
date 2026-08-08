@@ -837,7 +837,7 @@ function ipeLedgerSetBusy(on) {
     ipeLedgerBusy = !!on;
     if (on) ipeLedgerStaleWarned = false;
     try {
-        var ball = q("#ipe-ball");
+        var ball = q("#ipe-chat-quick-entry");
         if (ball) {
             if (on) ball.classList.add("ipe-ledger-busy");
             else ball.classList.remove("ipe-ledger-busy");
@@ -2887,7 +2887,8 @@ function createChatQuickButton() {
     var btn = d.createElement("button");
     btn.id = "ipe-chat-quick-entry";
     btn.type = "button";
-    btn.textContent = "🐚 IPE";
+    /* 月灰入米霜 · SVG 胶囊皮肤（按钮外壳透明，视觉全由 SVG 承担） */
+    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="7" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.7"><animate attributeName="r" values="6;16" dur="3.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="3.4s" repeatCount="indefinite"/></circle><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
     btn.title = "可移动 IPE 快捷入口：拖动移动，点击打开小面板";
 
     function imp(k, v) {
@@ -2911,15 +2912,16 @@ function createChatQuickButton() {
     imp("gap", "4px");
     imp("height", "34px");
     imp("min-height", "34px");
-    imp("padding", "0 11px");
+    imp("padding", "0");
     imp("border-radius", "999px");
-    imp("border", "1px solid rgba(255,255,255,.32)");
-    imp("background", "linear-gradient(135deg, rgba(76,90,220,.96), rgba(36,154,210,.96))");
+    imp("border", "none");
+    imp("background", "transparent");
     imp("color", "#ffffff");
     imp("font-size", "13px");
     imp("font-weight", "700");
     imp("line-height", "1");
-    imp("box-shadow", "0 8px 22px rgba(0,0,0,.35)");
+    btn.style.boxShadow = "none"; /* 不带 important：给脉冲动画让路 */
+    imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
     imp("z-index", "2147483647");
     imp("cursor", "grab");
     imp("pointer-events", "auto");
@@ -4218,7 +4220,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
     if (retryAttempt === 0) ipeClearApiRetry();
 
     processing = true;
-    var ball = q("#ipe-ball"); if(ball)ball.classList.add("processing");
+    var ball = q("#ipe-chat-quick-entry"); if(ball)ball.classList.add("processing");
     setStatus(retryAttempt > 0 ? "正在自动重试提取…" : "正在提取…","#6ec577"); setBtns(false,false);
     try {
         var desc = await callAPI(text, supplement||"");
@@ -4275,7 +4277,7 @@ function onInject() {
         var result = injectDescToMessage("", currentIdx);
         if (result && result.injected) {
             setStatus("已注入 ✓","#6ec577"); setBtns(false,false);
-            var ball=q("#ipe-ball"); if(ball)ball.classList.remove("has-result");
+            var ball=q("#ipe-chat-quick-entry"); if(ball)ball.classList.remove("has-result");
             var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
             if(s1)s1.value=""; if(s2)s2.value="";
             console.log("[IPE] 注入 #"+currentIdx);
