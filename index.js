@@ -2910,8 +2910,8 @@ function createChatQuickButton() {
     imp("align-items", "center");
     imp("justify-content", "center");
     imp("gap", "4px");
-    imp("height", "34px");
-    imp("min-height", "34px");
+    imp("height", "30px");
+    imp("min-height", "30px");
     imp("padding", "0");
     imp("border-radius", "999px");
     imp("border", "none");

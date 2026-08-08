@@ -500,3 +500,28 @@
     box-shadow: 0 0 4px rgba(110, 197, 119, .6);
     margin-left: 4px; align-self: center; flex: none;
 }
+
+
+/* ============================================================
+   v2.5.2 生图小灯 + 灯语统一
+   泊位 overflow:hidden 裁外扩光圈，生图状态此前在泊内不可见。
+   补一粒月灰呼吸灯（右侧）；与 has-result 绿点共用右位，
+   本规则在后、同特异性，生图进行中优先显示月灰灯。
+   灯语：工作中的灯呼吸（记账蓝/生图月灰/红霞胭雾），结果绿点常亮。
+   ============================================================ */
+#ipe-chat-quick-entry.processing::after {
+    content: "";
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #B0B1CF;
+    box-shadow: 0 0 5px rgba(176, 177, 207, .85);
+    margin-left: 4px; align-self: center; flex: none;
+    animation: ipe-lamp-breathe 1.2s ease-in-out infinite;
+}
+@keyframes ipe-lamp-breathe {
+    0%, 100% { opacity: .35; }
+    50%      { opacity: 1; }
+}
+/* 记账蓝灯同步改为呼吸 */
+#ipe-chat-quick-entry.ipe-ledger-busy::before {
+    animation: ipe-lamp-breathe 1.2s ease-in-out infinite;
+}
