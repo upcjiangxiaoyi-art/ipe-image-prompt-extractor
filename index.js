@@ -321,7 +321,20 @@ var IPE_LEDGER_META_KEY  = "ipe_ledger_v2";
 var IPE_LEDGER_META_V1   = "ipe_ledger_v1";      // 保留不删，回滚保险
 var IPE_LEDGER_LS_KEY    = "ipe_ledger_mirror_v2";
 var IPE_LEDGER_LS_V1     = "ipe_ledger_mirror_v1";
-var IPE_LEDGER_VER_MAX   = 10;
+var IPE_LEDGER_VER_MAX   = 10;               // 兜底极限；实际库存跟随旋钮，见 ipeLedgerVerMax()
+
+/* 库存深度 = 界面那个 1~5 旋钮。旋钮是"总账数"（历史 + 现任），
+   所以历史区上限 = 旋钮 - 1。一层一账、滚动淘汰，删太多全碎就重建。 */
+function ipeLedgerVerMax() {
+    var n = 3;
+    try {
+        var v = Number(cfg().ledgerVersionsN);
+        if (Number.isFinite(v)) n = v;
+    } catch(e) {}
+    if (n < 1) n = 1;
+    if (n > 5) n = 5;
+    return n - 1;
+}
 var IPE_LEDGER_REPORT_CAP = 60000;   // 真管事的那道闸；2000 楼旋钮只是粗筛
 var IPE_LEDGER_SHRINK    = 0.4;                   // 新文本 < 旧版 40% 视为疑似事故
 
@@ -374,16 +387,19 @@ function ipeLedgerNormalize(raw) {
     var o = (raw && typeof raw === "object") ? raw : {};
     var vs = Array.isArray(o.versions) ? o.versions : [];
     var out = [];
-    for (var i = 0; i < vs.length && out.length < IPE_LEDGER_VER_MAX; i++) {
+    var cap = ipeLedgerVerMax();
+    var seenFloor = {};                               // 一层一账：同楼多版只留最新（数组头部即最新）
+    for (var i = 0; i < vs.length && out.length < cap; i++) {
         var v = vs[i];
         if (!v) continue;
         var t = String(v.text == null ? "" : v.text);
         if (!t.trim()) continue;
-        out.push({
-            floor: Number.isFinite(Number(v.floor)) ? Number(v.floor) : -1,
-            ts:    Number.isFinite(Number(v.ts))    ? Number(v.ts)    : 0,
-            text:  t
-        });
+        var f = Number.isFinite(Number(v.floor)) ? Number(v.floor) : -1;
+        if (f >= 0) {
+            if (seenFloor[f]) continue;
+            seenFloor[f] = true;
+        }
+        out.push({ floor: f, ts: Number.isFinite(Number(v.ts)) ? Number(v.ts) : 0, text: t });
     }
     return {
         v: 2,
@@ -470,16 +486,17 @@ function ipeLedgerSave(state) {
     return { meta: metaOk, ls: lsOk };
 }
 
-// 落新版：旧版入历史，新文本成为 current
+// 落新版：一层一账。上一楼的账入历史；同一楼重挂（重roll后再采用）直接替换，旧稿不留。
 function ipeLedgerCommit(text) {
+    ipeLedgerReconcile(ipeFloorNo(), { silent: true });   // 落账前先对账，底下全是活楼
     var st = ipeLedgerRead();
     var old = String(st.current || "");
-    if (old.trim()) {
-        st.versions.unshift({ floor: st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo(), ts: Date.now(), text: old });
-        st.versions = st.versions.slice(0, IPE_LEDGER_VER_MAX);
+    var nowFloor = ipeFloorNo();
+    if (old.trim() && st.lastFloor >= 0 && st.lastFloor < nowFloor) {
+        st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
     }
     st.current   = String(text || "");
-    st.lastFloor = ipeFloorNo();
+    st.lastFloor = nowFloor;
     return ipeLedgerSave(st);
 }
 
@@ -489,10 +506,69 @@ function ipeLedgerRollback(idx) {
     if (!v) return false;
     var old = String(st.current || "");
     st.versions.splice(idx, 1);
-    if (old.trim()) st.versions.unshift({ floor: st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo(), ts: Date.now(), text: old });
-    st.versions = st.versions.slice(0, IPE_LEDGER_VER_MAX);
+    // 一层一账：现任与目标不同楼才把现任送回历史，同楼就是替换
+    if (old.trim() && st.lastFloor >= 0 && st.lastFloor !== v.floor) {
+        st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
+    }
     st.current = v.text;
+    if (v.floor >= 0) st.lastFloor = v.floor;         // 账跟楼走，回滚后楼号也跟着回去
     ipeLedgerSave(st);
+    return true;
+}
+
+/* ============================================================
+   🐚 楼层对账 · 账跟楼走，楼没了账就碎
+   limit = 允许存活的最大楼号。floor > limit 的版本（含现任）粉碎——真删，不留残余。
+   现任账本永远是幸存版本里楼号最大的那份；全军覆没就回到"第一次挂账"，
+   下轮副 AI 凭实时上下文 + report 重建。
+   删楼场景 limit = 当前楼层数，挂账/刷新时自动跑，用户零操作；
+   重roll 场景由事件或兜底钮带更小的 limit 进来（连当前楼的账一起碎）。
+   ============================================================ */
+function ipeLedgerReconcile(limit, opts) {
+    opts = opts || {};
+    try {
+        if (!ipeChatKeyReady()) return false;          // 聊天没就绪不动账，防初始化竞态误杀
+        var c = ctx();
+        if (!c || !Array.isArray(c.chat)) return false;
+    } catch(e0) { return false; }
+    if (!Number.isFinite(Number(limit)) || Number(limit) < 0) limit = ipeFloorNo();
+    limit = Number(limit);
+
+    var st = ipeLedgerRead();
+    var smashed = 0;
+
+    var keep = [];
+    for (var i = 0; i < st.versions.length; i++) {
+        var v = st.versions[i];
+        if (v.floor >= 0 && v.floor > limit) { smashed++; continue; }
+        keep.push(v);
+    }
+    st.versions = keep;
+
+    var demoted = false;
+    if (String(st.current || "").trim() && st.lastFloor > limit) {
+        st.current = ""; st.lastFloor = -1; smashed++; demoted = true;
+        var bi = -1, bf = -1;                          // 幸存者里楼号最大的顶上当现任
+        for (var k = 0; k < st.versions.length; k++) {
+            if (st.versions[k].floor > bf) { bf = st.versions[k].floor; bi = k; }
+        }
+        if (bi >= 0) {
+            var v2 = st.versions.splice(bi, 1)[0];
+            st.current = v2.text;
+            st.lastFloor = v2.floor;
+        }
+    }
+
+    if (!smashed) return false;
+    ipeLedgerSave(st);
+    try { console.log("[IPE] 楼层对账", { limit: limit, smashed: smashed, currentFloor: st.lastFloor }); } catch(eL) {}
+    if (!opts.silent) {
+        var msg = "楼层对账：碎掉 " + smashed + " 份已不存在楼层的账";
+        if (demoted) msg += (st.lastFloor >= 0
+            ? "，已自动回退到第 " + st.lastFloor + " 楼的账"
+            : "，账本已清空，下轮挂账会重建");
+        ipeLedgerStatus(msg, "#c9a227");
+    }
     return true;
 }
 
@@ -631,6 +707,7 @@ function ipeLedgerStripImageTag(text) {
 }
 
 function ipeLedgerBuildUser(text, extra) {
+    try { ipeLedgerReconcile(ipeFloorNo(), { silent: true }); } catch(eRec) {}   // 副 AI 只许拿活楼的账当底稿
     var st = ipeLedgerRead();
     var u = "";
     var note = ipeLedgerNoteValue().trim();
@@ -1311,6 +1388,7 @@ function ipeLedgerRefreshBotEditors() {
 
 /* 落盘 → 贴耳 → 刷预览 → 楼内重绘，一条龙 */
 function ipeLedgerSync() {
+    try { ipeLedgerReconcile(ipeFloorNo()); } catch(eRec) {}   // 先对账再贴耳，幽灵账进不了 prompt
     ipeLedgerApplyEP();
     ipeLedgerRefreshEditors();
     ipeLedgerRefreshEpPreview();
@@ -1324,11 +1402,9 @@ function ipeLedgerSaveFromEditor(which) {
     if (!el) { ipeLedgerStatus("找不到编辑框", "#d4726a"); return; }
     var st = ipeLedgerRead();
     var next = String(el.value || "");
-    if (next !== String(st.current || "") && String(st.current || "").trim()) {
-        st.versions.unshift({ floor: st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo(), ts: Date.now(), text: st.current });
-        st.versions = st.versions.slice(0, IPE_LEDGER_VER_MAX);
-    }
+    // 一层一账：手动改账 = 修订"这一楼"的账，原楼号不变、不产生同楼旧版
     st.current = next;
+    if (st.lastFloor < 0 && next.trim()) st.lastFloor = ipeFloorNo();
     if (oe) st.order = String(oe.value || "").trim();
     var r = ipeLedgerSave(st);
     ipeLedgerSync();
@@ -3145,6 +3221,9 @@ function createPanel() {
         '<div class="ipe-preview-actions" style="margin-top:6px">'+
             '<button id="ipe-ledger-run" class="ipe-btn ipe-btn-primary" type="button">\uD83E\uDD16 重新挂账（读最后一楼，先给你看）</button>'+
         '</div>'+
+        '<div class="ipe-preview-actions" id="ipe-ledger-reconcile-box" style="display:none;margin-top:6px">'+
+            '<button id="ipe-ledger-reconcile" class="ipe-btn" type="button">\uD83D\uDD04 重roll完点我对账（删楼不用管）</button>'+
+        '</div>'+
         '<div id="ipe-ledger-preview-box" style="display:none;margin-top:8px">'+
             '<label>\uD83D\uDC40 副 AI 刚才说了什么（可直接改）</label>'+
             '<textarea id="ipe-ledger-preview" rows="10"></textarea>'+
@@ -3166,7 +3245,7 @@ function createPanel() {
                 '<button id="ipe-ledger-rollback" class="ipe-btn" type="button">换回这版</button>'+
                 '<button id="ipe-ledger-view" class="ipe-btn" type="button">先看看</button>'+
             '</div>'+
-            '<div class="ipe-hint">最近 10 次改动都留着。</div>'+
+            '<div class="ipe-hint">一层楼一份账，留几份跟着上面「读几轮」的旋钮走。删楼/重roll后楼没了的账会自动碎掉，不用你管。</div>'+
         '</div></details>'+
         '<div class="ipe-hint">账本存在本聊天里（chat_metadata 主档 + 本地镜像）。切换聊天会各用各的。</div>'+
         '<hr style="border:none;border-top:1px solid rgba(255,255,255,.10);margin:12px 0">'+
@@ -3306,6 +3385,7 @@ function createDrawer() {
     h += '<label>\uD83D\uDCAC 这次额外说一句（可留空；只对下一次挂账有效）</label>';
     h += '<textarea id="iped-ledger-extra" class="text_pole" rows="2" placeholder="例：伤挂了八轮了，这轮该写好转"></textarea>';
     h += '<div style="display:flex;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-run" class="menu_button" style="flex:1" value="\uD83E\uDD16 重新挂账（读最后一楼，先给你看）"></div>';
+    h += '<div id="iped-ledger-reconcile-box" style="display:none;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-reconcile" class="menu_button" style="width:100%" value="\uD83D\uDD04 重roll完点我对账（删楼不用管）"></div>';
     h += '<div id="iped-ledger-preview-box" style="display:none;margin-top:8px">';
     h += '<label>\uD83D\uDC40 副 AI 刚才说了什么（可直接改）</label>';
     h += '<textarea id="iped-ledger-preview" class="text_pole" rows="8"></textarea>';
@@ -3941,6 +4021,24 @@ function bindAll() {
         var el = q("#" + id); if (!el) return;
         el.addEventListener("click", function(){ ipeLedgerRunManual(); });
     });
+    // 旧酒馆兜底钮：没有 MESSAGE_SWIPED 事件才现身；狠版判定，连当前楼的账一起碎
+    try {
+        var hasSwipeEv = false;
+        try { var cEv = ctx(); hasSwipeEv = !!(cEv.eventSource && cEv.event_types && cEv.event_types.MESSAGE_SWIPED); } catch(eHs) {}
+        if (!hasSwipeEv) {
+            ["ipe-ledger-reconcile-box","iped-ledger-reconcile-box"].forEach(function(id){
+                var el = q("#" + id); if (el) el.style.display = "";
+            });
+        }
+        ["ipe-ledger-reconcile","iped-ledger-reconcile"].forEach(function(id){
+            var el = q("#" + id); if (!el) return;
+            el.addEventListener("click", function(){
+                var changed = ipeLedgerReconcile(Math.max(0, ipeFloorNo() - 1));   // limit=尾楼-1：尾楼的账必碎
+                ipeLedgerSync();
+                if (!changed) ipeLedgerStatus("对过了，账和楼是齐的 \u2713", "#6ec577");
+            });
+        });
+    } catch(eRb) {}
     // 预览三件套：采用 / 重 roll / 收起
     [["ipe-ledger-adopt","panel"],["iped-ledger-adopt","drawer"]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
@@ -4097,6 +4195,31 @@ function bindAll() {
         }
     } catch(e) { console.log("[IPE] 换聊天事件绑定跳过"); }
 
+    // 删楼/重roll → 账跟楼走：楼没了账当场碎，自动回退到幸存的最新楼（新酒馆事件直连）
+    try {
+        var cd = ctx();
+        if (cd.eventSource && cd.event_types) {
+            if (cd.event_types.MESSAGE_DELETED) {
+                cd.eventSource.on(cd.event_types.MESSAGE_DELETED, function(){
+                    // 400ms 等 chat 数组换完再数楼——时序缓冲照抄小红霞踩过的坑
+                    setTimeout(function(){ try { ipeLedgerReconcile(ipeFloorNo()); ipeLedgerSync(); } catch(eD) {} }, 400);
+                });
+            }
+            if (cd.event_types.MESSAGE_SWIPED) {
+                cd.eventSource.on(cd.event_types.MESSAGE_SWIPED, function(mesId){
+                    // 重roll第 i 楼（0-based）→ 那楼换了灵魂，它的账（floor=i+1）连同更高楼一起碎 → limit=i
+                    var i = Number(mesId);
+                    var limit = (Number.isFinite(i) && i >= 0) ? i : Math.max(0, ipeFloorNo() - 1);
+                    setTimeout(function(){ try { ipeLedgerReconcile(limit); ipeLedgerSync(); } catch(eS) {} }, 400);
+                });
+            }
+            console.log("[IPE] 挂账楼层对账已绑定", {
+                del:   !!cd.event_types.MESSAGE_DELETED,
+                swipe: !!cd.event_types.MESSAGE_SWIPED
+            });
+        }
+    } catch(e) { console.log("[IPE] 楼层对账事件绑定跳过"); }
+
     // 账本还在跑就发了下一条 → 这一发的贴耳落后一楼，喊出来
     try {
         var cs = ctx();
@@ -4105,6 +4228,8 @@ function bindAll() {
                 var ev = cs.event_types[evName];
                 if (!ev) return;
                 cs.eventSource.on(ev, function(){
+                    // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
+                    try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true })) ipeLedgerApplyEP(); } catch(eR) {}
                     if (!ipeLedgerBusy || ipeLedgerStaleWarned) return;
                     ipeLedgerStaleWarned = true;
                     ipeLedgerStatus("\u26A0\uFE0F 账本还没记完你就发了——这一发 Gemini 读到的是上一楼的账本。"
