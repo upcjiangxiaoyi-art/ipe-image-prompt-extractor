@@ -4290,11 +4290,23 @@ function injectDescToMessage(desc, targetIdx) {
 function onMsgReceived(idx) {
     if (!cfg().enabled) return;
     try {
-        var msg=ctx().chat[idx];
-        if(!msg||msg.is_user) return;
+        var chat = ctx().chat || [];
+        var i = Number(idx);
+        var msg = (Number.isFinite(i) && i >= 0) ? chat[i] : null;
+        if (msg && msg.is_user) return;               // 酒馆明确点名 user 楼：不提取，维持原行为
+        if (!msg) {
+            // 有的酒馆/套壳发事件不带楼号（或带的不是数字）——参数靠不住就自己找最后一条 AI 楼
+            i = -1;
+            for (var k = chat.length - 1; k >= 0; k--) {
+                var m = chat[k];
+                if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { i = k; msg = m; break; }
+            }
+            if (i < 0 || !msg) return;
+            try { console.log("[IPE] 生图：事件没带楼号（收到:", idx, "），已自行定位第", i + 1, "楼"); } catch(eLg) {}
+        }
 
-        pendingAutoIdx = idx;
-        currentIdx = idx;
+        pendingAutoIdx = i;
+        currentIdx = i;
 
         if (autoTimer) clearTimeout(autoTimer);
 
