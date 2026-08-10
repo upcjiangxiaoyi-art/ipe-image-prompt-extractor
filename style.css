@@ -525,3 +525,180 @@
 #ipe-chat-quick-entry.ipe-ledger-busy::before {
     animation: ipe-lamp-breathe 1.2s ease-in-out infinite;
 }
+/* ============================================================
+   🐚 v2.7「晴空橘光」· UI-only · 只作用于开灯皮 .ipe-mist
+   一半清冷一半暖：天空蓝 #AFCEE1 → 奶油橘 #F2CA90。
+   上半天空，中段过白垫内容，下半落进奶油橘的黄昏。
+   语义分工：看的（背景/结构/正文）是清冷蓝灰，
+   按的（主按钮/开关/选中态/工作灯）是暖橘——冷暖即状态。
+   沿用 v2.2 的可读性纪律：头部深蓝段拉到 10%，白字全程 ≥4:1。
+   追加覆盖层，旧皮一行未动，删掉本段即回滚。
+   ============================================================ */
+
+.ipe-panel.ipe-mist {
+    background: linear-gradient(180deg,
+        #5E86A6 0%,
+        #6389A9 6%,
+        #7396B2 11%,
+        #9FB9CC 17%,
+        #C9DAE6 24%,
+        #EDF3F7 36%,
+        #FBF7F0 54%,
+        #F8ECD9 76%,
+        #F4E1C4 100%);
+    border: 1px solid rgba(94,134,166,.42);
+    color: #47555F;
+    box-shadow:
+        0 12px 44px rgba(88,106,124,.26),
+        0 0 0 1px rgba(255,255,255,.5) inset;
+}
+
+/* ---- 头部：坐在天空段，白字 ---- */
+.ipe-mist .ipe-panel-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(255,255,255,.26);
+}
+.ipe-mist .ipe-panel-title {
+    color: #FFFFFF;
+    text-shadow: 0 1px 3px rgba(46,70,92,.45);
+}
+.ipe-mist .ipe-panel-header .ipe-btn,
+.ipe-mist .ipe-panel-header button {
+    background: rgba(255,255,255,.30);
+    border-color: rgba(255,255,255,.52);
+    color: #FFFFFF;
+}
+.ipe-mist .ipe-panel-header .ipe-btn:hover {
+    background: rgba(255,255,255,.5);
+}
+
+/* ---- 总开关：开 = 奶油橘实心，关 = 蓝灰空壳。生死一眼可辨 ---- */
+.ipe-mist .ipe-toggle-slider {
+    background: rgba(94,134,166,.30);
+}
+.ipe-mist .ipe-toggle-slider::before {
+    background: #F7F9FA;
+    box-shadow: 0 1px 3px rgba(70,82,94,.30);
+}
+.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider {
+    background: rgba(226,178,121,.55);
+}
+.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider::before {
+    background: #D9A05B;
+    box-shadow: 0 1px 4px rgba(178,127,66,.5);
+}
+
+/* ---- Tab 条：白底；选中态换暖字 = 现在住在哪一页 ---- */
+.ipe-panel.ipe-mist .ipe-tab {
+    border: 1px solid rgba(255,255,255,.72);
+    background: rgba(255,255,255,.74);
+    color: #47606F;
+    text-shadow: none;
+}
+.ipe-panel.ipe-mist .ipe-tab:hover {
+    background: rgba(255,255,255,.85);
+}
+.ipe-panel.ipe-mist .ipe-tab.ipe-tab-on {
+    background: #FFFFFF;
+    border-color: #FFFFFF;
+    color: #B27F42;
+    box-shadow: 0 2px 12px rgba(120,96,64,.22);
+}
+
+/* ---- 区块 ---- */
+.ipe-mist .ipe-section {
+    border-bottom: 1px solid rgba(94,134,166,.14);
+}
+.ipe-mist .ipe-section-header { color: #5E7A92; }
+.ipe-mist .ipe-section-header:hover { color: #3C4A57; }
+
+/* ---- 输入区：白底压渐变，任何位置读得清 ---- */
+.ipe-mist .ipe-section-body input[type="text"],
+.ipe-mist .ipe-section-body input[type="password"],
+.ipe-mist .ipe-section-body textarea,
+.ipe-mist .ipe-section-body select {
+    background: rgba(255,255,255,.92);
+    border: 1px solid rgba(94,134,166,.32);
+    color: #3C4A57;
+}
+.ipe-mist .ipe-section-body input:focus,
+.ipe-mist .ipe-section-body textarea:focus {
+    border-color: #D9A05B;               /* 落笔的地方点一盏暖灯 */
+    background: #FFFFFF;
+}
+.ipe-mist .ipe-section-body label { color: #5E6E7C; }
+.ipe-mist .ipe-hint { color: #7C8B99; }
+
+/* ---- 状态行：工作中 = 暖橘，出事 = 砖红 ---- */
+.ipe-mist .ipe-preview-status { color: rgba(74,86,98,.55); }
+.ipe-mist .ipe-preview-status.active { color: #B27F42; }
+.ipe-mist .ipe-preview-status.error  { color: #B8756C; }
+
+/* ---- 按钮：常规 = 晴空玻璃，主动作 = 奶油橘 ---- */
+.ipe-mist .ipe-btn {
+    background: rgba(255,255,255,.82);
+    border: 1px solid rgba(94,134,166,.32);
+    color: #52616D;
+}
+.ipe-mist .ipe-btn:hover:not(:disabled) {
+    background: #FFFFFF;
+    color: #3C4A57;
+}
+.ipe-mist .ipe-btn-primary {
+    background: linear-gradient(135deg, #E7B87E, #CE9C61);
+    border-color: rgba(206,156,97,.72);
+    color: #FFFFFF;
+    text-shadow: 0 1px 2px rgba(140,96,42,.28);
+}
+.ipe-mist .ipe-btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #EFC48D, #D9A96E);
+    color: #FFFFFF;
+}
+
+/* ---- 折叠区 ---- */
+.ipe-panel.ipe-mist .ipe-fold {
+    border: 1px solid rgba(94,134,166,.22);
+    background: rgba(255,255,255,.6);
+}
+.ipe-panel.ipe-mist .ipe-fold > summary { color: #62717F; }
+.ipe-panel.ipe-mist .ipe-fold[open] > summary { color: #3C4A57; }
+.ipe-panel.ipe-mist .ipe-fold[open] { background: rgba(255,255,255,.82); }
+
+/* ---- 只读区块 ---- */
+.ipe-panel.ipe-mist .ipe-ledger-age {
+    border: 1px solid rgba(94,134,166,.22);
+    background: rgba(255,255,255,.8);
+    color: #47555F;
+}
+.ipe-mist .ipe-anchor-guide {
+    background: rgba(255,255,255,.7);
+    border: 1px solid rgba(94,134,166,.22);
+    color: #4A5763;
+}
+.ipe-mist .ipe-anchor-guide-title { color: #3C4A57; }
+.ipe-mist .ipe-footer {
+    border-top: 1px solid rgba(178,127,66,.20);   /* 页脚已经坐进奶油橘段 */
+    color: #9A8468;
+}
+
+/* ---- 悬浮球：一颗蓝橘小行星 ---- */
+.ipe-ball.ipe-mist {
+    background: linear-gradient(150deg, rgba(175,206,225,.95), rgba(255,255,255,.92) 45%, rgba(242,202,144,.95));
+    border: 1px solid rgba(255,255,255,.74);
+    box-shadow: 0 3px 14px rgba(112,118,124,.3);
+}
+
+@media (max-width: 480px) {
+    /* 手机面板更矮：天空段与黄昏段都相应拉长（照抄 v2.2 的血泪比例） */
+    .ipe-panel.ipe-mist {
+        background: linear-gradient(180deg,
+            #5E86A6 0%,
+            #6389A9 8%,
+            #7C9CB6 14%,
+            #B4C9D9 21%,
+            #E4EDF3 32%,
+            #FAF5EC 48%,
+            #F7EAD5 70%,
+            #F4E1C4 100%);
+    }
+}
