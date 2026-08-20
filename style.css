@@ -702,3 +702,1155 @@
             #F4E1C4 100%);
     }
 }
+
+
+/* ============================================================
+   🐚 v2.7「潮汐珠光」· UI-only
+   浅色：潮雾蓝 × 贝母紫 × 月砂米黄。
+   深色：海沟黑蓝 × 冷靛紫 × 微光青。
+   只接管既有面板、抽屉与快捷入口的外观；ID、布局挂点、事件、
+   数据与两条业务管线保持原样。所有大面积光感均为静态渐变，
+   不使用实时背景模糊或循环位移动画。
+   ============================================================ */
+
+/* ---------- 深海默认令牌 ---------- */
+#ipe-panel {
+    --ipe-ui-ink: #dce9f3;
+    --ipe-ui-muted: #9cafc1;
+    --ipe-ui-faint: #6f8498;
+    --ipe-ui-line: rgba(137, 178, 211, .13);
+    --ipe-ui-line-strong: rgba(137, 178, 211, .24);
+    --ipe-ui-card: rgba(12, 29, 47, .72);
+    --ipe-ui-card-strong: rgba(14, 34, 55, .90);
+    --ipe-ui-field: rgba(4, 15, 27, .76);
+    --ipe-ui-blue: #78a9c7;
+    --ipe-ui-purple: #9288c7;
+    --ipe-ui-sand: #d8c79f;
+    --ipe-ui-error: #d58d91;
+    --ipe-ui-shadow: rgba(0, 4, 14, .30);
+    border: 1px solid rgba(125, 169, 205, .23) !important;
+    border-radius: 20px !important;
+    background:
+        radial-gradient(115% 62% at 3% -8%, rgba(77, 91, 160, .42) 0%, transparent 52%),
+        radial-gradient(92% 58% at 104% 5%, rgba(42, 125, 157, .24) 0%, transparent 55%),
+        radial-gradient(100% 70% at 72% 112%, rgba(100, 75, 143, .18) 0%, transparent 58%),
+        linear-gradient(164deg, #0b1727 0%, #07131f 50%, #040b14 100%) !important;
+    color: var(--ipe-ui-ink) !important;
+    color-scheme: dark !important;
+    box-shadow:
+        0 20px 58px rgba(0, 5, 13, .48),
+        0 1px 0 rgba(183, 214, 237, .08) inset !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* ---------- 海珠晨雾令牌 ---------- */
+#ipe-panel.ipe-mist {
+    --ipe-ui-ink: #334a62;
+    --ipe-ui-muted: #607389;
+    --ipe-ui-faint: #8795a4;
+    --ipe-ui-line: rgba(83, 112, 144, .14);
+    --ipe-ui-line-strong: rgba(83, 112, 144, .24);
+    --ipe-ui-card: rgba(255, 255, 255, .52);
+    --ipe-ui-card-strong: rgba(255, 255, 255, .80);
+    --ipe-ui-field: rgba(255, 255, 255, .88);
+    --ipe-ui-blue: #7298c6;
+    --ipe-ui-purple: #9588c4;
+    --ipe-ui-sand: #c2a36d;
+    --ipe-ui-error: #b9757d;
+    --ipe-ui-shadow: rgba(66, 79, 108, .11);
+    border: 1px solid rgba(255, 255, 255, .74) !important;
+    background:
+        radial-gradient(118% 68% at 3% -9%, rgba(101, 170, 220, .50) 0%, transparent 52%),
+        radial-gradient(95% 60% at 105% 3%, rgba(164, 145, 216, .43) 0%, transparent 56%),
+        radial-gradient(98% 66% at 100% 106%, rgba(231, 205, 151, .50) 0%, transparent 58%),
+        linear-gradient(165deg, #deedf7 0%, #e8e6f3 36%, #f8f6f1 67%, #f1e4c7 100%) !important;
+    color: var(--ipe-ui-ink) !important;
+    color-scheme: light !important;
+    box-shadow:
+        0 18px 48px rgba(71, 82, 111, .18),
+        0 1px 0 rgba(255, 255, 255, .92) inset !important;
+}
+
+/* ---------- 壳体头部 ---------- */
+#ipe-panel .ipe-panel-header {
+    min-height: 58px !important;
+    padding: 11px 13px 10px 15px !important;
+    border-bottom: 1px solid var(--ipe-ui-line) !important;
+    background: linear-gradient(90deg, rgba(20, 40, 64, .72), rgba(8, 22, 38, .38)) !important;
+    box-shadow: 0 1px 0 rgba(210, 231, 245, .035) inset !important;
+}
+
+#ipe-panel.ipe-mist .ipe-panel-header {
+    border-bottom-color: rgba(255, 255, 255, .44) !important;
+    background: linear-gradient(90deg, rgba(255, 255, 255, .36), rgba(255, 255, 255, .13)) !important;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .72) inset !important;
+}
+
+#ipe-panel .ipe-panel-title {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    color: var(--ipe-ui-ink) !important;
+    font-size: 14.5px !important;
+    font-weight: 720 !important;
+    line-height: 1.18 !important;
+    letter-spacing: .035em !important;
+    text-shadow: none !important;
+}
+
+#ipe-panel .ipe-panel-title::after {
+    content: "IMAGE PROMPT EXTRACTOR";
+    margin-top: 3px;
+    color: var(--ipe-ui-faint);
+    font-size: 7.5px;
+    font-weight: 650;
+    line-height: 1;
+    letter-spacing: .19em;
+}
+
+#ipe-panel .ipe-panel-header > div {
+    gap: 7px !important;
+}
+
+#ipe-panel #ipe-theme-toggle,
+#ipe-panel #ipe-panel-close {
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    flex: 0 0 36px !important;
+    padding: 0 !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 12px !important;
+    background: rgba(25, 48, 74, .62) !important;
+    color: var(--ipe-ui-ink) !important;
+    -webkit-text-fill-color: var(--ipe-ui-ink) !important;
+    box-shadow: 0 5px 16px rgba(0, 7, 18, .18) !important;
+}
+
+#ipe-panel.ipe-mist #ipe-theme-toggle,
+#ipe-panel.ipe-mist #ipe-panel-close {
+    border-color: rgba(255, 255, 255, .62) !important;
+    background: rgba(255, 255, 255, .52) !important;
+    box-shadow: 0 5px 16px rgba(66, 79, 108, .10) !important;
+}
+
+/* ---------- 总开关 ---------- */
+#ipe-panel .ipe-toggle {
+    width: 39px !important;
+    height: 22px !important;
+    flex: 0 0 39px !important;
+}
+
+#ipe-panel .ipe-toggle-slider {
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 999px !important;
+    background: rgba(93, 114, 137, .22) !important;
+    box-shadow: inset 0 1px 3px rgba(0, 7, 18, .18) !important;
+}
+
+#ipe-panel .ipe-toggle-slider::before {
+    top: 2px !important;
+    left: 2px !important;
+    width: 16px !important;
+    height: 16px !important;
+    background: #dce8ef !important;
+    box-shadow: 0 2px 5px rgba(0, 7, 18, .32) !important;
+}
+
+#ipe-panel .ipe-toggle input:checked + .ipe-toggle-slider {
+    border-color: rgba(132, 156, 207, .48) !important;
+    background: linear-gradient(90deg, #6478aa, #778fc0 52%, #72a7bc) !important;
+}
+
+#ipe-panel .ipe-toggle input:checked + .ipe-toggle-slider::before {
+    transform: translateX(17px) !important;
+    background: var(--ipe-ui-sand) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-toggle-slider {
+    background: rgba(92, 121, 150, .17) !important;
+    box-shadow: inset 0 1px 3px rgba(69, 86, 112, .10) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider {
+    border-color: rgba(126, 137, 193, .42) !important;
+    background: linear-gradient(90deg, #7d9fc9, #9589c5) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider::before {
+    background: #fff8e8 !important;
+    box-shadow: 0 2px 5px rgba(73, 82, 108, .22) !important;
+}
+
+/* ---------- 分段页签 ---------- */
+#ipe-panel .ipe-tabs {
+    gap: 4px !important;
+    margin: 10px 11px 4px !important;
+    padding: 4px !important;
+    padding-right: calc(var(--ipe-thumb) * .7) !important;
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 15px !important;
+    background: rgba(2, 10, 18, .28) !important;
+    box-shadow: inset 0 1px 0 rgba(207, 229, 244, .035) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-tabs {
+    border-color: rgba(255, 255, 255, .47) !important;
+    background: rgba(255, 255, 255, .25) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62) !important;
+}
+
+#ipe-panel .ipe-tab {
+    min-height: 35px !important;
+    padding: 6px 9px !important;
+    border: 1px solid transparent !important;
+    border-radius: 11px !important;
+    background: transparent !important;
+    color: var(--ipe-ui-faint) !important;
+    -webkit-text-fill-color: var(--ipe-ui-faint) !important;
+    font-size: 0 !important;
+    font-weight: 680 !important;
+    letter-spacing: .06em !important;
+    box-shadow: none !important;
+}
+
+#ipe-panel .ipe-tab[data-ipe-tabbtn="image"]::before,
+#ipe-drawer .ipe-tab[data-ipe-tabbtn="image"]::before {
+    content: "生图";
+    font-size: 13px;
+}
+
+#ipe-panel .ipe-tab[data-ipe-tabbtn="ledger"]::before,
+#ipe-drawer .ipe-tab[data-ipe-tabbtn="ledger"]::before {
+    content: "挂账";
+    font-size: 13px;
+}
+
+#ipe-panel .ipe-tab.ipe-tab-on {
+    border-color: rgba(126, 166, 202, .29) !important;
+    background: linear-gradient(135deg, rgba(91, 111, 175, .36), rgba(50, 124, 153, .25)) !important;
+    color: #edf6fc !important;
+    -webkit-text-fill-color: #edf6fc !important;
+    box-shadow: 0 4px 13px rgba(0, 7, 18, .23) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-tab.ipe-tab-on {
+    border-color: rgba(255, 255, 255, .78) !important;
+    background: rgba(255, 255, 255, .78) !important;
+    color: #536e91 !important;
+    -webkit-text-fill-color: #536e91 !important;
+    box-shadow: 0 4px 14px rgba(73, 84, 118, .13) !important;
+}
+
+/* ---------- 内容卡与滚动 ---------- */
+#ipe-panel .ipe-sections {
+    padding: 5px 10px 12px !important;
+    scrollbar-color: rgba(119, 160, 191, .28) transparent !important;
+}
+
+#ipe-panel .ipe-sections::-webkit-scrollbar {
+    width: 4px !important;
+}
+
+#ipe-panel .ipe-sections::-webkit-scrollbar-thumb {
+    border-radius: 999px !important;
+    background: linear-gradient(180deg, rgba(120, 169, 199, .38), rgba(139, 124, 188, .30)) !important;
+}
+
+#ipe-panel .ipe-section {
+    overflow: hidden !important;
+    margin: 6px 0 !important;
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 15px !important;
+    background: var(--ipe-ui-card) !important;
+    box-shadow: 0 5px 18px var(--ipe-ui-shadow) !important;
+}
+
+#ipe-panel .ipe-section:not(.collapsed) {
+    border-color: var(--ipe-ui-line-strong) !important;
+    background: var(--ipe-ui-card-strong) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section {
+    box-shadow:
+        0 6px 18px var(--ipe-ui-shadow),
+        0 1px 0 rgba(255, 255, 255, .58) inset !important;
+}
+
+#ipe-panel .ipe-section-header {
+    min-height: 42px !important;
+    padding: 10px 12px !important;
+    color: var(--ipe-ui-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 690 !important;
+    line-height: 1.3 !important;
+    letter-spacing: .075em !important;
+    text-transform: none !important;
+}
+
+#ipe-panel .ipe-section:not(.collapsed) .ipe-section-header {
+    color: var(--ipe-ui-ink) !important;
+}
+
+#ipe-panel .ipe-collapse-icon {
+    color: var(--ipe-ui-faint) !important;
+    font-size: 10px !important;
+}
+
+#ipe-panel .ipe-section-body {
+    gap: 9px !important;
+    padding: 0 12px 13px !important;
+    border-top: 1px solid var(--ipe-ui-line) !important;
+}
+
+#ipe-panel .ipe-section-body > :first-child {
+    margin-top: 10px !important;
+}
+
+/* ---------- 表单 ---------- */
+#ipe-panel .ipe-section-body label {
+    color: var(--ipe-ui-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 550 !important;
+    line-height: 1.45 !important;
+    letter-spacing: .012em !important;
+}
+
+#ipe-panel .ipe-section-body input[type="text"],
+#ipe-panel .ipe-section-body input[type="password"],
+#ipe-panel .ipe-section-body select,
+#ipe-panel .ipe-section-body textarea {
+    width: 100% !important;
+    min-height: 38px !important;
+    margin-top: 4px !important;
+    padding: 9px 11px !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 12px !important;
+    background-color: var(--ipe-ui-field) !important;
+    color: var(--ipe-ui-ink) !important;
+    -webkit-text-fill-color: var(--ipe-ui-ink) !important;
+    caret-color: var(--ipe-ui-blue) !important;
+    font-family: inherit !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    box-sizing: border-box !important;
+    outline: none !important;
+    box-shadow: inset 0 1px 0 rgba(216, 235, 247, .025) !important;
+    text-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body input[type="text"],
+#ipe-panel.ipe-mist .ipe-section-body input[type="password"],
+#ipe-panel.ipe-mist .ipe-section-body select,
+#ipe-panel.ipe-mist .ipe-section-body textarea {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .84) !important;
+}
+
+#ipe-panel .ipe-section-body textarea {
+    line-height: 1.58 !important;
+    resize: vertical !important;
+}
+
+#ipe-panel .ipe-section-body input:focus,
+#ipe-panel .ipe-section-body select:focus,
+#ipe-panel .ipe-section-body textarea:focus {
+    border-color: rgba(127, 158, 207, .64) !important;
+    background-color: rgba(8, 23, 39, .94) !important;
+    box-shadow: 0 0 0 3px rgba(113, 139, 193, .12) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body input:focus,
+#ipe-panel.ipe-mist .ipe-section-body select:focus,
+#ipe-panel.ipe-mist .ipe-section-body textarea:focus {
+    border-color: rgba(147, 133, 193, .58) !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 0 0 3px rgba(147, 133, 193, .11) !important;
+}
+
+#ipe-panel .ipe-section-body input::placeholder,
+#ipe-panel .ipe-section-body textarea::placeholder {
+    color: var(--ipe-ui-faint) !important;
+    -webkit-text-fill-color: var(--ipe-ui-faint) !important;
+    opacity: .72 !important;
+}
+
+#ipe-panel .ipe-section-body select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    padding-right: 32px !important;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--ipe-ui-faint) 50%),
+        linear-gradient(135deg, var(--ipe-ui-faint) 50%, transparent 50%) !important;
+    background-position: calc(100% - 17px) 53%, calc(100% - 12px) 53% !important;
+    background-size: 5px 5px, 5px 5px !important;
+    background-repeat: no-repeat !important;
+}
+
+#ipe-panel .ipe-section-body select option {
+    background: #091725 !important;
+    color: #dce9f3 !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body select option {
+    background: #f5f2ee !important;
+    color: #334a62 !important;
+}
+
+/* ---------- 普通勾选改为小开关 ---------- */
+#ipe-panel .ipe-section-body input[type="checkbox"] {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 34px !important;
+    min-width: 34px !important;
+    max-width: 34px !important;
+    height: 20px !important;
+    min-height: 20px !important;
+    flex: 0 0 34px !important;
+    margin: 0 2px 0 7px !important;
+    padding: 0 !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 999px !important;
+    background:
+        radial-gradient(circle at 9px 50%, rgba(232, 240, 246, .95) 0 6px, transparent 6.6px),
+        rgba(87, 108, 131, .20) !important;
+    box-shadow: none !important;
+}
+
+#ipe-panel .ipe-section-body input[type="checkbox"]:checked {
+    border-color: rgba(132, 153, 204, .48) !important;
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #f4ead0 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #687bad, #7c90bf 54%, #71a6bc) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body input[type="checkbox"] {
+    background:
+        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
+        rgba(87, 111, 140, .16) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body input[type="checkbox"]:checked {
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #fff9e9 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #779bc8, #9589c5) !important;
+}
+
+#ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) {
+    min-height: 38px !important;
+    margin: 0 !important;
+    padding: 7px 9px !important;
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 11px !important;
+    background: rgba(3, 14, 25, .22) !important;
+    box-sizing: border-box !important;
+}
+
+#ipe-panel.ipe-mist .ipe-section-body > div:has(input[type="checkbox"]) {
+    background: rgba(255, 255, 255, .38) !important;
+}
+
+#ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) > label {
+    width: 100% !important;
+    justify-content: space-between !important;
+}
+
+/* ---------- 按钮与状态 ---------- */
+#ipe-panel .ipe-btn {
+    min-height: 36px !important;
+    padding: 7px 10px !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 11px !important;
+    background: rgba(24, 45, 68, .58) !important;
+    color: var(--ipe-ui-muted) !important;
+    -webkit-text-fill-color: var(--ipe-ui-muted) !important;
+    font-size: 12px !important;
+    font-weight: 620 !important;
+    line-height: 1.35 !important;
+    letter-spacing: .015em !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+#ipe-panel .ipe-btn:hover:not(:disabled) {
+    border-color: rgba(126, 166, 202, .40) !important;
+    background: rgba(31, 57, 84, .78) !important;
+    color: var(--ipe-ui-ink) !important;
+    -webkit-text-fill-color: var(--ipe-ui-ink) !important;
+}
+
+#ipe-panel .ipe-btn-primary {
+    border-color: rgba(130, 154, 202, .45) !important;
+    background: linear-gradient(135deg, rgba(100, 119, 173, .92), rgba(56, 119, 148, .82)) !important;
+    color: #f5f8fb !important;
+    -webkit-text-fill-color: #f5f8fb !important;
+    font-weight: 700 !important;
+    box-shadow: 0 6px 17px rgba(0, 7, 18, .22) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-btn {
+    border-color: var(--ipe-ui-line-strong) !important;
+    background: rgba(255, 255, 255, .58) !important;
+    color: var(--ipe-ui-muted) !important;
+    -webkit-text-fill-color: var(--ipe-ui-muted) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-btn:hover:not(:disabled) {
+    border-color: rgba(133, 147, 194, .36) !important;
+    background: rgba(255, 255, 255, .88) !important;
+    color: var(--ipe-ui-ink) !important;
+    -webkit-text-fill-color: var(--ipe-ui-ink) !important;
+}
+
+#ipe-panel.ipe-mist .ipe-btn-primary {
+    border-color: rgba(126, 139, 194, .40) !important;
+    background: linear-gradient(135deg, #7d9fc8, #9288c2) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    box-shadow: 0 6px 17px rgba(76, 85, 121, .17) !important;
+}
+
+#ipe-panel .ipe-btn:disabled {
+    opacity: .36 !important;
+}
+
+#ipe-panel .ipe-preview-actions {
+    gap: 7px !important;
+    padding-top: 3px !important;
+    flex-wrap: wrap !important;
+}
+
+#ipe-panel .ipe-preview-actions > .ipe-btn {
+    flex: 1 1 calc(50% - 4px) !important;
+    min-width: 0 !important;
+}
+
+#ipe-panel .ipe-preview-status {
+    color: var(--ipe-ui-faint) !important;
+    font-size: 11px !important;
+    letter-spacing: .02em !important;
+}
+
+#ipe-panel .ipe-preview-status.active {
+    color: var(--ipe-ui-blue) !important;
+}
+
+#ipe-panel .ipe-preview-status.error {
+    color: var(--ipe-ui-error) !important;
+}
+
+#ipe-panel .ipe-hint,
+#ipe-panel [style*="color:#888"] {
+    color: var(--ipe-ui-faint) !important;
+}
+
+#ipe-panel hr {
+    border: 0 !important;
+    border-top: 1px solid var(--ipe-ui-line) !important;
+}
+
+/* ---------- 折叠工具卡与只读块 ---------- */
+#ipe-panel .ipe-fold {
+    overflow: hidden !important;
+    margin: 8px 0 !important;
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 13px !important;
+    background: rgba(2, 11, 20, .19) !important;
+    box-shadow: none !important;
+}
+
+#ipe-panel.ipe-mist .ipe-fold {
+    background: rgba(255, 255, 255, .40) !important;
+}
+
+#ipe-panel .ipe-fold > summary {
+    min-height: 38px !important;
+    padding: 9px 11px !important;
+    color: var(--ipe-ui-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 630 !important;
+    line-height: 1.5 !important;
+}
+
+#ipe-panel .ipe-fold[open] > summary {
+    border-bottom: 1px solid var(--ipe-ui-line) !important;
+    color: var(--ipe-ui-ink) !important;
+}
+
+#ipe-panel .ipe-fold-body {
+    padding: 1px 11px 11px !important;
+}
+
+#ipe-panel .ipe-ledger-age,
+#ipe-panel .ipe-anchor-guide {
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 12px !important;
+    background: rgba(3, 14, 25, .44) !important;
+    color: var(--ipe-ui-muted) !important;
+    box-shadow: none !important;
+}
+
+#ipe-panel.ipe-mist .ipe-ledger-age,
+#ipe-panel.ipe-mist .ipe-anchor-guide {
+    background: rgba(255, 255, 255, .52) !important;
+}
+
+#ipe-panel .ipe-anchor-guide-title {
+    color: var(--ipe-ui-ink) !important;
+}
+
+#ipe-panel .ipe-footer {
+    padding: 9px 15px 11px !important;
+    border-top: 1px solid var(--ipe-ui-line) !important;
+    background: rgba(2, 9, 17, .18) !important;
+    color: var(--ipe-ui-faint) !important;
+    font-size: 10.5px !important;
+    letter-spacing: .04em !important;
+}
+
+#ipe-panel.ipe-mist .ipe-footer {
+    background: rgba(255, 248, 231, .24) !important;
+    color: #8b806e !important;
+}
+
+/* ---------- 快捷入口：随面板状态换潮色 ---------- */
+#ipe-chat-quick-entry svg stop:first-of-type {
+    stop-color: #263a59 !important;
+}
+
+#ipe-chat-quick-entry svg stop:last-of-type {
+    stop-color: #0b1829 !important;
+}
+
+#ipe-chat-quick-entry svg text {
+    fill: #c8dcf0 !important;
+}
+
+#ipe-chat-quick-entry svg path,
+#ipe-chat-quick-entry svg circle {
+    stroke: #dce8f2 !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-chat-quick-entry svg stop:first-of-type {
+    stop-color: #91bee0 !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-chat-quick-entry svg stop:last-of-type {
+    stop-color: #ead5a9 !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-chat-quick-entry svg text {
+    fill: #696f9e !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-chat-quick-entry svg path,
+body:has(#ipe-panel.ipe-mist) #ipe-chat-quick-entry svg circle {
+    stroke: #fffaf1 !important;
+}
+
+#ipe-chat-quick-entry.processing::after {
+    background: #9b90cb !important;
+    box-shadow: 0 0 6px rgba(155, 144, 203, .88) !important;
+}
+
+#ipe-chat-quick-entry.ipe-ledger-busy::before {
+    background: #76b5ca !important;
+    box-shadow: 0 0 6px rgba(118, 181, 202, .85) !important;
+}
+
+/* ============================================================
+   酒馆内嵌抽屉：同一套潮汐令牌，跟随小面板开灯状态。
+   :has() 在当前 iOS / Chromium WebView 均支持；不支持时安全回落深海皮。
+   ============================================================ */
+#ipe-drawer {
+    --iped-ink: #dce9f3;
+    --iped-muted: #9cafc1;
+    --iped-faint: #6f8498;
+    --iped-line: rgba(137, 178, 211, .13);
+    --iped-line-strong: rgba(137, 178, 211, .24);
+    --iped-card: rgba(12, 29, 47, .72);
+    --iped-field: rgba(4, 15, 27, .80);
+    --iped-blue: #78a9c7;
+    --iped-purple: #9288c7;
+    --iped-sand: #d8c79f;
+    --iped-shadow: rgba(0, 4, 14, .27);
+    --ipe-thumb: 0px;
+    color: var(--iped-ink) !important;
+    color-scheme: dark !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer {
+    --iped-ink: #334a62;
+    --iped-muted: #607389;
+    --iped-faint: #8795a4;
+    --iped-line: rgba(83, 112, 144, .14);
+    --iped-line-strong: rgba(83, 112, 144, .24);
+    --iped-card: rgba(255, 255, 255, .54);
+    --iped-field: rgba(255, 255, 255, .88);
+    --iped-blue: #7298c6;
+    --iped-purple: #9588c4;
+    --iped-sand: #c2a36d;
+    --iped-shadow: rgba(66, 79, 108, .10);
+    color-scheme: light !important;
+}
+
+#ipe-drawer > .inline-drawer {
+    overflow: hidden !important;
+    border: 1px solid rgba(125, 169, 205, .22) !important;
+    border-radius: 18px !important;
+    background:
+        radial-gradient(115% 62% at 3% -8%, rgba(77, 91, 160, .39) 0%, transparent 52%),
+        radial-gradient(92% 58% at 104% 5%, rgba(42, 125, 157, .21) 0%, transparent 55%),
+        radial-gradient(100% 70% at 72% 112%, rgba(100, 75, 143, .16) 0%, transparent 58%),
+        linear-gradient(164deg, #0b1727 0%, #07131f 50%, #040b14 100%) !important;
+    color: var(--iped-ink) !important;
+    box-shadow: 0 14px 38px rgba(0, 5, 13, .34) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer > .inline-drawer {
+    border-color: rgba(255, 255, 255, .72) !important;
+    background:
+        radial-gradient(118% 68% at 3% -9%, rgba(101, 170, 220, .43) 0%, transparent 52%),
+        radial-gradient(95% 60% at 105% 3%, rgba(164, 145, 216, .38) 0%, transparent 56%),
+        radial-gradient(98% 66% at 100% 106%, rgba(231, 205, 151, .45) 0%, transparent 58%),
+        linear-gradient(165deg, #deedf7 0%, #e8e6f3 36%, #f8f6f1 67%, #f1e4c7 100%) !important;
+    box-shadow: 0 14px 38px rgba(71, 82, 111, .16) !important;
+}
+
+#ipe-drawer .inline-drawer-toggle.inline-drawer-header {
+    min-height: 54px !important;
+    padding: 10px 13px !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--iped-line) !important;
+    background: rgba(16, 35, 57, .54) !important;
+    box-shadow: none !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .inline-drawer-toggle.inline-drawer-header {
+    border-bottom-color: rgba(255, 255, 255, .42) !important;
+    background: rgba(255, 255, 255, .30) !important;
+}
+
+#ipe-drawer .inline-drawer-toggle b {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    color: var(--iped-ink) !important;
+    font-size: 0 !important;
+    line-height: 1.18 !important;
+    text-shadow: none !important;
+}
+
+#ipe-drawer .inline-drawer-toggle b::before {
+    content: "🐚 小海螺 · IPE";
+    color: var(--iped-ink);
+    font-size: 14.5px;
+    font-weight: 720;
+    letter-spacing: .035em;
+}
+
+#ipe-drawer .inline-drawer-toggle b::after {
+    content: "IMAGE PROMPT EXTRACTOR";
+    margin-top: 4px;
+    color: var(--iped-faint);
+    font-size: 7.5px;
+    font-weight: 650;
+    letter-spacing: .18em;
+}
+
+#ipe-drawer .inline-drawer-icon {
+    color: var(--iped-faint) !important;
+    opacity: .78 !important;
+    text-shadow: none !important;
+}
+
+#ipe-drawer .inline-drawer-content {
+    padding: 12px 12px 18px !important;
+    background: transparent !important;
+    color: var(--iped-ink) !important;
+}
+
+#ipe-drawer .inline-drawer-content > div:nth-child(-n+3) {
+    min-height: 40px !important;
+    margin: 0 0 6px !important;
+    padding: 7px 10px !important;
+    border: 1px solid var(--iped-line) !important;
+    border-radius: 12px !important;
+    background: rgba(3, 14, 25, .22) !important;
+    box-sizing: border-box !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .inline-drawer-content > div:nth-child(-n+3) {
+    background: rgba(255, 255, 255, .38) !important;
+}
+
+#ipe-drawer .inline-drawer-content > div:nth-child(-n+3) > label {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+}
+
+#ipe-drawer .inline-drawer-content label {
+    color: var(--iped-muted) !important;
+    font-size: 12px !important;
+    font-weight: 550 !important;
+    line-height: 1.48 !important;
+    text-shadow: none !important;
+}
+
+#ipe-drawer .inline-drawer-content small,
+#ipe-drawer .inline-drawer-content [style*="color:#888"],
+#ipe-drawer .inline-drawer-content [style*="color:#666"] {
+    color: var(--iped-faint) !important;
+    font-size: 11px !important;
+    line-height: 1.55 !important;
+    text-shadow: none !important;
+}
+
+#ipe-drawer .inline-drawer-content small > b {
+    color: var(--iped-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 700 !important;
+    letter-spacing: .07em !important;
+}
+
+#ipe-drawer hr {
+    margin: 14px 0 9px !important;
+    border: 0 !important;
+    border-top: 1px solid var(--iped-line) !important;
+}
+
+/* 抽屉页签 */
+#ipe-drawer .ipe-tabs {
+    gap: 4px !important;
+    margin: 11px 0 12px !important;
+    padding: 4px !important;
+    border: 1px solid var(--iped-line) !important;
+    border-radius: 15px !important;
+    background: rgba(2, 10, 18, .24) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-tabs {
+    border-color: rgba(255, 255, 255, .45) !important;
+    background: rgba(255, 255, 255, .25) !important;
+}
+
+#ipe-drawer .ipe-tab {
+    min-height: 36px !important;
+    padding: 6px 9px !important;
+    border: 1px solid transparent !important;
+    border-radius: 11px !important;
+    background: transparent !important;
+    color: var(--iped-faint) !important;
+    -webkit-text-fill-color: var(--iped-faint) !important;
+    font-size: 0 !important;
+    font-weight: 680 !important;
+    box-shadow: none !important;
+}
+
+#ipe-drawer .ipe-tab.ipe-tab-on {
+    border-color: rgba(126, 166, 202, .29) !important;
+    background: linear-gradient(135deg, rgba(91, 111, 175, .36), rgba(50, 124, 153, .25)) !important;
+    color: #edf6fc !important;
+    -webkit-text-fill-color: #edf6fc !important;
+    box-shadow: 0 4px 13px var(--iped-shadow) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-tab.ipe-tab-on {
+    border-color: rgba(255, 255, 255, .76) !important;
+    background: rgba(255, 255, 255, .76) !important;
+    color: #536e91 !important;
+    -webkit-text-fill-color: #536e91 !important;
+}
+
+/* 抽屉字段 */
+#ipe-drawer .text_pole,
+#ipe-drawer input[type="text"],
+#ipe-drawer input[type="password"],
+#ipe-drawer select,
+#ipe-drawer textarea {
+    width: 100% !important;
+    min-height: 38px !important;
+    margin: 5px 0 9px !important;
+    padding: 9px 11px !important;
+    border: 1px solid var(--iped-line-strong) !important;
+    border-radius: 12px !important;
+    background-color: var(--iped-field) !important;
+    color: var(--iped-ink) !important;
+    -webkit-text-fill-color: var(--iped-ink) !important;
+    caret-color: var(--iped-blue) !important;
+    font-family: inherit !important;
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    box-sizing: border-box !important;
+    outline: none !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+#ipe-drawer textarea {
+    line-height: 1.58 !important;
+    resize: vertical !important;
+}
+
+#ipe-drawer input:focus,
+#ipe-drawer select:focus,
+#ipe-drawer textarea:focus {
+    border-color: rgba(127, 158, 207, .62) !important;
+    background-color: rgba(8, 23, 39, .95) !important;
+    box-shadow: 0 0 0 3px rgba(113, 139, 193, .11) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input:focus,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer select:focus,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer textarea:focus {
+    border-color: rgba(147, 133, 193, .56) !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 0 0 3px rgba(147, 133, 193, .10) !important;
+}
+
+#ipe-drawer input::placeholder,
+#ipe-drawer textarea::placeholder {
+    color: var(--iped-faint) !important;
+    -webkit-text-fill-color: var(--iped-faint) !important;
+    opacity: .76 !important;
+}
+
+#ipe-drawer select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    padding-right: 32px !important;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--iped-faint) 50%),
+        linear-gradient(135deg, var(--iped-faint) 50%, transparent 50%) !important;
+    background-position: calc(100% - 17px) 53%, calc(100% - 12px) 53% !important;
+    background-size: 5px 5px, 5px 5px !important;
+    background-repeat: no-repeat !important;
+}
+
+#ipe-drawer select option {
+    background: #091725 !important;
+    color: #dce9f3 !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer select option {
+    background: #f5f2ee !important;
+    color: #334a62 !important;
+}
+
+/* 抽屉勾选 */
+#ipe-drawer input[type="checkbox"] {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 34px !important;
+    min-width: 34px !important;
+    max-width: 34px !important;
+    height: 20px !important;
+    min-height: 20px !important;
+    flex: 0 0 34px !important;
+    margin: 0 3px 0 8px !important;
+    padding: 0 !important;
+    border: 1px solid var(--iped-line-strong) !important;
+    border-radius: 999px !important;
+    background:
+        radial-gradient(circle at 9px 50%, rgba(232, 240, 246, .95) 0 6px, transparent 6.6px),
+        rgba(87, 108, 131, .20) !important;
+    box-shadow: none !important;
+}
+
+#ipe-drawer input[type="checkbox"]:checked {
+    border-color: rgba(132, 153, 204, .48) !important;
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #f4ead0 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #687bad, #7c90bf 54%, #71a6bc) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[type="checkbox"] {
+    background:
+        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
+        rgba(87, 111, 140, .16) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[type="checkbox"]:checked {
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #fff9e9 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #779bc8, #9589c5) !important;
+}
+
+/* 抽屉按钮 */
+#ipe-drawer .menu_button,
+#ipe-drawer input[type="button"] {
+    min-height: 38px !important;
+    padding: 7px 10px !important;
+    border: 1px solid var(--iped-line-strong) !important;
+    border-radius: 11px !important;
+    background: rgba(24, 45, 68, .58) !important;
+    color: var(--iped-muted) !important;
+    -webkit-text-fill-color: var(--iped-muted) !important;
+    font-family: inherit !important;
+    font-size: 12px !important;
+    font-weight: 620 !important;
+    line-height: 1.35 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+#ipe-drawer .menu_button:hover,
+#ipe-drawer input[type="button"]:hover {
+    border-color: rgba(126, 166, 202, .40) !important;
+    background: rgba(31, 57, 84, .78) !important;
+    color: var(--iped-ink) !important;
+    -webkit-text-fill-color: var(--iped-ink) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .menu_button,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[type="button"] {
+    background: rgba(255, 255, 255, .58) !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .menu_button:hover,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[type="button"]:hover {
+    border-color: rgba(133, 147, 194, .36) !important;
+    background: rgba(255, 255, 255, .88) !important;
+}
+
+#ipe-drawer input[id$="-inject"],
+#ipe-drawer input[id$="-save"],
+#ipe-drawer input[id$="-save-now"],
+#ipe-drawer input[id$="-run"],
+#ipe-drawer input[id$="-adopt"] {
+    border-color: rgba(130, 154, 202, .43) !important;
+    background: linear-gradient(135deg, rgba(100, 119, 173, .92), rgba(56, 119, 148, .82)) !important;
+    color: #f5f8fb !important;
+    -webkit-text-fill-color: #f5f8fb !important;
+    font-weight: 700 !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[id$="-inject"],
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[id$="-save"],
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[id$="-save-now"],
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[id$="-run"],
+body:has(#ipe-panel.ipe-mist) #ipe-drawer input[id$="-adopt"] {
+    border-color: rgba(126, 139, 194, .40) !important;
+    background: linear-gradient(135deg, #7d9fc8, #9288c2) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+#ipe-drawer input[type="button"]:disabled {
+    opacity: .36 !important;
+}
+
+#ipe-drawer [data-ipe-tab] > div[style*="display:flex"] {
+    flex-wrap: wrap !important;
+}
+
+#ipe-drawer [data-ipe-tab] > div[style*="display:flex"] > .menu_button,
+#ipe-drawer [data-ipe-tab] > div[style*="display:flex"] > input[type="button"] {
+    flex: 1 1 calc(50% - 4px) !important;
+    min-width: 0 !important;
+}
+
+/* 抽屉工具卡 */
+#ipe-drawer .ipe-anchor-guide,
+#ipe-drawer .ipe-fold,
+#ipe-drawer .ipe-ledger-age {
+    overflow: hidden !important;
+    border: 1px solid var(--iped-line) !important;
+    border-radius: 13px !important;
+    background: rgba(3, 14, 25, .36) !important;
+    color: var(--iped-muted) !important;
+    box-shadow: none !important;
+}
+
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-anchor-guide,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-fold,
+body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
+    background: rgba(255, 255, 255, .46) !important;
+}
+
+#ipe-drawer .ipe-anchor-guide-title {
+    color: var(--iped-ink) !important;
+}
+
+#ipe-drawer .ipe-fold > summary {
+    min-height: 40px !important;
+    padding: 9px 11px !important;
+    color: var(--iped-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 630 !important;
+    line-height: 1.55 !important;
+}
+
+#ipe-drawer .ipe-fold[open] > summary {
+    border-bottom: 1px solid var(--iped-line) !important;
+    color: var(--iped-ink) !important;
+}
+
+#ipe-drawer .ipe-fold-body {
+    padding: 2px 11px 11px !important;
+}
+
+#ipe-drawer .ipe-ledger-age {
+    padding: 9px 10px !important;
+}
+
+@media (max-width: 480px) {
+    #ipe-panel {
+        border-radius: 18px !important;
+    }
+
+    #ipe-panel .ipe-panel-header {
+        min-height: 56px !important;
+        padding-left: 13px !important;
+    }
+
+    #ipe-panel .ipe-tabs {
+        margin-left: 9px !important;
+        margin-right: 9px !important;
+    }
+
+    #ipe-panel .ipe-sections {
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+    }
+
+    #ipe-panel .ipe-section {
+        border-radius: 14px !important;
+    }
+
+    #ipe-panel .ipe-btn {
+        min-height: 40px !important;
+    }
+
+    #ipe-drawer .inline-drawer-content {
+        padding: 10px 10px 16px !important;
+    }
+}
+
+@media (max-width: 370px) {
+    #ipe-panel .ipe-panel-title::after,
+    #ipe-drawer .inline-drawer-toggle b::after {
+        display: none !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #ipe-panel *,
+    #ipe-drawer *,
+    #ipe-chat-quick-entry,
+    #ipe-chat-quick-entry * {
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
