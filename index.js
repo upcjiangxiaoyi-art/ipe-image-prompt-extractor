@@ -1072,10 +1072,17 @@ function ipeLedgerRenderInline() {
                 || d.querySelector('#chat .mes[data-mesid="' + idx + '"] .mes_text');
         if (!host) return;
 
-        var box = d.createElement("div");
+        // 纯文字 + 折叠壳：正文用 textContent 原样印字（换行靠 CSS pre-wrap），绝不当 HTML 解释
+        var box = d.createElement("details");
         box.className = IPE_LEDGER_INLINE_CLASS;
         box.setAttribute("data-arb-ledger", "1");
-        box.innerHTML = cur;
+        var sum = d.createElement("summary");
+        sum.className = IPE_LEDGER_INLINE_CLASS + "-title";
+        sum.textContent = "\uD83D\uDCCB \u8d26\u672c";
+        var body = d.createElement("div");
+        body.className = IPE_LEDGER_INLINE_CLASS + "-body";
+        body.textContent = cur;
+        box.appendChild(sum); box.appendChild(body);
         host.appendChild(box);
     } catch(e) {}
 }

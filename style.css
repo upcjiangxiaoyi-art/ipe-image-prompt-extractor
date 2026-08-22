@@ -1854,3 +1854,9 @@ body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
         animation-iteration-count: 1 !important;
     }
 }
+
+
+/* 楼内账本 · 纯文字折叠壳 */
+.ipe-ledger-inline{margin-top:10px;padding:6px 10px;border:1px solid rgba(120,126,172,.35);border-radius:10px;font-size:.9em;text-align:left}
+.ipe-ledger-inline-title{cursor:pointer;user-select:none;opacity:.75;font-weight:600}
+.ipe-ledger-inline-body{white-space:pre-wrap;word-break:break-word;margin-top:6px;line-height:1.6;text-align:left}
