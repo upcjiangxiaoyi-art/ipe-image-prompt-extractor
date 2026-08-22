@@ -1078,7 +1078,7 @@ function ipeLedgerRenderInline() {
         box.setAttribute("data-arb-ledger", "1");
         var sum = d.createElement("summary");
         sum.className = IPE_LEDGER_INLINE_CLASS + "-title";
-        sum.textContent = "\uD83D\uDCCB \u8d26\u672c";
+        sum.textContent = "\uD83D\uDC1A \u6f6e\u6c50\u56de\u54cd";
         var body = d.createElement("div");
         body.className = IPE_LEDGER_INLINE_CLASS + "-body";
         body.textContent = cur;
