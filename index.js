@@ -4567,9 +4567,22 @@ function bindAll() {
             ["GENERATION_STARTED","MESSAGE_SENT"].forEach(function(evName){
                 var ev = cs.event_types[evName];
                 if (!ev) return;
-                cs.eventSource.on(ev, function(){
-                    // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
-                    try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true })) ipeLedgerApplyEP(); } catch(eR) {}
+                cs.eventSource.on(ev, function(genType, genParams, dryRun){
+                    /* 重roll 抢跑修补：MESSAGE_SWIPED 的对账挂在 400ms 之后，
+                       而 Generate() 立刻就拿贴耳去组 prompt——被 roll 掉那楼的账会原样送进去，
+                       Gemini 把它当既成事实，roll 几次都还是同一个剧情。
+                       酒馆把 type 当第一个参数传进来，这里同步降一楼，赶在组 prompt 之前碎掉尾楼的账。
+                       continue 不降：它是给当前楼续写，那楼的账仍然算数。 */
+                    var t = String(genType || "").toLowerCase();
+                    if ((t === "swipe" || t === "regenerate") && dryRun !== true) {
+                        try {
+                            ipeLedgerReconcile(Math.max(0, ipeFloorNo() - 1), { silent: true });
+                            ipeLedgerApplyEP();          // 无条件重贴，不赌 reconcile 的返回值
+                        } catch(eSw) {}
+                    } else {
+                        // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
+                        try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true })) ipeLedgerApplyEP(); } catch(eR) {}
+                    }
                     if (!ipeLedgerBusy || ipeLedgerStaleWarned) return;
                     ipeLedgerStaleWarned = true;
                     ipeLedgerStatus("\u26A0\uFE0F 账本还没记完你就发了——这一发 Gemini 读到的是上一楼的账本。"
