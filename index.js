@@ -773,9 +773,13 @@ async function ipeLedgerCallAPI(text, extra) {
         stream: false
     };
 
+    /* 副 AI 有时候半天不回，或者这套预设本来就不通——得能自己掐掉。
+       生图那条管线早就有 ipeAbortController，挂账这边一直是裸跑的。 */
+    ipeLedgerAbort = (typeof AbortController !== "undefined") ? new AbortController() : null;
     var res = await ipeFetchWithTimeout(
         buildChatUrl(item.endpoint),
-        { method: "POST", headers: headers, body: JSON.stringify(body) },
+        { method: "POST", headers: headers, body: JSON.stringify(body),
+          signal: ipeLedgerAbort ? ipeLedgerAbort.signal : undefined },
         Number(cfg().requestTimeout || 0)
     );
     var raw = await res.text();
@@ -897,7 +901,14 @@ async function ipeLedgerRunManual() {
         ipeLedgerShowPreview(body, !got || got.level === 4);
         ipeLedgerStatus(ex ? "按你补的那句重跑了一次，看一眼" : "副 AI 回来了，看一眼再决定", "#6ec577");
     } catch(e) {
-        ipeLedgerStatus("挂账失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
+        if (ipeLedgerIsAbort(e)) {
+            ipeLedgerStatus("已中断挂账。账本没动，还是上一份。", "#c9a227");
+        } else {
+            var d = (e && e.message) ? e.message : String(e);
+            ipeLedgerFailStreak++;
+            ipeLedgerStatus("挂账失败：" + d, "#d4726a");
+            ipeLedgerFailNotice(d);
+        }
     } finally {
         ipeLedgerSetBusy(false);
     }
@@ -905,6 +916,31 @@ async function ipeLedgerRunManual() {
 
 var ipeLedgerBusy = false;
 var ipeLedgerFailStreak = 0;
+var ipeLedgerAbort = null;            // 当前挂账请求的中断句柄
+var ipeLedgerAbortedByUser = false;   // 区分「人掐的」和「超时自己断的」
+
+function ipeLedgerStop() {
+    if (!ipeLedgerAbort) { ipeLedgerStatus("现在没有在跑的挂账", "#c9a227"); return false; }
+    ipeLedgerAbortedByUser = true;
+    try { ipeLedgerAbort.abort(); } catch(e) {}
+    ipeLedgerAbort = null;
+    return true;
+}
+
+function ipeLedgerIsAbort(e) {
+    if (ipeLedgerAbortedByUser) return true;
+    return !!e && (e.name === "AbortError" || /abort/i.test(String((e && e.message) || "")));
+}
+
+/* 状态行在面板里，面板关着就等于没说。失败必须弹到面板外面来。 */
+function ipeLedgerFailNotice(detail) {
+    var body = "挂账失败：" + detail;
+    if (ipeLedgerFailStreak >= 2) {
+        body += "\n已经连续失败 " + ipeLedgerFailStreak + " 次——多半不是这一楼的问题，"
+             +  "换一套 API 预设或换个模型再试。";
+    }
+    try { ipeShowApiFailurePopup(body, false); } catch(e) {}
+}
 var ipeLedgerStaleWarned = false;
 
 /* 副 AI 在跑的这几秒，贴耳里还是上一份账本。
@@ -912,7 +948,14 @@ var ipeLedgerStaleWarned = false;
    拦不住，但必须让人看得见——所以球转起来、状态行说话、真发了还再喊一次。 */
 function ipeLedgerSetBusy(on) {
     ipeLedgerBusy = !!on;
-    if (on) ipeLedgerStaleWarned = false;
+    if (on) { ipeLedgerStaleWarned = false; ipeLedgerAbortedByUser = false; }
+    else { ipeLedgerAbort = null; }
+    try {
+        ["ipe-ledger-stop","iped-ledger-stop"].forEach(function(id){
+            var el = q("#" + id);
+            if (el) el.style.display = on ? "" : "none";
+        });
+    } catch(e) {}
     try {
         var ball = q("#ipe-chat-quick-entry");
         if (ball) {
@@ -956,6 +999,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         if (!got || !got.text) {                               // 保底 2/3：整个回复是空的
             ipeLedgerFailStreak++;
             ipeLedgerStatus("副 AI 返回是空的，账本未改动。点「重新挂账」可以手动看一眼。", "#d4726a");
+            ipeLedgerFailNotice("副 AI 返回是空的，账本未改动。");
             return;
         }
         var body = got.text;
@@ -997,8 +1041,22 @@ async function ipeLedgerRun(targetIdx, silent) {
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
     } catch(e) {
+        if (ipeLedgerIsAbort(e)) {
+            ipeLedgerStatus("已中断挂账。账本没动，还是上一份。", "#c9a227");
+            return;
+        }
         ipeLedgerFailStreak++;
-        ipeLedgerStatus("挂账失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
+        var d = (e && e.message) ? e.message : String(e);
+        /* 连撞两次就别再撞了——每层自动跑一次，坏预设能烧一晚上额度。
+           跟缩水拦截一个道理：事故现场停车，等人来看。 */
+        var offNote = "";
+        if (ipeLedgerFailStreak >= 2 && cfg().ledgerAutoRun === true) {
+            save("ledgerAutoRun", false);
+            try { ipeLedgerRefreshBotEditors(); } catch(e2) {}
+            offNote = "自动挂账已自动关闭，换好 API 再开。";
+        }
+        ipeLedgerStatus("挂账失败：" + d + (offNote ? "｜" + offNote : ""), "#d4726a");
+        ipeLedgerFailNotice(d + (offNote ? "\n" + offNote : ""));
     } finally {
         ipeLedgerSetBusy(false);
     }
@@ -3574,6 +3632,9 @@ function createPanel() {
             '</div>'+
             '<div id="ipe-ledger-preview-tip" class="ipe-hint"></div>'+
         '</div>'+
+        '<div class="ipe-preview-actions" id="ipe-ledger-stop" style="display:none">'+
+            '<button id="ipe-ledger-stop-btn" class="ipe-btn" type="button">\u23F9 中断这次挂账</button>'+
+        '</div>'+
         '<div class="ipe-preview-actions" id="ipe-ledger-force" style="display:none">'+
             '<button id="ipe-ledger-force-btn" class="ipe-btn" type="button">\u26A0\uFE0F 强制采用这次结果</button>'+
         '</div>'+
@@ -3732,6 +3793,7 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-adopt" class="menu_button" value="\u2713 采用"><input type="button" id="iped-ledger-reroll" class="menu_button" value="\uD83C\uDFB2 重 roll"><input type="button" id="iped-ledger-preview-close" class="menu_button" value="收起"></div>';
     h += '<div id="iped-ledger-preview-tip" style="color:#888;font-size:11px;margin-top:4px"></div>';
     h += '</div>';
+    h += '<div id="iped-ledger-stop" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-stop-btn" class="menu_button" style="width:100%" value="\u23F9 \u4E2D\u65AD\u8FD9\u6B21\u6302\u8D26"></div>';
     h += '<div id="iped-ledger-force" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-force-btn" class="menu_button" style="width:100%" value="\u26A0\uFE0F 强制采用这次结果"></div>';
     h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0">\u2014</div>';
     h += '<details class="ipe-fold"><summary>\u23F1 后悔药（改错了从这儿找回来）</summary><div class="ipe-fold-body">';
@@ -4240,6 +4302,13 @@ function bindAll() {
 
     /* ---------- v2 新增控件绑定 ---------- */
     // 强制采用（缩水拦截后）
+    ["ipe-ledger-stop-btn","iped-ledger-stop-btn"].forEach(function(id){
+        var b = q("#" + id);
+        if (b && !b.dataset.ipeBound) {
+            b.dataset.ipeBound = "1";
+            b.addEventListener("click", function(){ ipeLedgerStop(); });
+        }
+    });
     ["ipe-ledger-force-btn","iped-ledger-force-btn"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
         el.addEventListener("click", function(){
