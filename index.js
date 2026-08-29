@@ -1200,8 +1200,17 @@ function ipeLedgerInspectEP() {
             : "\n\u26A0\uFE0F 贴耳内容与账本现任对不上——这就是 roll 抢跑那类问题的现场")
         + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
 
-    ipeLedgerShowPreview(head + (live || "（空）"), false);
-    ipeLedgerStatus("已抓取贴耳原文 \u2713 上面预览框里就是这一发会送进模型的内容", "#6ec577");
+    /* 只往只读框里写。绝不碰 #ipe-ledger-preview——那个框旁边就是「采用」，
+       也绝不碰 #ipe-ledger-text——那是账本正文。自检文本一旦有被采用的可能，
+       就等于给账本开了条污染通道。 */
+    var payload = head + (live || "（空）");
+    var shown = false;
+    ["ipe-ledger-ep-out","iped-ledger-ep-out"].forEach(function(id){
+        var el = q("#" + id);
+        if (el) { el.textContent = payload; el.parentNode.style.display = ""; shown = true; }
+    });
+    if (!shown) { try { alert(payload); } catch(e) {} }
+    ipeLedgerStatus("已抓取贴耳原文 \u2713 只读，不会进账本", "#6ec577");
 }
 
 /* ============================================================
@@ -3743,6 +3752,11 @@ function createPanel() {
             '<button id="ipe-ledger-ep" class="ipe-btn" type="button">\u{1F50D} \u770B\u8D34\u8033</button>'+
         '</div>'+
         '<input type="file" id="ipe-ledger-file" accept=".json,application/json" style="display:none">'+
+        '<div id="ipe-ledger-ep-box" style="display:none;margin-top:6px">'+
+            '<div style="font-size:12px;opacity:.7;margin-bottom:4px">\u{1F50D} \u8D34\u8033\u81EA\u68C0\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u4F1A\u8FDB\u8D26\u672C\uFF09</div>'+
+            '<pre id="ipe-ledger-ep-out" style="white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;margin:0;padding:8px;border-radius:8px;background:rgba(127,127,127,.10)"></pre>'+
+            '<button id="ipe-ledger-ep-close" class="ipe-btn" type="button" style="margin-top:6px">\u6536\u8D77</button>'+
+        '</div>'+
         '<div class="ipe-preview-actions" id="ipe-ledger-stop" style="display:none">'+
             '<button id="ipe-ledger-stop-btn" class="ipe-btn" type="button">\u23F9 中断这次挂账</button>'+
         '</div>'+
@@ -3910,6 +3924,11 @@ function createDrawer() {
        +   '<input type="button" id="iped-ledger-ep" class="menu_button" style="flex:1" value="\u{1F50D} \u770B\u8D34\u8033">'
        + '</div>';
     h += '<input type="file" id="iped-ledger-file" accept=".json,application/json" style="display:none">';
+    h += '<div id="iped-ledger-ep-box" style="display:none;margin-top:6px">'
+       +   '<div style="font-size:12px;opacity:.7;margin-bottom:4px">\u{1F50D} \u8D34\u8033\u81EA\u68C0\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u4F1A\u8FDB\u8D26\u672C\uFF09</div>'
+       +   '<pre id="iped-ledger-ep-out" style="white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;margin:0;padding:8px;border-radius:8px;background:rgba(127,127,127,.10)"></pre>'
+       +   '<input type="button" id="iped-ledger-ep-close" class="menu_button" style="width:100%;margin-top:6px" value="\u6536\u8D77">'
+       + '</div>';
     h += '<div id="iped-ledger-stop" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-stop-btn" class="menu_button" style="width:100%" value="\u23F9 \u4E2D\u65AD\u8FD9\u6B21\u6302\u8D26"></div>';
     h += '<div id="iped-ledger-force" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-force-btn" class="menu_button" style="width:100%" value="\u26A0\uFE0F 强制采用这次结果"></div>';
     h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0">\u2014</div>';
@@ -4439,6 +4458,16 @@ function bindAll() {
                 r.onload  = function(){ ipeLedgerImportText(r.result); };
                 r.onerror = function(){ ipeLedgerStatus("读文件失败", "#d4726a"); };
                 r.readAsText(f);
+            });
+        }
+    });
+    ["ipe-ledger-ep-close","iped-ledger-ep-close"].forEach(function(id){
+        var b = q("#" + id);
+        if (b && !b.dataset.ipeBound) {
+            b.dataset.ipeBound = "1";
+            b.addEventListener("click", function(){
+                var box = q("#" + (id.charAt(0) === "i" && id.indexOf("iped") === 0 ? "iped" : "ipe") + "-ledger-ep-box");
+                if (box) box.style.display = "none";
             });
         }
     });

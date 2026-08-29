@@ -164,6 +164,31 @@ console.log("\n\u30108\u3011 导入导出往返");
     ok(F("ipeLedgerRead")().current.indexOf("要被导出") >= 0, "合法包导入后正文还在");
 }
 
+console.log("\n\u30109\u3011 \u8D34\u8033\u81EA\u68C0\u7EDD\u4E0D\u80FD\u6C61\u67D3\u8D26\u672C");
+{
+    const { w, tavern, F } = boot(10);
+    F("ipeLedgerCommit")("这是真正的账本正文，够长够长够长够长够长。", 10);
+    const beforeCur = F("ipeLedgerRead")().current;
+
+    F("ipeLedgerInspectEP")();
+
+    const cur = F("ipeLedgerRead")().current;
+    eq(cur, beforeCur, "自检之后账本存储一字未改");
+    ok(cur.indexOf("贴耳自检") < 0, "账本正文里没有自检文本");
+
+    const editor  = w.document.querySelector("#ipe-ledger-text");
+    const preview = w.document.querySelector("#ipe-ledger-preview");
+    ok(!editor  || String(editor.value  || "").indexOf("贴耳自检") < 0,
+        "账本编辑框没被写入自检文本");
+    ok(!preview || String(preview.value || "").indexOf("贴耳自检") < 0,
+        "预览框没被写入自检文本（那个框旁边就是「采用」）");
+
+    const out = w.document.querySelector("#ipe-ledger-ep-out");
+    ok(out && String(out.textContent || "").indexOf("贴耳自检") >= 0,
+        "自检文本落在只读框里");
+    ok(!out || out.tagName === "PRE", "只读框是 pre，不是可编辑控件");
+}
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
