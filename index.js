@@ -487,17 +487,82 @@ function ipeLedgerSave(state) {
 }
 
 // 落新版：一层一账。上一楼的账入历史；同一楼重挂（重roll后再采用）直接替换，旧稿不留。
-function ipeLedgerCommit(text) {
-    ipeLedgerReconcile(ipeFloorNo(), { silent: true });   // 落账前先对账，底下全是活楼
+/* atFloor：正文实际取自哪一层，就盖哪一层的戳。
+   末楼被藏起来时 ipeLedgerRun 会往下找活楼，读的是第 8 层正文，
+   而 ipeFloorNo() 还是 chat.length=10——不传就会盖错戳，对账全靠楼号，一错就误伤。 */
+function ipeLedgerCommit(text, atFloor) {
+    var nowFloor = Number.isFinite(Number(atFloor)) && Number(atFloor) > 0
+                 ? Number(atFloor) : ipeFloorNo();
+    ipeLedgerReconcile(Math.max(nowFloor, ipeFloorNo()), { silent: true });  // 落账前先对账，底下全是活楼
     var st = ipeLedgerRead();
     var old = String(st.current || "");
-    var nowFloor = ipeFloorNo();
     if (old.trim() && st.lastFloor >= 0 && st.lastFloor < nowFloor) {
         st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
     }
     st.current   = String(text || "");
     st.lastFloor = nowFloor;
     return ipeLedgerSave(st);
+}
+
+/* ---- 导出 / 导入 ----
+   账本只活在 chat_metadata + localStorage 镜像里，聊天一删就没了，
+   也没法挪到别的聊天。这两个函数不碰任何现有逻辑，纯进出。 */
+function ipeLedgerExport() {
+    var st = ipeLedgerRead();
+    var pack = {
+        _fmt: "ipe-ledger", _v: 2,
+        exportedAt: new Date().toISOString(),
+        chatKey: ipeChatKey(),
+        floorAtExport: ipeFloorNo(),
+        data: st
+    };
+    var name = "ipe-ledger-" + String(ipeChatKey() || "chat").replace(/[^\w.-]+/g, "_")
+             + "-" + new Date().toISOString().slice(0, 10) + ".json";
+    try {
+        var blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement("a");
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 200);
+        ipeLedgerStatus("已导出 \u2713 " + name + "（当前版 + " + st.versions.length + " 个历史版）", "#6ec577");
+    } catch(e) {
+        ipeLedgerStatus("导出失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
+    }
+}
+
+function ipeLedgerImportText(txt) {
+    var pack;
+    try { pack = JSON.parse(String(txt || "")); }
+    catch(e) { ipeLedgerStatus("导入失败：这不是合法 JSON", "#d4726a"); return false; }
+
+    // 容两种：整包（有 _fmt）或裸账本对象
+    var raw = (pack && pack._fmt === "ipe-ledger" && pack.data) ? pack.data : pack;
+    if (!raw || typeof raw !== "object" || typeof raw.current !== "string") {
+        ipeLedgerStatus("导入失败：里面没有账本正文（缺 current 字段）", "#d4726a");
+        return false;
+    }
+
+    // 覆盖前先把现任存进历史，别让人一键抹掉自己攒的东西
+    try {
+        var cur = ipeLedgerRead();
+        if (String(cur.current || "").trim()) {
+            var bak = ipeLedgerNormalize(raw);
+            bak.versions.unshift({ floor: cur.lastFloor, ts: Date.now(), text: String(cur.current) });
+            ipeLedgerSave(ipeLedgerNormalize(bak));
+        } else {
+            ipeLedgerSave(ipeLedgerNormalize(raw));
+        }
+    } catch(e) {
+        ipeLedgerStatus("导入失败：" + (e && e.message ? e.message : String(e)), "#d4726a");
+        return false;
+    }
+
+    ipeLedgerSync();
+    var st2 = ipeLedgerRead();
+    ipeLedgerStatus("已导入 \u2713 当前版停在第 " + st2.lastFloor + " 楼，"
+        + "原本的账本已存进历史可回滚。下一轮会自动对账到实际楼层。", "#6ec577");
+    return true;
 }
 
 function ipeLedgerRollback(idx) {
@@ -861,11 +926,12 @@ function ipeLedgerAdoptPreview(which) {
     var el = q("#" + (which === "drawer" ? "iped-ledger-preview" : "ipe-ledger-preview"));
     var t = el ? String(el.value || "").trim() : "";
     if (!t) { ipeLedgerStatus("预览是空的，没什么可采用", "#c9a227"); return; }
-    ipeLedgerCommit(t);
+    var f = ipeLedgerPreviewFloor || 0;   // 预览那份正文取自哪层，就盖哪层
+    ipeLedgerCommit(t, f);
     ipeLedgerHidePreview();
     ipeLedgerClearExtra();
     ipeLedgerSync();
-    ipeLedgerStatus("已采用 \u2713 第 " + ipeFloorNo() + " 楼（旧版已进历史，可回滚）", "#6ec577");
+    ipeLedgerStatus("已采用 \u2713 第 " + (f || ipeFloorNo()) + " 楼（旧版已进历史，可回滚）", "#6ec577");
 }
 
 function ipeLedgerExtraOnce() {
@@ -881,15 +947,16 @@ function ipeLedgerClearExtra() {
 
 async function ipeLedgerRunManual() {
     if (ipeLedgerBusy) { ipeLedgerStatus("上一次还在跑，等它一下", "#c9a227"); return; }
-    var msg = null;
+    var msg = null, msgFloor = 0;
     try {
         var chat = ctx().chat;
         for (var i = chat.length - 1; i >= 0; i--) {
             var m = chat[i];
-            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m; break; }
+            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m; msgFloor = i + 1; break; }
         }
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
+    ipeLedgerPreviewFloor = msgFloor;
 
     ipeLedgerSetBusy(true);
     ipeLedgerStatus("正在挂账…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
@@ -965,6 +1032,7 @@ function ipeLedgerSetBusy(on) {
     } catch(e) {}
 }
 var ipeLedgerPending = null;      // 缩水拦截暂存，点「强制采用」才落盘
+var ipeLedgerPreviewFloor = 0;    // 预览那份正文取自哪一层，采用时照这个盖戳
 
 function ipeLedgerShowForce(on) {
     ["ipe-ledger-force","iped-ledger-force"].forEach(function(id){
@@ -976,18 +1044,19 @@ function ipeLedgerShowForce(on) {
 async function ipeLedgerRun(targetIdx, silent) {
     if (ipeLedgerBusy) { if (!silent) ipeLedgerStatus("上一次挂账还没跑完", "#c9a227"); return; }
 
-    var msg = null;
+    var msg = null, msgFloor = 0;
     try {
         var chat = ctx().chat;
-        if (typeof targetIdx === "number" && chat[targetIdx]) msg = chat[targetIdx];
+        if (typeof targetIdx === "number" && chat[targetIdx]) { msg = chat[targetIdx]; msgFloor = targetIdx + 1; }
         else for (var i = chat.length - 1; i >= 0; i--) {
             var m = chat[i];
             // 跳过 user 楼与藏楼/系统楼：刚藏完末楼不该给隐形消息挂账
-            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m; break; }
+            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m; msgFloor = i + 1; break; }
         }
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
 
+    ipeLedgerPreviewFloor = msgFloor;
     ipeLedgerSetBusy(true);
     ipeLedgerPending = null;
     ipeLedgerShowForce(false);
@@ -1007,7 +1076,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         ipeLedgerFailStreak = 0;
 
         if (body.replace(/\s+/g, "") === IPE_LEDGER_SENTINEL) { // 静默哨兵
-            ipeLedgerStatus("本轮无变化（第 " + ipeFloorNo() + " 楼）" + note, "#6ec577");
+            ipeLedgerStatus("本轮无变化（第 " + (msgFloor || ipeFloorNo()) + " 楼）" + note, "#6ec577");
             return;
         }
 
@@ -1035,8 +1104,8 @@ async function ipeLedgerRun(targetIdx, silent) {
             return;
         }
 
-        ipeLedgerCommit(body);
-        ipeLedgerStatus("已挂账 \u2713 第 " + ipeFloorNo() + " 楼" + note
+        ipeLedgerCommit(body, msgFloor);
+        ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note
             + (ipeLedgerReportTruncated ? "（report 层已截断）" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
@@ -1097,6 +1166,42 @@ function ipeLedgerApplyEP() {
         c.setExtensionPrompt(IPE_LEDGER_EP_KEY, String(text || ""), pos, ipeLedgerEpDepth(), false, role);
         return true;
     } catch(e) { return false; }
+}
+
+/* ---- 贴耳自检 ----
+   账本编辑框显示的是「账本」，真正进 prompt 的是「贴耳」，中间隔着 setExtensionPrompt。
+   2.8.1 那个抢跑 bug 难认，就是因为这一段不可见：账本看着对，注进去的是旧的。
+   这里直接读酒馆手里存的那份，不重算——重算就又变成"我以为它是什么"了。 */
+function ipeLedgerInspectEP() {
+    var live = null, src = "";
+    try {
+        var c = ctx();
+        var bag = c.extensionPrompts || c.extension_prompts;
+        if (bag && bag[IPE_LEDGER_EP_KEY]) {
+            var e = bag[IPE_LEDGER_EP_KEY];
+            live = String((e && e.value != null) ? e.value : e);
+            src  = "酒馆现存";
+        }
+    } catch(e) {}
+    if (live == null) {                       // 拿不到就退回本地算一份，并明说是算的
+        try { live = String(ipeLedgerEpText() || ""); src = "本地重算（读不到酒馆存的那份）"; }
+        catch(e2) { live = ""; src = "读取失败"; }
+    }
+
+    var st  = ipeLedgerRead();
+    var on  = cfg().ledgerEpEnabled !== false;
+    var head = "【贴耳自检】" + src
+        + "\n开关：" + (on ? "开" : "关（贴耳为空是正常的）")
+        + "\n深度：" + ipeLedgerEpDepth() + "　当前楼：" + ipeFloorNo()
+        + "\n账本现任：第 " + st.lastFloor + " 楼"
+        + "\n贴耳长度：" + live.length + " 字"
+        + (live.indexOf(String(st.current || "").slice(0, 40)) >= 0 || !String(st.current||"").trim()
+            ? "\n\u2705 贴耳与账本现任一致"
+            : "\n\u26A0\uFE0F 贴耳内容与账本现任对不上——这就是 roll 抢跑那类问题的现场")
+        + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
+
+    ipeLedgerShowPreview(head + (live || "（空）"), false);
+    ipeLedgerStatus("已抓取贴耳原文 \u2713 上面预览框里就是这一发会送进模型的内容", "#6ec577");
 }
 
 /* ============================================================
@@ -3632,6 +3737,12 @@ function createPanel() {
             '</div>'+
             '<div id="ipe-ledger-preview-tip" class="ipe-hint"></div>'+
         '</div>'+
+        '<div class="ipe-preview-actions">'+
+            '<button id="ipe-ledger-export" class="ipe-btn" type="button">\u2B07 \u5BFC\u51FA\u8D26\u672C</button>'+
+            '<button id="ipe-ledger-import" class="ipe-btn" type="button">\u2B06 \u5BFC\u5165\u8D26\u672C</button>'+
+            '<button id="ipe-ledger-ep" class="ipe-btn" type="button">\u{1F50D} \u770B\u8D34\u8033</button>'+
+        '</div>'+
+        '<input type="file" id="ipe-ledger-file" accept=".json,application/json" style="display:none">'+
         '<div class="ipe-preview-actions" id="ipe-ledger-stop" style="display:none">'+
             '<button id="ipe-ledger-stop-btn" class="ipe-btn" type="button">\u23F9 中断这次挂账</button>'+
         '</div>'+
@@ -3793,6 +3904,12 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px;padding-right:6px"><input type="button" id="iped-ledger-adopt" class="menu_button" value="\u2713 采用"><input type="button" id="iped-ledger-reroll" class="menu_button" value="\uD83C\uDFB2 重 roll"><input type="button" id="iped-ledger-preview-close" class="menu_button" value="收起"></div>';
     h += '<div id="iped-ledger-preview-tip" style="color:#888;font-size:11px;margin-top:4px"></div>';
     h += '</div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px">'
+       +   '<input type="button" id="iped-ledger-export" class="menu_button" style="flex:1" value="\u2B07 \u5BFC\u51FA\u8D26\u672C">'
+       +   '<input type="button" id="iped-ledger-import" class="menu_button" style="flex:1" value="\u2B06 \u5BFC\u5165\u8D26\u672C">'
+       +   '<input type="button" id="iped-ledger-ep" class="menu_button" style="flex:1" value="\u{1F50D} \u770B\u8D34\u8033">'
+       + '</div>';
+    h += '<input type="file" id="iped-ledger-file" accept=".json,application/json" style="display:none">';
     h += '<div id="iped-ledger-stop" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-stop-btn" class="menu_button" style="width:100%" value="\u23F9 \u4E2D\u65AD\u8FD9\u6B21\u6302\u8D26"></div>';
     h += '<div id="iped-ledger-force" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-force-btn" class="menu_button" style="width:100%" value="\u26A0\uFE0F 强制采用这次结果"></div>';
     h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0">\u2014</div>';
@@ -4302,6 +4419,36 @@ function bindAll() {
 
     /* ---------- v2 新增控件绑定 ---------- */
     // 强制采用（缩水拦截后）
+    [["ipe-ledger-export","ipe-ledger-import","ipe-ledger-file"],
+     ["iped-ledger-export","iped-ledger-import","iped-ledger-file"]].forEach(function(ids){
+        var bE = q("#" + ids[0]), bI = q("#" + ids[1]), fi = q("#" + ids[2]);
+        if (bE && !bE.dataset.ipeBound) {
+            bE.dataset.ipeBound = "1";
+            bE.addEventListener("click", function(){ ipeLedgerExport(); });
+        }
+        if (bI && fi && !bI.dataset.ipeBound) {
+            bI.dataset.ipeBound = "1";
+            bI.addEventListener("click", function(){ try { fi.value = ""; fi.click(); } catch(e){} });
+        }
+        if (fi && !fi.dataset.ipeBound) {
+            fi.dataset.ipeBound = "1";
+            fi.addEventListener("change", function(){
+                var f = fi.files && fi.files[0];
+                if (!f) return;
+                var r = new FileReader();
+                r.onload  = function(){ ipeLedgerImportText(r.result); };
+                r.onerror = function(){ ipeLedgerStatus("读文件失败", "#d4726a"); };
+                r.readAsText(f);
+            });
+        }
+    });
+    ["ipe-ledger-ep","iped-ledger-ep"].forEach(function(id){
+        var b = q("#" + id);
+        if (b && !b.dataset.ipeBound) {
+            b.dataset.ipeBound = "1";
+            b.addEventListener("click", function(){ ipeLedgerInspectEP(); });
+        }
+    });
     ["ipe-ledger-stop-btn","iped-ledger-stop-btn"].forEach(function(id){
         var b = q("#" + id);
         if (b && !b.dataset.ipeBound) {
@@ -4313,7 +4460,7 @@ function bindAll() {
         var el = q("#" + id); if (!el) return;
         el.addEventListener("click", function(){
             if (ipeLedgerPending == null) { ipeLedgerStatus("没有待确认的结果", "#c9a227"); return; }
-            ipeLedgerCommit(ipeLedgerPending);
+            ipeLedgerCommit(ipeLedgerPending, ipeLedgerPreviewFloor || 0);
             ipeLedgerPending = null;
             ipeLedgerShowForce(false);
             ipeLedgerSync();
