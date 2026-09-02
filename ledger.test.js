@@ -58,7 +58,7 @@ function boot(floors) {
     const exposed = ["ipeLedgerRead", "ipeLedgerSave", "ipeLedgerCommit", "ipeLedgerReconcile",
         "ipeFloorNo", "ipeLedgerApplyEP", "ipeLedgerNormalize", "ipeLedgerStop",
         "ipeLedgerIsAbort", "ipeLedgerExport", "ipeLedgerImportText", "ipeLedgerInspectEP",
-        "EXT_NAME", "DEFAULTS", "IPE_LEDGER_EP_KEY", "init"];
+        "EXT_NAME", "DEFAULTS", "IPE_LEDGER_EP_KEY", "init", "ipeLedgerStripImageTag", "ipeLedgerBuildUser", "ipeLedgerReportBlock", "ipeLedgerPruneMirror"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") + " })();";
     try { w.eval(shim); } catch (e) { console.log("装载失败：" + e.message); }
@@ -187,6 +187,40 @@ console.log("\n\u30109\u3011 \u8D34\u8033\u81EA\u68C0\u7EDD\u4E0D\u80FD\u6C61\u6
     ok(out && String(out.textContent || "").indexOf("贴耳自检") >= 0,
         "自检文本落在只读框里");
     ok(!out || out.tagName === "PRE", "只读框是 pre，不是可编辑控件");
+}
+
+
+console.log("\n\u301010\u3011 生图 tag 剥离（2.9.2）");
+{
+    const { tavern, F } = boot(10);
+    const strip = F("ipeLedgerStripImageTag");
+    eq(strip("正文。\n\nimage###a girl###"), "正文。", "默认模板 前后缀都有：整段剥掉");
+    eq(strip("正文里提到 image###x### 这种写法。\n\nimage###real###"), "正文里提到 这种写法。", "前后缀齐全时按对剥（与旧行为一致）");
+    tavern.extensionSettings["image-prompt-extractor"].baseTemplatesJson = JSON.stringify([
+        { id: "tpl_1", name: "前缀", value: "IMG: {Description}" },
+        { id: "tpl_2", name: "无占位", value: "[pic]" }]);
+    eq(strip("他说 IMG: 不是这个。\n\nIMG: a girl by window"), "他说 IMG: 不是这个。", "只有前缀：从最后一次出现剥到楼尾，正文里同样的字不误伤");
+    eq(strip("正文。\n\n[pic]a girl"), "正文。", "模板没占位符：按 tpl+desc 拼接方式也能剥");
+}
+console.log("\n\u301011\u3011 摘要层不重复喂本轮那楼 + 楼号按正文所在层报");
+{
+    const { tavern, F } = boot(10);
+    tavern.chat[7].mes = "第8层 <report>八楼摘要</report>";
+    tavern.chat[9].mes = "第10层 <report>十楼摘要</report>";
+    const u10 = F("ipeLedgerBuildUser")(tavern.chat[9].mes, "", 10);
+    ok(u10.indexOf("八楼摘要") >= 0, "更早楼的 report 在摘要层");
+    ok(u10.split("十楼摘要").length === 2, "本轮那楼的 report 只出现一次（在正文里，不在摘要层）");
+    ok(u10.indexOf("【当前楼层】第 10 楼") >= 0, "楼号 10");
+    const u8 = F("ipeLedgerBuildUser")(tavern.chat[7].mes, "", 8);
+    ok(u8.indexOf("【当前楼层】第 8 楼") >= 0, "藏末楼读第 8 层时报第 8 楼，不再报 chat.length");
+}
+console.log("\n\u301012\u3011 镜像修剪");
+{
+    const { F } = boot(10);
+    const all = {}; for (let i = 0; i < 40; i++) all["c" + i] = { updatedAt: i };
+    const out = F("ipeLedgerPruneMirror")(all, 30);
+    eq(Object.keys(out).length, 30, "只留 30 个");
+    ok(out.c39 && !out.c0, "留的是最近活跃的");
 }
 
 console.log("\n" + "\u2500".repeat(46));

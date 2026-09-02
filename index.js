@@ -378,8 +378,28 @@ function ipeReadJsonLS(key) {
         return (v && typeof v === "object") ? v : {};
     } catch(e) { return {}; }
 }
+var IPE_LEDGER_MIRROR_MAX_CHATS = 30;   // 镜像只留最近活跃的这么多个聊天，主档在 chat_metadata 里不受影响
+function ipeLedgerPruneMirror(all, keepN) {
+    var keys = Object.keys(all || {});
+    if (keys.length <= keepN) return all;
+    keys.sort(function(a, b){ return (Number(all[b] && all[b].updatedAt) || 0) - (Number(all[a] && all[a].updatedAt) || 0); });
+    var out = {};
+    for (var i = 0; i < keepN && i < keys.length; i++) out[keys[i]] = all[keys[i]];
+    return out;
+}
 function ipeWriteJsonLS(key, obj) {
-    try { localStorage.setItem(key, JSON.stringify(obj || {})); } catch(e) {}
+    try { localStorage.setItem(key, JSON.stringify(obj || {})); return true; }
+    catch(e) {
+        // 撞到配额：只对账本镜像做减法——先砍到 10 个聊天，再砍到只剩当前这个，仍不行才放弃
+        if (key !== IPE_LEDGER_LS_KEY) return false;
+        try {
+            var cur = ipeChatKey();
+            var shrunk = ipeLedgerPruneMirror(obj, 10);
+            try { localStorage.setItem(key, JSON.stringify(shrunk)); return true; } catch(e2) {}
+            var only = {}; if (obj && obj[cur]) only[cur] = obj[cur];
+            localStorage.setItem(key, JSON.stringify(only)); return true;
+        } catch(e3) { return false; }
+    }
 }
 
 /* ---- v2 结构规整：每次读都过，改 schema 不炸 ---- */
@@ -479,8 +499,8 @@ function ipeLedgerSave(state) {
         try {
             var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
             all[ipeChatKey()] = clean;
-            ipeWriteJsonLS(IPE_LEDGER_LS_KEY, all);
-            lsOk = true;
+            all = ipeLedgerPruneMirror(all, IPE_LEDGER_MIRROR_MAX_CHATS);
+            lsOk = ipeWriteJsonLS(IPE_LEDGER_LS_KEY, all) !== false;
         } catch(eL) { lsOk = false; }
     }
     return { meta: metaOk, ls: lsOk };
@@ -496,7 +516,10 @@ function ipeLedgerCommit(text, atFloor) {
     ipeLedgerReconcile(Math.max(nowFloor, ipeFloorNo()), { silent: true });  // 落账前先对账，底下全是活楼
     var st = ipeLedgerRead();
     var old = String(st.current || "");
-    if (old.trim() && st.lastFloor >= 0 && st.lastFloor < nowFloor) {
+    if (old.trim() && st.lastFloor >= 0 && st.lastFloor !== nowFloor) {
+        // lastFloor < nowFloor：正常翻楼，旧账入历史。
+        // lastFloor > nowFloor：预览开着时自动挂账已经落了更新的一楼，现在采用的是旧楼稿——
+        // 新账不能就这么被静默覆盖掉，也进历史，后悔药里找得回。
         st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
     }
     st.current   = String(text || "");
@@ -595,6 +618,9 @@ function ipeLedgerReconcile(limit, opts) {
         if (!ipeChatKeyReady()) return false;          // 聊天没就绪不动账，防初始化竞态误杀
         var c = ctx();
         if (!c || !Array.isArray(c.chat)) return false;
+        // 换聊天/清屏瞬间 chat 可能短暂为空：这时 limit=0 会把整本账连历史一起碎光。
+        // 楼都没有就不对账，等楼回来再说。
+        if (!c.chat.length) return false;
     } catch(e0) { return false; }
     if (!Number.isFinite(Number(limit)) || Number(limit) < 0) limit = ipeFloorNo();
     limit = Number(limit);
@@ -679,7 +705,7 @@ function ipeLedgerProtocolNote() { return [
 /* ---- report 摘要层：定界符按字面转义，不让用户直接写正则 ---- */
 function ipeEscRe(s) { return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
-function ipeLedgerReportBlock() {
+function ipeLedgerReportBlock(skipFloor) {
     var m = Number(cfg().ledgerReportFloors);
     if (!Number.isFinite(m) || m <= 0) return "";
     if (m > 2000) m = 2000;
@@ -697,6 +723,7 @@ function ipeLedgerReportBlock() {
     for (var i = start; i < chat.length; i++) {
         var msg = chat[i];
         if (!msg || msg.is_user === true) continue;   // 只在非 user 楼里抠；藏楼照抠（特性）
+        if (Number.isFinite(Number(skipFloor)) && i === Number(skipFloor) - 1) continue;   // 本轮那楼已作正文全量投喂，摘要层不重复
         var txt = String(msg.mes || "");
         if (!txt) continue;
         re.lastIndex = 0;
@@ -753,25 +780,42 @@ function ipeLedgerStripImageTag(text) {
     try { if (cfg().baseTemplate) tpls.push(String(cfg().baseTemplate)); } catch(e) {}
     tpls.push("image###{Description}###");
 
+    var esc = function(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
+    /* 注入永远追加在楼尾（injectDescToMessage 只做 trimEnd + "\n\n" + tag）。
+       所以「只有前缀」和「模板没占位符」这两种，都从**最后一次**出现的位置剥到楼尾，
+       而不是从第一次出现就一路剥——正文里恰好有同样的字，不会被误伤。 */
+    var stripTail = function(str, marker) {
+        var k = str.lastIndexOf(marker);
+        if (k < 0) return str;
+        return str.slice(0, k).replace(/\s+$/, "");
+    };
+
     var seen = {};
     for (var i = 0; i < tpls.length; i++) {
         var t = tpls[i];
         if (!t || seen[t]) continue;
         seen[t] = true;
         var k = t.indexOf("{Description}");
-        if (k < 0) continue;
+        if (k < 0) {
+            // buildInjectTag 对无占位符模板是 tpl + desc 直接拼接：整个模板字面量就是前缀
+            if (t.trim()) out = stripTail(out, t);
+            continue;
+        }
         var pre = t.slice(0, k), suf = t.slice(k + "{Description}".length);
         if (!pre && !suf) continue;
-        var esc = function(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
-        try {
-            var re = new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + (suf ? esc(suf) : "$"), "g");
-            out = out.replace(re, "");
-        } catch(e) {}
+        if (pre && suf) {
+            try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
+        } else if (pre) {
+            out = stripTail(out, pre);
+        } else {
+            // 只有后缀：desc + suf 追加在楼尾，没有可靠起点，只能剥掉最后一段（最后一个空行之后到后缀）
+            try { out = out.replace(new RegExp("\\n\\n(?:(?!\\n\\n)[\\s\\S])*?" + esc(suf) + "\\s*$"), ""); } catch(e) {}
+        }
     }
     return out;
 }
 
-function ipeLedgerBuildUser(text, extra) {
+function ipeLedgerBuildUser(text, extra, atFloor) {
     try { ipeLedgerReconcile(ipeFloorNo(), { silent: true }); } catch(eRec) {}   // 副 AI 只许拿活楼的账当底稿
     var st = ipeLedgerRead();
     var u = "";
@@ -784,13 +828,14 @@ function ipeLedgerBuildUser(text, extra) {
     if (ex) u += "\u3010\u8fd9\u6b21\u989d\u5916\u8981\u6c42\u3011\n" + ex + "\n\n";
 
     ipeLedgerReportTruncated = false;
-    var rep = ipeLedgerReportBlock();
+    var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
+    var rep = ipeLedgerReportBlock(floorNo);
     if (rep) u += "\u3010\u5267\u60c5\u6458\u8981 \u00b7 \u8fd1 " + Number(cfg().ledgerReportFloors || 0) + " \u697c \u00b7 \u65e7\u2192\u65b0\u3011\n" + rep + "\n\n";
 
     var his = ipeLedgerHistoryBlock();
     if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0\u3011\n" + his + "\n\n";
 
-    u += "\u3010\u5f53\u524d\u697c\u5c42\u3011\u7b2c " + ipeFloorNo() + " \u697c\n\n";
+    u += "\u3010\u5f53\u524d\u697c\u5c42\u3011\u7b2c " + floorNo + " \u697c\n\n";   // 正文取自哪层就报哪层，藏末楼时不再虚报 chat.length
     u += "\u3010\u672c\u8f6e\u6b63\u6587\u3011\n" + ipeTrimSourceText(ipeLedgerStripImageTag(text));
     ipeLedgerLastUserChars = u.length;
     return u;
@@ -800,13 +845,13 @@ function ipeLedgerBuildUser(text, extra) {
 function ipeLedgerEstimateChars() {
     try {
         var chat = ctx().chat || [];
-        var msg = "";
+        var msg = "", fl = 0;
         for (var i = chat.length - 1; i >= 0; i--) {
             var m = chat[i];
-            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m.mes; break; }
+            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m.mes; fl = i + 1; break; }
         }
         var sys = ipeLedgerSystemText().length;
-        var usr = ipeLedgerBuildUser(msg).length;
+        var usr = ipeLedgerBuildUser(msg, "", fl).length;
         return sys + usr;
     } catch(e) { return 0; }
 }
@@ -819,7 +864,7 @@ function ipeLedgerApiItem() {
     return null;
 }
 
-async function ipeLedgerCallAPI(text, extra) {
+async function ipeLedgerCallAPI(text, extra, atFloor) {
     var item = ipeLedgerApiItem();
     if (!item || !item.endpoint) throw new Error("请先在挂账页选一套 API 预设（地址为空）");
     if (!item.model) throw new Error("这套 API 预设没有选模型");
@@ -832,7 +877,7 @@ async function ipeLedgerCallAPI(text, extra) {
         model: item.model,
         messages: [
             { role: "system", content: ipeLedgerSystemText() },
-            { role: "user",   content: ipeLedgerBuildUser(text, extra) }
+            { role: "user",   content: ipeLedgerBuildUser(text, extra, atFloor) }
         ],
         temperature: 0.2,
         stream: false
@@ -962,7 +1007,7 @@ async function ipeLedgerRunManual() {
     ipeLedgerStatus("正在挂账…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var ex  = ipeLedgerExtraOnce();
-        var out = await ipeLedgerCallAPI(msg.mes, ex);
+        var out = await ipeLedgerCallAPI(msg.mes, ex, msgFloor);
         var got = ipeLedgerExtract(out);          // 有标签顺手剥，没标签原样给
         var body = (got && got.text) ? got.text : String(out || "");
         ipeLedgerShowPreview(body, !got || got.level === 4);
@@ -1062,7 +1107,7 @@ async function ipeLedgerRun(targetIdx, silent) {
     ipeLedgerShowForce(false);
     ipeLedgerStatus("自动挂账中…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
-        var out = await ipeLedgerCallAPI(msg.mes);
+        var out = await ipeLedgerCallAPI(msg.mes, "", msgFloor);
         var got = ipeLedgerExtract(out);
 
         if (!got || !got.text) {                               // 保底 2/3：整个回复是空的
@@ -3208,6 +3253,12 @@ function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAt
                     setStatus("自动重试已取消：目标消息不存在", "#888");
                     return;
                 }
+                // 这 10 秒里要是 swipe / 重roll / 手改了这一楼，正文已经不是当初那份——
+                // 再把旧描述注进新 swipe 就是张冠李戴。楼变了就不补注了。
+                if (String(target.mes || "") !== String(text || "")) {
+                    setStatus("自动重试已取消：这一楼内容已变化（swipe/重roll/编辑）", "#888");
+                    return;
+                }
             }
             setStatus("正在自动重试 API 请求…", "#6ec577");
             runExtract(text, supplement || "", autoInjectNow, targetIdx, retryAttempt + 1);
@@ -4877,6 +4928,13 @@ function injectDescToMessage(desc, targetIdx) {
     }
 
     msg.mes = String(msg.mes || "").trimEnd() + "\n\n" + tag;
+    // 酒馆左右滑 swipe 时会用 swipes[swipe_id] 覆盖 mes（syncSwipeToMes），
+    // 只写 mes 不写 swipes，一滑回来注入的 tag 就没了。两边同步。
+    try {
+        if (Array.isArray(msg.swipes) && Number.isInteger(msg.swipe_id) && msg.swipe_id >= 0 && msg.swipe_id < msg.swipes.length) {
+            msg.swipes[msg.swipe_id] = msg.mes;
+        }
+    } catch(eSw) {}
     if (typeof c.saveChat === "function") c.saveChat();
 
     var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');

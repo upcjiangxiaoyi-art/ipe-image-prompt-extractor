@@ -1157,6 +1157,23 @@
 #ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) > label {
     width: 100% !important;
     justify-content: space-between !important;
+    /* 2.9.2：整行原本都是 label，点文字、点空白都会翻开关。
+       只让勾选框本身吃点击，行其余部分只是说明文字。 */
+    pointer-events: none !important;
+}
+#ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) > label > input[type="checkbox"] {
+    pointer-events: auto !important;
+    width: 18px !important;
+    height: 18px !important;
+    flex: 0 0 18px !important;
+    cursor: pointer !important;
+}
+#ipe-drawer .inline-drawer-content label:has(> input[type="checkbox"]) {
+    pointer-events: none !important;
+}
+#ipe-drawer .inline-drawer-content label > input[type="checkbox"] {
+    pointer-events: auto !important;
+    cursor: pointer !important;
 }
 
 /* ---------- 按钮与状态 ---------- */
