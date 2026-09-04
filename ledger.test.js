@@ -365,6 +365,58 @@ await (async () => {
     ok(F("ipeLedgerRead")().current.indexOf("慢慢流回来") >= 0, "总时长超过阈值但每块都在续命，照样落账", statusText(w));
 })();
 
+console.log("\n【19】 空回复要说清原因：finish_reason=length 是思考吃光额度");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    withApi(tavern, F, "gpt-5");
+    F("ipeLedgerCommit")("白卷之前的账本，够长够长够长够长够长够长。", 8);
+    w.fetch = async () => ({ ok: true, status: 200, body: sseBody([
+        'data: {"choices":[{"delta":{"role":"assistant","content":""}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"\\n"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+        'data: [DONE]\n\n'
+    ]) });
+    await F("ipeLedgerRun")(9, true);
+    ok(statusText(w).indexOf("length") >= 0 && statusText(w).indexOf("额度") >= 0, "状态行点名 finish_reason=length 与额度吃光", statusText(w));
+    ok(F("ipeLedgerRead")().current.indexOf("白卷之前") >= 0, "账本没动");
+})();
+
+console.log("\n【20】 输出上限：思考模型发 max_completion_tokens，普通模型发 max_tokens，0 不发");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-5");
+    let sent = null;
+    const okStream = () => ({ ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>上限测试账本，够长够长够长够长够长够长。</ledger>"}}]}\n']) });
+    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return okStream(); };
+    await F("ipeLedgerRun")(9, true);
+    ok(!("max_tokens" in sent) && !("max_completion_tokens" in sent), "默认 0：两种都不发");
+    st.ledgerMaxTokens = 16000;
+    await F("ipeLedgerRun")(9, true);
+    eq(sent.max_completion_tokens, 16000, "gpt-5 → max_completion_tokens");
+    ok(!("max_tokens" in sent), "gpt-5 不发 max_tokens");
+    st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "t", endpoint: "http://x.test/v1", key: "k", model: "gpt-4.1" }]);
+    await F("ipeLedgerRun")(9, true);
+    eq(sent.max_tokens, 16000, "gpt-4.1 → max_tokens");
+    ok(!("max_completion_tokens" in sent), "gpt-4.1 不发 max_completion_tokens");
+})();
+
+console.log("\n【21】 首字节之后看门狗放宽一倍：首字节前 1 秒判死，首字节后能扛 1.5 秒沉默");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-5");
+    st.ledgerIdleTimeout = 1;
+    const enc = new TextEncoder();
+    let i = 0;
+    const pieces = ['data: {"choices":[{"delta":{"content":"\\n"}}]}\n', 'data: {"choices":[{"delta":{"content":"<ledger>放宽后收到的账本，够长够长够长够长够长够长。</ledger>"}}]}\n'];
+    w.fetch = async () => ({ ok: true, status: 200, body: { getReader() { return { async read() {
+        if (i >= pieces.length) return { done: true };
+        if (i === 1) await new Promise(r => setTimeout(r, 1500));   // 首字节之后沉默 1.5 秒：> 1 秒，< 2 秒
+        return { done: false, value: enc.encode(pieces[i++]) };
+    } }; } } });
+    await F("ipeLedgerRun")(9, true);
+    ok(F("ipeLedgerRead")().current.indexOf("放宽后") >= 0, "首字节后 1.5 秒沉默没被判死", statusText(w));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
