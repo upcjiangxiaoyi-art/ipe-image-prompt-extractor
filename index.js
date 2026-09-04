@@ -43,7 +43,10 @@ const DEFAULTS = {
     ledgerInlineShow: true,
     ledgerPromptPresetsJson: "", activeLedgerPrompt: "lp_1",
     ledgerNotePresetsJson: "",   activeLedgerNote: "ln_1",
-    ledgerAutoRun: false
+    ledgerAutoRun: false,
+    ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
+    ledgerIdleTimeout: 300,        // 秒。「连续多少秒一个字节都没收到」才判死；0 = 永不
+    ledgerReasoningEffort: ""      // reasoning_effort；空 = 不发，用模型默认
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -864,6 +867,115 @@ function ipeLedgerApiItem() {
     return null;
 }
 
+/* ---- 思考模型识别 ----
+   o 系列 / gpt-5 系列不吃非默认 temperature，硬发 0.2 官方直连立刻 400。
+   gpt-5-chat-latest 是例外：它不思考，也接受 temperature。 */
+function ipeLedgerIsReasoningModel(model) {
+    var m = String(model || "").trim().toLowerCase();
+    if (!m) return false;
+    if (/^gpt-5/.test(m) && m.indexOf("chat") >= 0) return false;
+    return /^(o\d|gpt-5)/.test(m);
+}
+
+function ipeLedgerIdleMs() {
+    var sec = Number(cfg().ledgerIdleTimeout);
+    if (!Number.isFinite(sec) || sec <= 0) return 0;
+    return Math.max(1, Math.floor(sec)) * 1000;
+}
+
+/* ---- 空闲看门狗 ----
+   2.8.2 之前挂账没有任何超时：requestTimeout 默认 0 且没有界面能改，
+   ipeFetchWithTimeout 拿到 0 直接返回裸 fetch。副 AI 一挂死，Busy 永远是
+   true，之后每一楼自动挂账全被「上一次还没跑完」挡掉，失败计数也不走。
+   现在改成看门狗：不是「总共多久」，是「连续多久一个字节都没收到」。
+   思考模型想五分钟没关系，只要连接活着、字节还在流，就不判死。 */
+function ipeLedgerWatchdog(controller, idleMs) {
+    var timer = null, fired = false;
+    function clear() { if (timer) { clearTimeout(timer); timer = null; } }
+    function kick() {
+        if (!idleMs || !controller) return;
+        clear();
+        timer = setTimeout(function(){
+            fired = true;
+            try { controller.abort(); } catch(e) {}
+        }, idleMs);
+    }
+    return { kick: kick, clear: clear, fired: function(){ return fired; } };
+}
+
+/* ---- SSE 逐块拼 delta ----
+   四种回法都认，代码不看内容写了什么：
+     1 标准流      data: {"choices":[{"delta":{"content":"…"}}]}
+     2 思考流      delta.reasoning_content / delta.reasoning 只计数，不进账本
+     3 中转偷懒    要了 stream:true 却整包 JSON 回来 → 回退 parseChatResponse
+     4 流里夹 error 对象 → 当场抛，不等 [DONE]
+   onChunk 每收到一块就喊一声（喂看门狗），onProgress 给状态行报字数。 */
+async function ipeLedgerReadStream(res, onChunk, onProgress) {
+    var content = "", reasonChars = 0, sawData = false, buf = "", allText = "";
+    var lastReport = 0;
+    function report(force) {
+        if (typeof onProgress !== "function") return;
+        var now = Date.now();
+        if (!force && now - lastReport < 400) return;
+        lastReport = now;
+        try { onProgress(content.length, reasonChars); } catch(e) {}
+    }
+    function handleLine(line) {
+        line = line.replace(/\r$/, "");
+        if (!/^data:/.test(line)) return;
+        var payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") return;
+        var j; try { j = JSON.parse(payload); } catch(e) { return; }
+        sawData = true;
+        if (j && j.error) {
+            var em = (j.error && (j.error.message || j.error.msg)) || JSON.stringify(j.error);
+            throw new Error("API 流内报错：" + String(em).slice(0, 180));
+        }
+        var ch = j && j.choices && j.choices[0];
+        if (!ch) return;
+        var d = ch.delta || ch.message || {};
+        if (typeof d.content === "string") content += d.content;
+        else if (Array.isArray(d.content)) d.content.forEach(function(p){
+            if (!p) return;
+            if (typeof p === "string") content += p;
+            else if (typeof p.text === "string") content += p.text;
+        });
+        var r = d.reasoning_content != null ? d.reasoning_content : d.reasoning;
+        if (typeof r === "string") reasonChars += r.length;
+    }
+    function feed(chunk) {
+        if (!chunk) return;
+        buf += chunk; allText += chunk;
+        var idx;
+        while ((idx = buf.indexOf("\n")) >= 0) {
+            var line = buf.slice(0, idx); buf = buf.slice(idx + 1);
+            handleLine(line);
+        }
+        report(false);
+    }
+    if (res.body && typeof res.body.getReader === "function" && typeof TextDecoder !== "undefined") {
+        var reader = res.body.getReader();
+        var dec = new TextDecoder("utf-8");
+        while (true) {
+            var r = await reader.read();
+            if (r.done) break;
+            if (typeof onChunk === "function") onChunk();
+            feed(dec.decode(r.value, { stream: true }));
+        }
+        feed(dec.decode());
+    } else {
+        feed(await res.text());   // 没有可读流的环境：整包读
+    }
+    if (buf) handleLine(buf);
+    report(true);
+    if (sawData) return content.trim();
+    // 一行 data: 都没见到 → 不是 SSE，按整包 JSON 处理
+    var data;
+    try { data = JSON.parse(allText); }
+    catch(e) { throw new Error("返回既不是 SSE 也不是 JSON：" + allText.slice(0, 160)); }
+    return parseChatResponse(data);
+}
+
 async function ipeLedgerCallAPI(text, extra, atFloor) {
     var item = ipeLedgerApiItem();
     if (!item || !item.endpoint) throw new Error("请先在挂账页选一套 API 预设（地址为空）");
@@ -872,6 +984,8 @@ async function ipeLedgerCallAPI(text, extra, atFloor) {
     var headers = { "Content-Type": "application/json" };
     if (item.key) headers["Authorization"] = "Bearer " + item.key;
 
+    var useStream = cfg().ledgerStream !== false;
+
     // system 只放用户预设，代码不再追加任何内容
     var body = {
         model: item.model,
@@ -879,26 +993,58 @@ async function ipeLedgerCallAPI(text, extra, atFloor) {
             { role: "system", content: ipeLedgerSystemText() },
             { role: "user",   content: ipeLedgerBuildUser(text, extra, atFloor) }
         ],
-        temperature: 0.2,
-        stream: false
+        stream: useStream
     };
+    if (!ipeLedgerIsReasoningModel(item.model)) body.temperature = 0.2;
+    var eff = String(cfg().ledgerReasoningEffort || "").trim();
+    if (eff) body.reasoning_effort = eff;
 
     /* 副 AI 有时候半天不回，或者这套预设本来就不通——得能自己掐掉。
-       生图那条管线早就有 ipeAbortController，挂账这边一直是裸跑的。 */
+       ⏹ 按钮走 ipeLedgerAbort；看门狗也走它，但用 fired() 区分「人掐的」和「空闲判死」。 */
     ipeLedgerAbort = (typeof AbortController !== "undefined") ? new AbortController() : null;
-    var res = await ipeFetchWithTimeout(
-        buildChatUrl(item.endpoint),
-        { method: "POST", headers: headers, body: JSON.stringify(body),
-          signal: ipeLedgerAbort ? ipeLedgerAbort.signal : undefined },
-        Number(cfg().requestTimeout || 0)
-    );
-    var raw = await res.text();
-    if (!res.ok) throw new Error("API " + res.status + "：" + raw.slice(0, 180));
-    var data;
-    try { data = JSON.parse(raw); } catch(e) { throw new Error("返回不是 JSON：" + raw.slice(0, 160)); }
-    var out = parseChatResponse(data);
-    if (!out) throw new Error("响应里没有内容：" + raw.slice(0, 160));
-    return out;
+    var idleMs = ipeLedgerIdleMs();
+    var dog = ipeLedgerWatchdog(ipeLedgerAbort, idleMs);
+    var startedAt = Date.now();
+    function progress(chars, reasonChars) {
+        var sec = Math.round((Date.now() - startedAt) / 1000);
+        var t = chars > 0
+            ? "挂账中…副 AI 正在写账本，已收 " + chars + " 字"
+            : (reasonChars > 0 ? "挂账中…副 AI 思考中（思考 " + reasonChars + " 字）" : "挂账中…等副 AI 开口");
+        ipeLedgerStatus(t + "，" + sec + " 秒（先别发下一条，贴耳还是上一份）", "#c9a227");
+    }
+
+    try {
+        dog.kick();
+        var res = await fetch(buildChatUrl(item.endpoint), {
+            method: "POST", headers: headers, body: JSON.stringify(body),
+            signal: ipeLedgerAbort ? ipeLedgerAbort.signal : undefined
+        });
+        dog.kick();
+        if (!res.ok) {
+            var errRaw = await res.text();
+            throw new Error("API " + res.status + "：" + errRaw.slice(0, 180));
+        }
+        var out;
+        if (useStream) {
+            out = await ipeLedgerReadStream(res, dog.kick, progress);
+        } else {
+            var raw = await res.text();
+            var data;
+            try { data = JSON.parse(raw); } catch(e) { throw new Error("返回不是 JSON：" + raw.slice(0, 160)); }
+            out = parseChatResponse(data);
+            if (!out) throw new Error("响应里没有内容：" + raw.slice(0, 160));
+        }
+        if (!out) throw new Error("副 AI 回了个空（流式已收完，正文为零字）");
+        return out;
+    } catch(e) {
+        if (dog.fired()) {
+            throw new Error("挂账超时：连续 " + Math.round(idleMs / 1000) + " 秒没收到副 AI 任何字节，已主动断开。"
+                + (useStream ? "连接大概率在中转那头卡死了，换套 API 预设试试。" : "思考模型请把「流式接收」打开。"));
+        }
+        throw e;
+    } finally {
+        dog.clear();
+    }
 }
 
 /* ---- 降级阶梯：笨 AI 记不住包裹也照样能收 ----
@@ -1914,6 +2060,22 @@ function ipeLedgerRefreshBotEditors() {
     });
     ["ipe-ledger-nochange","iped-ledger-nochange"].forEach(function(id){
         var el = q("#" + id); if (el) el.checked = cfg().ledgerAllowNoChange === true;
+    });
+    ["ipe-ledger-stream","iped-ledger-stream"].forEach(function(id){
+        var el = q("#" + id); if (el) el.checked = cfg().ledgerStream !== false;
+    });
+    ["ipe-ledger-idle","iped-ledger-idle"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var v = String(Math.max(0, Math.floor(Number(cfg().ledgerIdleTimeout) || 0)));
+        if (el.value !== v && doc.activeElement !== el) el.value = v;
+    });
+    ["ipe-ledger-effort","iped-ledger-effort"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        if (!el.options || !el.options.length) {
+            el.innerHTML = '<option value="">不发（模型默认）</option>'
+                + ["minimal","low","medium","high"].map(function(v){ return '<option value="'+v+'">'+v+'</option>'; }).join("");
+        }
+        el.value = String(cfg().ledgerReasoningEffort || "");
     });
     ["ipe-ledger-inline","iped-ledger-inline"].forEach(function(id){
         var el = q("#" + id); if (el) el.checked = cfg().ledgerInlineShow !== false;
@@ -3841,6 +4003,12 @@ function createPanel() {
             '<div class="ipe-preview-actions" style="margin-top:2px"><button id="ipe-ledger-tag-reset" class="ipe-btn" type="button">恢复成 &lt;ledger&gt;</button></div>'+
             '<div style="color:#888;font-size:12px;margin-top:10px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">允许副 AI 回「没变化」省一次重写 <input type="checkbox" id="ipe-ledger-nochange"></label></div>'+
             '<div class="ipe-hint">默认关。开了能省 token，但状态快照式的预设容易被它当借口天天不更新。</div>'+
+            '<div style="color:#888;font-size:12px;margin-top:10px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">流式接收（思考模型必开） <input type="checkbox" id="ipe-ledger-stream"></label></div>'+
+            '<div class="ipe-hint">默认开。副 AI 边想边把字节流回来，中转不会因为「半天没动静」把连接掐断；关了就是老的整包干等。</div>'+
+            '<label>空闲超时（秒，0 = 永不）<input type="text" id="ipe-ledger-idle" placeholder="300"></label>'+
+            '<div class="ipe-hint">不是总时长，是「连续多少秒一个字节都没收到」才判死，思考再久只要连接活着就不算。超时算一次失败，自动挂账连撞两次照样自动关。</div>'+
+            '<label>思考强度 reasoning_effort<select id="ipe-ledger-effort"></select></label>'+
+            '<div class="ipe-hint">只对 o 系列 / gpt-5 这类思考模型有意义。不发 = 用模型默认；记账一般 low 就够，high 一楼能想好几分钟。</div>'+
             '<div id="ipe-ledger-size" class="ipe-hint" style="margin-top:6px"></div>'+
         '</div></details>'+
         '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
@@ -4003,6 +4171,12 @@ function createDrawer() {
     h += '<div style="margin-top:6px"><input type="button" id="iped-ledger-tag-reset" class="menu_button" value="恢复成 &lt;ledger&gt;"></div>';
     h += '<div style="margin-top:10px"><label>允许副 AI 回「没变化」省一次重写 <input type="checkbox" id="iped-ledger-nochange"></label></div>';
     h += '<small style="color:#888">默认关。开了省 token，但快照式预设容易被它当借口不更新。</small>';
+    h += '<div style="margin-top:10px"><label>流式接收（思考模型必开） <input type="checkbox" id="iped-ledger-stream"></label></div>';
+    h += '<small style="color:#888">默认开。边想边流字节回来，中转不会因空闲掐连接；关了就是整包干等。</small>';
+    h += '<label>空闲超时（秒，0 = 永不）</label><input type="text" id="iped-ledger-idle" class="text_pole" placeholder="300">';
+    h += '<small style="color:#888">「连续多少秒一个字节都没收到」才判死，思考再久只要连接活着就不算。超时算一次失败。</small>';
+    h += '<label>思考强度 reasoning_effort</label><select id="iped-ledger-effort" class="text_pole"></select>';
+    h += '<small style="color:#888">只对 o 系列 / gpt-5 这类思考模型有意义。不发 = 模型默认；记账一般 low 就够。</small>';
     h += '<div id="iped-ledger-size" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
     h += '<div style="margin-bottom:6px"><label>自动挂账（每来一楼跑一次） <input type="checkbox" id="iped-ledger-auto"></label></div>';
@@ -4612,6 +4786,31 @@ function bindAll() {
             save("ledgerAllowNoChange", !!el.checked);
             ipeLedgerRefreshBotEditors();
             ipeLedgerStatus(el.checked ? "已允许副 AI 回「没变化」" : "已要求每轮都重写完整账本", "#6ec577");
+        });
+    });
+    ["ipe-ledger-stream","iped-ledger-stream"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.addEventListener("change", function(){
+            save("ledgerStream", !!el.checked);
+            ipeLedgerRefreshBotEditors();
+            ipeLedgerStatus(el.checked ? "挂账改为流式接收" : "挂账改为整包等待（思考模型容易被中转掐断）", el.checked ? "#6ec577" : "#c9a227");
+        });
+    });
+    ["ipe-ledger-idle","iped-ledger-idle"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.addEventListener("change", function(){
+            var n = Math.max(0, Math.floor(Number(el.value) || 0));
+            save("ledgerIdleTimeout", n);
+            ipeLedgerRefreshBotEditors();
+            ipeLedgerStatus(n > 0 ? "空闲超时 " + n + " 秒（连续这么久没字节才判死）" : "已关闭空闲超时——挂死只能手点 ⏹ 中断", n > 0 ? "#6ec577" : "#c9a227");
+        });
+    });
+    ["ipe-ledger-effort","iped-ledger-effort"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.addEventListener("change", function(){
+            save("ledgerReasoningEffort", String(el.value || ""));
+            ipeLedgerRefreshBotEditors();
+            ipeLedgerStatus(el.value ? "reasoning_effort = " + el.value : "不发 reasoning_effort，用模型默认", "#6ec577");
         });
     });
     ["ipe-ledger-tag-reset","iped-ledger-tag-reset"].forEach(function(id){
