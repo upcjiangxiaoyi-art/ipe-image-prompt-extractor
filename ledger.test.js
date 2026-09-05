@@ -571,6 +571,9 @@ await (async () => {
     F("ipeZoomOpen")(src);
     const ov = d.getElementById("ipe-zoom-overlay");
     ok(!!ov, "弹窗出现了");
+    eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
+    ok(ov.style.zIndex === "2147483000" && ov.style.display === "flex", "层级与布局也内联");
+    eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
     big.dispatchEvent(new w.Event("input", { bubbles: true }));

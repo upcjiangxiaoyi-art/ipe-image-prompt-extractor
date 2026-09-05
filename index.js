@@ -4,6 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
+var IPE_VERSION = "2.11.3";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4602,13 +4603,27 @@ function ipeZoomOpen(ta) {
     if (!ta) return;
     var d = ipeRootDocument();
     ipeZoomClose();
+    var mist = cfg().mistTheme === true;
     var ov = d.createElement("div");
     ov.id = "ipe-zoom-overlay";
-    ov.className = "ipe-zoom-overlay" + (cfg().mistTheme === true ? " ipe-mist" : "");
-    ov.innerHTML = '<div class="ipe-zoom-box">'
-        + '<div class="ipe-zoom-head"><span class="ipe-zoom-title"></span><span class="ipe-zoom-count"></span>'
-        + '<button type="button" class="ipe-zoom-close">完成</button></div>'
-        + '<textarea class="ipe-zoom-ta" spellcheck="false"></textarea></div>';
+    ov.className = "ipe-zoom-overlay" + (mist ? " ipe-mist" : "");
+    /* 关键样式全部内联：酒馆会缓存扩展的 style.css，更新后 JS 是新的、CSS 可能还是旧的，
+       只靠外部 CSS 的话弹窗会变成一个躺在页面底部看不见的 div。外部 CSS 只做锦上添花。 */
+    ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483000;background:rgba(0,0,0,.55);"
+        + "display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;margin:0";
+    var boxBg = mist ? "#F7F4EE" : "rgba(28,28,32,.98)", fg = mist ? "#2f3d4a" : "#d4d4d4";
+    var taBg = mist ? "#fff" : "rgba(255,255,255,.05)", bd = mist ? "rgba(0,0,0,.12)" : "rgba(255,255,255,.1)";
+    var small = false;
+    try { var rw = ipeRootWindow(); small = !!(rw && rw.innerWidth && rw.innerWidth <= 480); } catch(e) {}
+    ov.innerHTML = '<div class="ipe-zoom-box" style="width:' + (small ? '100%' : 'min(920px,100%)') + ';height:' + (small ? '100%' : 'min(86vh,100%)')
+        + ';background:' + boxBg + ';color:' + fg + ';border:1px solid ' + bd + ';border-radius:' + (small ? '0' : '14px')
+        + ';display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.5);font-family:-apple-system,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;font-size:13px;box-sizing:border-box">'
+        + '<div class="ipe-zoom-head" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ' + bd + ';flex-shrink:0">'
+        + '<span class="ipe-zoom-title" style="font-weight:600;font-size:14px"></span>'
+        + '<span class="ipe-zoom-count" style="font-size:11px;opacity:.7;margin-left:auto"></span>'
+        + '<button type="button" class="ipe-zoom-close" style="padding:6px 14px;border-radius:8px;border:1px solid rgba(110,197,119,.45);background:rgba(110,197,119,.18);color:' + (mist ? '#2f6b3a' : '#6ec577') + ';cursor:pointer;font-size:13px;font-family:inherit">完成</button></div>'
+        + '<textarea class="ipe-zoom-ta" spellcheck="false" style="flex:1;margin:' + (small ? '8px' : '12px') + ';padding:12px;background:' + taBg + ';color:' + fg + ';border:1px solid ' + bd
+        + ';border-radius:10px;font-size:' + (small ? '16px' : '15px') + ';line-height:1.6;resize:none;outline:none;font-family:inherit;box-sizing:border-box;width:auto;min-height:0"></textarea></div>';
     ov.querySelector(".ipe-zoom-title").textContent = ipeZoomTitleFor(ta);
     var count = ov.querySelector(".ipe-zoom-count");
     var big = ov.querySelector(".ipe-zoom-ta");
@@ -4631,7 +4646,36 @@ function ipeZoomOpen(ta) {
     (d.body || d.documentElement).appendChild(ov);
     setTimeout(function(){ try { big.focus(); big.setSelectionRange(big.value.length, big.value.length); } catch(e) {} }, 30);
 }
+/* 酒馆缓存旧 style.css 的自救：探针元素拿不到新样式，就找到本插件的 <link> 带版本号重载一次 */
+var ipeCssBusted = false;
+function ipeEnsureFreshCss() {
+    if (ipeCssBusted) return;
+    try {
+        var d = ipeRootDocument();
+        var probe = d.createElement("i");
+        probe.className = "ipe-zoom-btn";
+        probe.style.cssText = "";
+        (d.body || d.documentElement).appendChild(probe);
+        var pos = "";
+        try { pos = (d.defaultView || window).getComputedStyle(probe).position; } catch(e) {}
+        if (probe.parentNode) probe.parentNode.removeChild(probe);
+        if (pos === "absolute") return;                       // 新 CSS 在，不用管
+        var ver = "";
+        try { ver = String((typeof IPE_VERSION !== "undefined" && IPE_VERSION) || Date.now()); } catch(e) { ver = String(Date.now()); }
+        var links = d.querySelectorAll('link[rel="stylesheet"]');
+        for (var i = 0; i < links.length; i++) {
+            var href = String(links[i].getAttribute("href") || "");
+            if (/image-prompt-extractor[^"']*\/style\.css/i.test(href) || /\/ipe[^"']*\/style\.css/i.test(href)) {
+                links[i].setAttribute("href", href.split("?")[0] + "?v=" + encodeURIComponent(ver));
+                ipeCssBusted = true;
+                try { console.log("[IPE] style.css 疑似旧缓存，已带版本号重载"); } catch(e) {}
+            }
+        }
+    } catch(e) {}
+}
+
 function ipeInstallZoomButtons() {
+    ipeEnsureFreshCss();
     ["#ipe-panel", "#ipe-drawer"].forEach(function(sel){
         var root = q(sel); if (!root) return;
         var list = root.querySelectorAll("textarea");
@@ -4639,9 +4683,12 @@ function ipeInstallZoomButtons() {
             if (ta.__ipeZoom) return; ta.__ipeZoom = true;
             var doc = ta.ownerDocument;
             var wrap = doc.createElement("div"); wrap.className = "ipe-zoom-wrap";
+            wrap.style.cssText = "position:relative;width:100%";
             ta.parentNode.insertBefore(wrap, ta); wrap.appendChild(ta);
             var btn = doc.createElement("button");
             btn.type = "button"; btn.className = "ipe-zoom-btn"; btn.title = "放大编辑"; btn.textContent = "⤢";
+            btn.style.cssText = "position:absolute;top:4px;right:6px;z-index:2;width:22px;height:22px;line-height:20px;padding:0;margin:0;"
+                + "border-radius:6px;border:1px solid rgba(128,128,128,.35);background:rgba(28,28,32,.55);color:#ccc;font-size:12px;cursor:pointer;opacity:.75";
             btn.addEventListener("click", function(ev){ ev.preventDefault(); ev.stopPropagation(); ipeZoomOpen(ta); });
             wrap.appendChild(btn);
         })(list[i]);
