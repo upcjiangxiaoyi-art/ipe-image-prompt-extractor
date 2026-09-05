@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.11.4";
+var IPE_VERSION = "2.11.5";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4598,6 +4598,14 @@ function ipeZoomClose() {
         if (ov.__ipeKey) d.removeEventListener("keydown", ov.__ipeKey);
         if (ov.parentNode) ov.parentNode.removeChild(ov);
     } catch(e) {}
+    try {
+        var ball = q("#ipe-chat-quick-entry");
+        if (ball && "__ipeZoomPrevVis" in ball) {
+            ball.style.removeProperty("visibility");
+            if (ball.__ipeZoomPrevVis) ball.style.visibility = ball.__ipeZoomPrevVis;
+            delete ball.__ipeZoomPrevVis;
+        }
+    } catch(e) {}
 }
 function ipeZoomOpen(ta) {
     if (!ta) return;
@@ -4609,19 +4617,32 @@ function ipeZoomOpen(ta) {
     ov.className = "ipe-zoom-overlay" + (mist ? " ipe-mist" : "");
     /* 关键样式全部内联：酒馆会缓存扩展的 style.css，更新后 JS 是新的、CSS 可能还是旧的，
        只靠外部 CSS 的话弹窗会变成一个躺在页面底部看不见的 div。外部 CSS 只做锦上添花。 */
-    ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;min-height:100%;z-index:2147483000;background:rgba(0,0,0,.55);"
+    ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;min-height:100%;background:" + (mist ? "rgba(70,82,94,.38)" : "rgba(0,0,0,.55)") + ";"
         + "display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;margin:0;transform:none";
-    var boxBg = mist ? "#F7F4EE" : "rgba(28,28,32,.98)", fg = mist ? "#2f3d4a" : "#d4d4d4";
-    var taBg = mist ? "#fff" : "rgba(255,255,255,.05)", bd = mist ? "rgba(0,0,0,.12)" : "rgba(255,255,255,.1)";
+    /* 面板自己被强制到 2147483646 !important（ipeHardOpenPanel），弹窗必须再高一级且同样 important，否则压在面板底下 */
+    try { ov.style.setProperty("z-index", "2147483647", "important"); } catch(e) { ov.style.zIndex = "2147483647"; }
+    try {
+        var ball0 = q("#ipe-chat-quick-entry");
+        if (ball0) { ball0.__ipeZoomPrevVis = ball0.style.visibility; ball0.style.setProperty("visibility", "hidden", "important"); }
+    } catch(e) {}
+    /* 开灯皮跟面板同一套：莫兰迪雾蓝 #7C93A6 / 深汀 #5E7A92 / 正文 #4A5662 */
+    var boxBg = mist ? "linear-gradient(168deg, rgba(243,245,248,.99) 0%, rgba(235,239,244,.99) 48%, rgba(228,233,239,.99) 100%)" : "rgba(28,28,32,.98)";
+    var fg = mist ? "#4A5662" : "#d4d4d4";
+    var taBg = mist ? "rgba(255,255,255,.72)" : "rgba(255,255,255,.05)";
+    var bd = mist ? "rgba(140,156,172,.32)" : "rgba(255,255,255,.1)";
+    var headBg = mist ? "linear-gradient(90deg, rgba(196,216,232,.55) 0%, rgba(214,208,232,.40) 100%)" : "transparent";
+    var closeCss = mist
+        ? "border:1px solid rgba(124,147,166,.55);background:rgba(124,147,166,.18);color:#5E7A92"
+        : "border:1px solid rgba(110,197,119,.45);background:rgba(110,197,119,.18);color:#6ec577";
     var small = false;
     try { var rw = ipeRootWindow(); small = !!(rw && rw.innerWidth && rw.innerWidth <= 480); } catch(e) {}
     ov.innerHTML = '<div class="ipe-zoom-box" style="width:' + (small ? '100%' : 'min(920px,100%)') + ';height:' + (small ? '100%' : 'min(86vh,100%)')
-        + ';background:' + boxBg + ';color:' + fg + ';border:1px solid ' + bd + ';border-radius:' + (small ? '0' : '14px')
+        + ';background:' + boxBg + ';color:' + fg + ';border:1px solid ' + bd + ';border-radius:' + (small ? '0' : '14px') + (mist ? ';box-shadow:0 10px 40px rgba(84,100,116,.28),0 0 0 1px rgba(255,255,255,.55)' : '')
         + ';display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.5);font-family:-apple-system,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;font-size:13px;box-sizing:border-box">'
-        + '<div class="ipe-zoom-head" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ' + bd + ';flex-shrink:0">'
-        + '<span class="ipe-zoom-title" style="font-weight:600;font-size:14px"></span>'
+        + '<div class="ipe-zoom-head" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ' + bd + ';flex-shrink:0;background:' + headBg + '">'
+        + '<span class="ipe-zoom-title" style="font-weight:600;font-size:14px;color:' + (mist ? '#46525E' : '#e8e8e8') + '"></span>'
         + '<span class="ipe-zoom-count" style="font-size:11px;opacity:.7;margin-left:auto"></span>'
-        + '<button type="button" class="ipe-zoom-close" style="padding:6px 14px;border-radius:8px;border:1px solid rgba(110,197,119,.45);background:rgba(110,197,119,.18);color:' + (mist ? '#2f6b3a' : '#6ec577') + ';cursor:pointer;font-size:13px;font-family:inherit">完成</button></div>'
+        + '<button type="button" class="ipe-zoom-close" style="padding:6px 14px;border-radius:8px;' + closeCss + ';cursor:pointer;font-size:13px;font-family:inherit">完成</button></div>'
         + '<textarea class="ipe-zoom-ta" spellcheck="false" style="flex:1;margin:' + (small ? '8px' : '12px') + ';padding:12px;background:' + taBg + ';color:' + fg + ';border:1px solid ' + bd
         + ';border-radius:10px;font-size:' + (small ? '16px' : '15px') + ';line-height:1.6;resize:none;outline:none;font-family:inherit;box-sizing:border-box;width:auto;min-height:0"></textarea></div>';
     ov.querySelector(".ipe-zoom-title").textContent = ipeZoomTitleFor(ta);
