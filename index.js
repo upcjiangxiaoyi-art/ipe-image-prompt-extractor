@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.11.5";
+var IPE_VERSION = "2.12.0";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4168,7 +4168,14 @@ function createPanel() {
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-base-template" rows="6" placeholder="image###...{Description}...###"></textarea>'+
-        '<div class="ipe-hint">可无限新增模板。用 {Description} 标记描述文本的插入位置</div>');
+        '<div class="ipe-hint">可无限新增模板。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}</div>'+
+        '<div class="ipe-preview-actions" style="margin-top:8px">'+
+            '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
+            '<button id="ipe-pack-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
+            '<button id="ipe-pack-import" class="ipe-btn" type="button">\u2B06 导入预设包</button>'+
+        '</div>'+
+        '<input type="file" id="ipe-pack-file" accept=".json,application/json" style="display:none">'+
+        '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 角色锚点 / 通用锚点规则，不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示、锚点各一份，发给别人用这个。</div>');
 
     h += secHTML("char-anchors","角色锚点", true,
         '<label>锚点预设<select id="ipe-anchor-slot"></select></label>'+
@@ -4384,7 +4391,10 @@ function createDrawer() {
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="image###...{Description}...###"></textarea>';
-    h += '<small style="color:#888">可无限新增模板。用 {Description} 标记插入位置</small>';
+    h += '<small style="color:#888">可无限新增模板。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}</small>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
+    h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
+    h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 锚点 / 通用锚点规则，不含 API 与密钥；导入按名字合并，同名覆盖前会问。</small>';
     h += '<hr><small><b>角色锚点</b></small>';
     h += '<label>锚点预设</label><select id="iped-anchor-slot" class="text_pole"></select>';
     h += '<label>锚点名称</label><input type="text" id="iped-anchor-name" class="text_pole" value="" placeholder="例如：陆星河 / 苑无忧">';
@@ -4559,6 +4569,172 @@ function ipeForceSaveFromEditors() {
         console.error("[IPE] force save failed:", e);
         setStatus("保存失败", "#d4726a");
     }
+}
+
+/* ============================================================
+   📦 生图预设包（2.12.0）
+   一个 JSON 装五样：模板 / 提取规则 / 系统提示 / 角色锚点 / 通用锚点规则。
+   不带 API 地址和密钥——分享给别人的时候不能把 key 送出去。
+   导入按名字合并：新名字追加，同名覆盖（覆盖前问一句），绝不清空对方已有的。
+   系统提示固定两槽（情感 / 剧情），按 id 对位，对不上再按名字。
+   ============================================================ */
+var IPE_IMG_PACK_FMT = "ipe-image-pack";
+
+function ipeImgPackBuild(scope) {
+    var onlyCur = scope === "current";
+    function pick(list, activeId) {
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+            var it = list[i]; if (!it) continue;
+            if (onlyCur && it.id !== activeId) continue;
+            out.push({ id: it.id, name: it.name, value: String(it.value || "") });
+        }
+        return out;
+    }
+    var guide = String(cfg().anchorUsageGuide || "").trim();   // 只导出用户自己改过的；没改过就不带，导入方保留自己的默认
+    return {
+        _fmt: IPE_IMG_PACK_FMT, _v: 1,
+        exportedAt: new Date().toISOString(),
+        pluginVersion: IPE_VERSION,
+        scope: onlyCur ? "current" : "all",
+        templates:     pick(ipeGetBaseTemplates(),      ipeGetActiveTemplateId()),
+        rules:         pick(ipeGetRulePresets(),        ipeGetActiveRuleId()),
+        systemPrompts: pick(ipeGetSystemPromptPresets(), ipeGetActiveSystemPromptId()),
+        anchors:       pick(ipeGetAnchorPresets(),      ipeGetActiveAnchorId()),
+        anchorGuide:   guide
+    };
+}
+
+function ipeToast(msg, ok) {
+    try {
+        var w = ipeRootWindow();
+        var t = w && (w.toastr || (w.parent && w.parent.toastr));
+        if (t && typeof t[ok ? "success" : "error"] === "function") {
+            t[ok ? "success" : "error"](msg, "🐚 小海螺", { timeOut: ok ? 6000 : 9000, extendedTimeOut: 2000, closeButton: true });
+        }
+    } catch(e) {}
+    try { setStatus(msg, ok ? "#6ec577" : "#d4726a"); } catch(e) {}
+}
+
+function ipeImgPackExport(scope) {
+    var pack = ipeImgPackBuild(scope);
+    var n = pack.templates.length + pack.rules.length + pack.systemPrompts.length + pack.anchors.length;
+    var name = "ipe-image-pack-" + (pack.scope === "current" ? "current-" : "") + new Date().toISOString().slice(0, 10) + ".json";
+    try {
+        var blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement("a");
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 200);
+        ipeToast("已导出 " + name + "：模板 " + pack.templates.length + " / 规则 " + pack.rules.length
+            + " / 系统提示 " + pack.systemPrompts.length + " / 锚点 " + pack.anchors.length + (pack.anchorGuide ? " / 通用锚点规则" : "") + "（不含 API 与密钥）", true);
+        return true;
+    } catch(e) {
+        ipeToast("导出失败：" + (e && e.message ? e.message : String(e)), false);
+        return false;
+    }
+}
+
+/* 按名字合并一类预设。返回 { added, replaced } */
+function ipeImgPackMergeList(cur, incoming, prefix, opts) {
+    var added = 0, replaced = 0;
+    var byName = {}, byId = {};
+    for (var i = 0; i < cur.length; i++) { byName[String(cur[i].name || "").trim()] = cur[i]; byId[cur[i].id] = cur[i]; }
+    for (var j = 0; j < (incoming || []).length; j++) {
+        var it = incoming[j]; if (!it || typeof it !== "object") continue;
+        var name = String(it.name || "").trim(); var value = String(it.value == null ? "" : it.value);
+        if (!name && !value) continue;
+        var hit = null;
+        if (opts && opts.matchIdFirst && it.id && byId[it.id]) hit = byId[it.id];
+        if (!hit && name && byName[name]) hit = byName[name];
+        if (hit) {
+            if (String(hit.value || "") !== value) { hit.value = value; replaced++; }
+        } else if (opts && opts.fixedSlots) {
+            continue;                                   // 系统提示只有两槽，对不上号就不硬塞
+        } else {
+            var nu = { id: ipeMakeId(prefix), name: name || (prefix + "_" + (cur.length + 1)), value: value };
+            cur.push(nu); byName[nu.name] = nu; byId[nu.id] = nu; added++;
+        }
+    }
+    return { added: added, replaced: replaced };
+}
+
+/* 先干跑数一数要覆盖多少，再决定问不问 */
+function ipeImgPackPreview(pack) {
+    function count(cur, incoming, opts) {
+        var byName = {}, byId = {}, add = 0, rep = 0;
+        cur.forEach(function(c){ byName[String(c.name || "").trim()] = c; byId[c.id] = c; });
+        (incoming || []).forEach(function(it){
+            if (!it || typeof it !== "object") return;
+            var name = String(it.name || "").trim(); var value = String(it.value == null ? "" : it.value);
+            if (!name && !value) return;
+            var hit = (opts && opts.matchIdFirst && it.id && byId[it.id]) || (name && byName[name]) || null;
+            if (hit) { if (String(hit.value || "") !== value) rep++; }
+            else if (!(opts && opts.fixedSlots)) add++;
+        });
+        return { added: add, replaced: rep };
+    }
+    return {
+        templates: count(ipeGetBaseTemplates(), pack.templates),
+        rules: count(ipeGetRulePresets(), pack.rules),
+        systemPrompts: count(ipeGetSystemPromptPresets(), pack.systemPrompts, { matchIdFirst: true, fixedSlots: true }),
+        anchors: count(ipeGetAnchorPresets(), pack.anchors)
+    };
+}
+
+function ipeImgPackNormalize(parsed) {
+    if (Array.isArray(parsed)) return { _fmt: IPE_IMG_PACK_FMT, templates: parsed };     // 裸数组当模板表
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed._fmt && parsed._fmt !== IPE_IMG_PACK_FMT) return null;
+    var has = ["templates", "rules", "systemPrompts", "anchors", "anchorGuide"].some(function(k){ return k in parsed; });
+    return has ? parsed : null;
+}
+
+function ipeImgPackImportText(txt, opts) {
+    opts = opts || {};
+    var parsed;
+    try { parsed = JSON.parse(String(txt || "")); }
+    catch(e) { ipeToast("导入失败：这不是合法 JSON", false); return null; }
+    var pack = ipeImgPackNormalize(parsed);
+    if (!pack) { ipeToast("导入失败：这不是小海螺的生图预设包（也不是模板数组）", false); return null; }
+
+    var pv = ipeImgPackPreview(pack);
+    var totalRep = pv.templates.replaced + pv.rules.replaced + pv.systemPrompts.replaced + pv.anchors.replaced;
+    var totalAdd = pv.templates.added + pv.rules.added + pv.systemPrompts.added + pv.anchors.added;
+    var guideIn = String(pack.anchorGuide || "").trim();
+    var guideChange = !!guideIn && guideIn !== String(cfg().anchorUsageGuide || "").trim();
+    if (!opts.force && (totalRep > 0 || guideChange)) {
+        var msg = "这个包会覆盖你 " + totalRep + " 个同名预设"
+            + (pv.templates.replaced ? "（模板 " + pv.templates.replaced + "）" : "")
+            + (pv.rules.replaced ? "（规则 " + pv.rules.replaced + "）" : "")
+            + (pv.systemPrompts.replaced ? "（系统提示 " + pv.systemPrompts.replaced + "）" : "")
+            + (pv.anchors.replaced ? "（锚点 " + pv.anchors.replaced + "）" : "")
+            + (guideChange ? "，并替换通用锚点规则" : "")
+            + "；另新增 " + totalAdd + " 个。\n继续吗？（取消 = 什么都不动）";
+        var okc = true;
+        try { var rw = ipeRootWindow(); if (rw && typeof rw.confirm === "function") okc = rw.confirm(msg); } catch(e) {}
+        if (!okc) { ipeToast("已取消导入，什么都没动", false); return null; }
+    }
+
+    var tpl = ipeGetBaseTemplates(), rul = ipeGetRulePresets(), sys = ipeGetSystemPromptPresets(), anc = ipeGetAnchorPresets();
+    var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl");
+    var r2 = ipeImgPackMergeList(rul, pack.rules, "rule");
+    var r3 = ipeImgPackMergeList(sys, pack.systemPrompts, "sys", { matchIdFirst: true, fixedSlots: true });
+    var r4 = ipeImgPackMergeList(anc, pack.anchors, "anchor");
+    ipeSaveBaseTemplates(tpl); ipeSaveRulePresets(rul); ipeSaveSystemPromptPresets(sys); ipeSaveAnchorPresets(anc);
+    if (guideChange) {
+        ipeSetAnchorUsageGuide(guideIn === IPE_DEFAULT_ANCHOR_USAGE_GUIDE ? "" : guideIn);
+        ["ipe-anchor-guide-editor","iped-anchor-guide-editor"].forEach(function(id){ var el = q("#" + id); if (el) el.value = ipeGetAnchorUsageGuide(); });
+    }
+    try { ipeSaveNow(); } catch(e) {}
+    try { ipeRefreshTemplateEditors(); ipeRefreshRuleEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshAnchorEditors(); } catch(e) {}
+
+    var sum = { templates: r1, rules: r2, systemPrompts: r3, anchors: r4, guide: guideChange };
+    function fmt(label, r) { return (r.added || r.replaced) ? label + " +" + r.added + "/覆盖" + r.replaced : ""; }
+    var parts = [fmt("模板", r1), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : ""].filter(Boolean);
+    ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") : "包是空的或与现有内容完全一致，什么都没变", true);
+    return sum;
 }
 
 /* ============================================================
@@ -5124,6 +5300,23 @@ function bindAll() {
 
     /* ---------- v2 新增控件绑定 ---------- */
     // 强制采用（缩水拦截后）
+    [["ipe-pack-export","ipe-pack-export-cur","ipe-pack-import","ipe-pack-file"],
+     ["iped-pack-export","iped-pack-export-cur","iped-pack-import","iped-pack-file"]].forEach(function(ids){
+        var bA = q("#" + ids[0]), bC = q("#" + ids[1]), bI = q("#" + ids[2]), fi = q("#" + ids[3]);
+        if (bA && !bA.dataset.ipeBound) { bA.dataset.ipeBound = "1"; bA.addEventListener("click", function(){ ipeImgPackExport("all"); }); }
+        if (bC && !bC.dataset.ipeBound) { bC.dataset.ipeBound = "1"; bC.addEventListener("click", function(){ ipeImgPackExport("current"); }); }
+        if (bI && fi && !bI.dataset.ipeBound) { bI.dataset.ipeBound = "1"; bI.addEventListener("click", function(){ try { fi.value = ""; fi.click(); } catch(e){} }); }
+        if (fi && !fi.dataset.ipeBound) {
+            fi.dataset.ipeBound = "1";
+            fi.addEventListener("change", function(){
+                var f = fi.files && fi.files[0]; if (!f) return;
+                var r = new FileReader();
+                r.onload  = function(){ ipeImgPackImportText(r.result); };
+                r.onerror = function(){ ipeToast("读文件失败", false); };
+                r.readAsText(f);
+            });
+        }
+    });
     [["ipe-ledger-export","ipe-ledger-import","ipe-ledger-file"],
      ["iped-ledger-export","iped-ledger-import","iped-ledger-file"]].forEach(function(ids){
         var bE = q("#" + ids[0]), bI = q("#" + ids[1]), fi = q("#" + ids[2]);

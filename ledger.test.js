@@ -62,7 +62,8 @@ function boot(floors) {
         "EXT_NAME", "DEFAULTS", "IPE_LEDGER_EP_KEY", "init", "ipeLedgerStripImageTag", "ipeLedgerBuildUser", "ipeLedgerReportBlock", "ipeLedgerPruneMirror",
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
         "runExtract", "ipeImgParseLayers", "buildInjectTag", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
-        "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor"];
+        "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
+        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -574,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.11.5") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -587,6 +588,72 @@ await (async () => {
     F("ipeZoomOpen")(src);
     d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape" }));
     ok(!d.getElementById("ipe-zoom-overlay"), "Esc 关闭");
+})();
+
+console.log("\n【30】 生图预设包：导出不带密钥，「只导出当前」只带选中的");
+{
+    const { tavern, F } = boot(4);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "秘密", endpoint: "http://x", key: "sk-SECRET", model: "m" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "校园明媚", value: "A{Description}" }, { id: "tpl_2", name: "暗色油画", value: "B{Description}" }]);
+    st.activeBaseTemplate = "tpl_2";
+    st.rulePresetsJson = JSON.stringify([{ id: "rule_1", name: "GPT-image-2", value: "R1" }, { id: "rule_2", name: "NAI", value: "R2" }]);
+    st.activeRulePreset = "rule_1";
+    st.anchorPresetsJson = JSON.stringify([{ id: "anchor_1", name: "苑无忧", value: "boy" }]);
+    st.anchorUsageGuide = "我改过的规则";
+    const all = F("ipeImgPackBuild")("all");
+    eq(all._fmt, "ipe-image-pack", "格式标记");
+    eq(all.templates.length, 2, "全部：两套模板都在");
+    eq(all.rules.length, 2, "全部：两条规则都在");
+    eq(all.anchorGuide, "我改过的规则", "带用户改过的通用锚点规则");
+    ok(JSON.stringify(all).indexOf("sk-SECRET") < 0 && JSON.stringify(all).indexOf("http://x") < 0, "不含 API 地址与密钥");
+    const cur = F("ipeImgPackBuild")("current");
+    eq(cur.templates.length, 1, "当前：只有一套模板"); eq(cur.templates[0].name, "暗色油画", "是选中的那套");
+    eq(cur.rules.length, 1, "当前：只有一条规则"); eq(cur.rules[0].name, "GPT-image-2", "是选中的那条");
+    eq(cur.systemPrompts.length, 1, "当前：系统提示只带选中的一槽");
+}
+
+console.log("\n【31】 导入：按名字合并，新名字追加、同名覆盖、别人的原有预设一个不少；系统提示按 id 对槽；裸数组当模板");
+await (async () => {
+    const { w, tavern, F } = boot(4);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    w.confirm = () => true;
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "校园明媚", value: "OLD" }, { id: "tpl_9", name: "我自己的", value: "MINE" }]);
+    st.rulePresetsJson = JSON.stringify([{ id: "rule_1", name: "GPT-image-2", value: "R-old" }]);
+    st.anchorPresetsJson = JSON.stringify([{ id: "anchor_1", name: "角色锚点1", value: "" }]);
+    const pack = {
+        _fmt: "ipe-image-pack", _v: 1,
+        templates: [{ name: "校园明媚", value: "NEW" }, { name: "暗色油画", value: "DARK" }],
+        rules: [{ name: "GPT-image-2", value: "R-old" }, { name: "NanoBanana", value: "R-nb" }],
+        systemPrompts: [{ id: "sys_plot", name: "剧情", value: "PLOT-NEW" }, { id: "sys_x", name: "不存在的槽", value: "X" }],
+        anchors: [{ name: "苑无忧", value: "boy anchors" }],
+        anchorGuide: "对方的规则"
+    };
+    const sum = F("ipeImgPackImportText")(JSON.stringify(pack));
+    ok(!!sum, "导入成功");
+    const tpl = F("ipeGetBaseTemplates")();
+    eq(tpl.length, 3, "模板：原 2 + 新 1 = 3（同名覆盖不新增）");
+    eq(tpl.find(x => x.name === "校园明媚").value, "NEW", "同名模板被覆盖");
+    eq(tpl.find(x => x.name === "我自己的").value, "MINE", "对方自己的模板原样保留");
+    ok(tpl.find(x => x.name === "暗色油画"), "新模板追加");
+    eq(sum.templates.added, 1, "统计：模板 +1"); eq(sum.templates.replaced, 1, "统计：模板覆盖 1");
+    eq(sum.rules.replaced, 0, "内容相同的同名规则不算覆盖"); eq(sum.rules.added, 1, "规则 +1");
+    const sys = F("ipeGetSystemPromptPresets")();
+    eq(sys.find(x => x.id === "sys_plot").value, "PLOT-NEW", "系统提示按 id 对槽覆盖");
+    eq(sys.length, 2, "系统提示仍是两槽，对不上号的不硬塞");
+    ok(F("ipeGetAnchorPresets")().find(x => x.name === "苑无忧"), "锚点追加");
+    eq(F("ipeGetAnchorUsageGuide")(), "对方的规则", "通用锚点规则替换");
+    // 取消 = 什么都不动
+    w.confirm = () => false;
+    const before = JSON.stringify(F("ipeGetBaseTemplates")());
+    const r2 = F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-image-pack", templates: [{ name: "校园明媚", value: "NEWER" }] }));
+    ok(r2 === null && JSON.stringify(F("ipeGetBaseTemplates")()) === before, "confirm 取消 → 原样不动");
+    // 裸数组 = 模板表
+    w.confirm = () => true;
+    const r3 = F("ipeImgPackImportText")(JSON.stringify([{ name: "只发模板", value: "T" }]));
+    eq(r3.templates.added, 1, "裸数组按模板导入");
+    ok(F("ipeImgPackImportText")("not json") === null, "坏 JSON 拒收");
+    ok(F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-ledger", data: {} })) === null, "账本包拒收，不会串门");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
