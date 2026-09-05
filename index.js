@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.5";
+var IPE_VERSION = "2.12.6";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3673,6 +3673,33 @@ function ipeNoticeBindActions(root, opts, closeFn) {
     } catch(e) {}
 }
 
+/* 浮层挂哪儿：挂 <html>，不挂 body。
+   实测（2.12.5 自检）：某些酒馆环境里 body 被加了 transform / filter，fixed 元素就不再以屏幕为参照，
+   而是以 body 的盒子为参照，body 高度又是 0，于是 bottom:88px 算出来在屏幕上方 -88px。
+   放大编辑框第一次塌成顶上一条灰也是它。<html> 没人动，挂那儿 fixed 才是真 fixed。 */
+function ipeOverlayHost(d) {
+    d = d || ipeRootDocument();
+    return d.documentElement || d.body;
+}
+/* 保险：挂完量一下，真飞出屏幕就用 visualViewport 算像素 top 硬摆回来 */
+function ipeNoticeFixPosition(st) {
+    try {
+        if (!st || !st.getBoundingClientRect) return;
+        var rw = ipeRootWindow() || window;
+        var vv = rw.visualViewport;
+        var vh = (vv && vv.height) || rw.innerHeight || 0;
+        var vtop = (vv && vv.offsetTop) || 0;
+        if (!vh) return;
+        var rc = st.getBoundingClientRect();
+        var off = rc.height > 0 && (rc.top < vtop || rc.bottom > vtop + vh);
+        if (!off && !st.__ipePinned) return;
+        var top = Math.max(vtop + 8, vtop + vh - 88 - rc.height);
+        st.style.setProperty("bottom", "auto", "important");
+        st.style.setProperty("top", Math.round(top) + "px", "important");
+        st.__ipePinned = true;
+    } catch(e) {}
+}
+
 function ipeNoticeStack() {
     var d = ipeRootDocument();
     var st = d.getElementById("ipe-notice-stack");
@@ -3684,7 +3711,15 @@ function ipeNoticeStack() {
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
     try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
     try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.bottom = "88px"; } } catch(e) {}
-    (d.body || d.documentElement).appendChild(st);
+    ipeOverlayHost(d).appendChild(st);
+    try {
+        var rw2 = ipeRootWindow() || window;
+        if (rw2.visualViewport && !rw2.__ipeNoticeVVBound) {
+            rw2.__ipeNoticeVVBound = true;
+            var re = function(){ var s2 = d.getElementById("ipe-notice-stack"); if (s2) ipeNoticeFixPosition(s2); };
+            rw2.visualViewport.addEventListener("resize", re); rw2.visualViewport.addEventListener("scroll", re);
+        }
+    } catch(e) {}
     return st;
 }
 
@@ -3744,6 +3779,7 @@ function ipeNotice(opts) {
     ipeNoticeBindActions(card, opts, close);
 
     stack.appendChild(card);
+    ipeNoticeFixPosition(stack);
     ipeNoticeMirror(card, opts, accent, close);
     /* 自检：挂上去之后量一下，量不到就在控制台点名，方便远程排查 */
     try {
@@ -3825,7 +3861,7 @@ function ipeNoticeDemo() {
             function r4(x){ return x ? Math.round(x.left) + "," + Math.round(x.top) + " " + Math.round(x.width) + "×" + Math.round(x.height) : "无"; }
             var lines = [
                 "—— 自检 v" + IPE_VERSION + " ——",
-                "文档: " + (d === document ? "本页" : "顶层") + "　栈父级: " + (st && st.parentNode ? st.parentNode.tagName : "无") + "　卡片在DOM: " + (card && card.isConnected ? "是" : "否"),
+                "文档: " + (d === document ? "本页" : "顶层") + "　栈父级: " + (st && st.parentNode ? st.parentNode.tagName : "无") + (st && st.__ipePinned ? "（已用像素钉住）" : "") + "　卡片在DOM: " + (card && card.isConnected ? "是" : "否"),
                 "视口: " + rw.innerWidth + "×" + rw.innerHeight + (vv ? "　visualViewport: " + Math.round(vv.width) + "×" + Math.round(vv.height) + " @" + Math.round(vv.offsetLeft) + "," + Math.round(vv.offsetTop) : ""),
                 "栈 rect: " + r4(rs) + "　卡 rect: " + r4(rc) + "　面板 rect: " + r4(rp),
                 ss ? ("栈样式: pos=" + ss.position + " z=" + ss.zIndex + " disp=" + ss.display + " vis=" + ss.visibility + " op=" + ss.opacity + " bottom=" + ss.bottom + " top=" + ss.top) : "栈样式: 拿不到",
@@ -5028,8 +5064,8 @@ function ipeZoomOpen(ta) {
     ov.addEventListener("click", function(ev){ if (ev.target === ov) done(); });
     ov.__ipeKey = function(ev){ if (ev.key === "Escape") done(); };
     d.addEventListener("keydown", ov.__ipeKey);
-    (d.body || d.documentElement).appendChild(ov);
-    /* iOS 上 top/bottom 拉伸偶尔不生效，遮罩塌成顶上一条灰。挂完实测一下，不够高就用像素硬撑。 */
+    ipeOverlayHost(d).appendChild(ov);
+    /* 挂 <html> 后 fixed 以屏幕为准；下面这段像素兜底仍保留，双保险。 */
     try {
         var rw2 = d.defaultView || ipeRootWindow() || window;
         var vh = Number(rw2.innerHeight) || 0, vw = Number(rw2.innerWidth) || 0;

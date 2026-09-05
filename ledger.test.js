@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.5") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.6") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -689,6 +689,10 @@ await (async () => {
     await new Promise(r => setTimeout(r, 200));
     ok(d.querySelector(".ipe-notice-mirror .ipe-notice-body").textContent.indexOf("自检 v") >= 0 && d.querySelector(".ipe-notice-mirror .ipe-notice-body").textContent.indexOf("栈 rect") >= 0, "演示卡正文带自检报告（镜像里也有）");
     ok(d.getElementById("ipe-notice-stack").style.transform === "translateZ(0)", "通知栈开了合成层 translateZ(0)");
+    eq(d.getElementById("ipe-notice-stack").parentNode.tagName, "HTML", "通知栈挂在 <html> 上，不挂 body（body 被加 transform 时 fixed 会失准）");
+    F("ipeZoomOpen")(d.querySelector("#ipe-ledger-prompt"));
+    eq(d.getElementById("ipe-zoom-overlay").parentNode.tagName, "HTML", "放大编辑框也挂在 <html> 上");
+    F("ipeZoomClose")();
     d.querySelector(".ipe-notice-mirror .ipe-notice-x").click();
     await new Promise(r => setTimeout(r, 260));
     ok(!d.querySelector('.ipe-notice[data-ipe-sticky="1"]') && !d.querySelector(".ipe-notice-mirror"), "从镜像上点 × 两边一起关");
