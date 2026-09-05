@@ -51,4 +51,10 @@ README.md
 
 ## 署名
 
-co-authored by **ripple & GPT & Claude**
+co-authored by **ripple & GPT & Claude Fable 5.1**
+
+- **ripple**：设计、需求、测试与全部审美决策，插件的主人
+- **GPT**（OpenAI）：共同开发
+- **Claude Fable 5.1**（Anthropic）：2.10.0 起的挂账流式化与看门狗、分层生图、⤢ 放大编辑、生图预设包等实现，每一笔在提交记录里都带共同作者署名
+
+开源，欢迎使用与二改，保留署名即可。

@@ -58,7 +58,7 @@ let ipeUserAbortRequested = false;
 let ipeRetryTimer = null;
 let autoTimer = null, pendingAutoIdx = -1;
 
-const IPE_CREDITS = "ripple & GPT & Claude";
+const IPE_CREDITS = "ripple & GPT & Claude Fable 5.1";
 const IPE_DEFAULT_ANCHOR_USAGE_GUIDE = [
     "以下角色锚点仅为候选资料库，不是强制全部使用。提取时请严格根据正文当前场景按需调用：",
     "1. 只调用正文中明确出场、且当前画面确实需要入镜的角色。",
