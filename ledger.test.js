@@ -573,6 +573,8 @@ await (async () => {
     ok(!!ov, "弹窗出现了");
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483000" && ov.style.display === "flex", "层级与布局也内联");
+    ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.11.4") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";

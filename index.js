@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.11.3";
+var IPE_VERSION = "2.11.4";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4338,7 +4338,7 @@ function createPanel() {
         '</div></details>',
         "ledger");
 
-    h += '</div><div class="ipe-footer">by ' + IPE_CREDITS + '</div>';
+    h += '</div><div class="ipe-footer">by ' + IPE_CREDITS + ' \u00B7 v' + IPE_VERSION + '</div>';
     panel.innerHTML = h;
     ipeRootDocument().body.appendChild(panel);
     ipeApplyTheme();
@@ -4609,8 +4609,8 @@ function ipeZoomOpen(ta) {
     ov.className = "ipe-zoom-overlay" + (mist ? " ipe-mist" : "");
     /* 关键样式全部内联：酒馆会缓存扩展的 style.css，更新后 JS 是新的、CSS 可能还是旧的，
        只靠外部 CSS 的话弹窗会变成一个躺在页面底部看不见的 div。外部 CSS 只做锦上添花。 */
-    ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483000;background:rgba(0,0,0,.55);"
-        + "display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;margin:0";
+    ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;min-height:100%;z-index:2147483000;background:rgba(0,0,0,.55);"
+        + "display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;margin:0;transform:none";
     var boxBg = mist ? "#F7F4EE" : "rgba(28,28,32,.98)", fg = mist ? "#2f3d4a" : "#d4d4d4";
     var taBg = mist ? "#fff" : "rgba(255,255,255,.05)", bd = mist ? "rgba(0,0,0,.12)" : "rgba(255,255,255,.1)";
     var small = false;
@@ -4644,6 +4644,19 @@ function ipeZoomOpen(ta) {
     ov.__ipeKey = function(ev){ if (ev.key === "Escape") done(); };
     d.addEventListener("keydown", ov.__ipeKey);
     (d.body || d.documentElement).appendChild(ov);
+    /* iOS 上 top/bottom 拉伸偶尔不生效，遮罩塌成顶上一条灰。挂完实测一下，不够高就用像素硬撑。 */
+    try {
+        var rw2 = d.defaultView || ipeRootWindow() || window;
+        var vh = Number(rw2.innerHeight) || 0, vw = Number(rw2.innerWidth) || 0;
+        var rect = ov.getBoundingClientRect ? ov.getBoundingClientRect() : null;
+        if (vh > 0 && (!rect || rect.height < vh * 0.6)) { ov.style.height = vh + "px"; ov.style.minHeight = vh + "px"; }
+        if (vw > 0 && (!rect || rect.width < vw * 0.6)) { ov.style.width = vw + "px"; }
+        var bx = ov.firstElementChild;
+        if (bx) {
+            var br = bx.getBoundingClientRect ? bx.getBoundingClientRect() : null;
+            if (vh > 0 && (!br || br.height < vh * 0.5)) { bx.style.height = Math.max(200, vh - (small ? 0 : 24)) + "px"; bx.style.minHeight = "200px"; }
+        }
+    } catch(e) {}
     setTimeout(function(){ try { big.focus(); big.setSelectionRange(big.value.length, big.value.length); } catch(e) {} }, 30);
 }
 /* 酒馆缓存旧 style.css 的自救：探针元素拿不到新样式，就找到本插件的 <link> 带版本号重载一次 */
