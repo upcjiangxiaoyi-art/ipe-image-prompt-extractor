@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.8";
+var IPE_VERSION = "2.12.9";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -1237,7 +1237,7 @@ function ipeLedgerAutoOff(reason) {
         ipeNotice({
             kind: "error", sticky: true,
             title: "自动挂账已被插件关闭",
-            body: why + "\n\n从现在起每一楼都不会自动记账，贴耳里一直是旧账本。处理好之后点下面按钮重开，或者去挂账页点左边那个开关。",
+            body: why + "\n\n之后每一楼都不会自动记账。处理好后点下面按钮重开。",
             actions: [{ label: "重新打开自动挂账", onClick: function(){
                 save("ledgerAutoRun", true); save("ledgerAutoOffReason", "");
                 ipeLedgerFailStreak = 0;
@@ -1250,12 +1250,14 @@ function ipeLedgerAutoOff(reason) {
 
 /* 状态行在面板里，面板关着就等于没说。失败必须弹到面板外面来。 */
 function ipeLedgerFailNotice(detail) {
-    var body = "挂账失败：" + detail;
+    var d0 = String(detail || "");
+    if (d0.length > 160) d0 = d0.slice(0, 160) + "…（完整错误见挂账页状态行）";
+    var body = "挂账失败：" + d0;
     if (ipeLedgerFailStreak >= 2) {
         body += "\n已经连续失败 " + ipeLedgerFailStreak + " 次——多半不是这一楼的问题，"
              +  "换一套 API 预设或换个模型再试。";
     }
-    body += "\n\n这一楼没挂上，贴耳里还是上一份账本。先别发下一条，去挂账页点「重新挂账」补上；看到后点掉这条。";
+    body += "\n\n这一楼没挂上，贴耳还是上一份。先别发下一条，去点「重新挂账」补上。";
     try { ipeShowApiFailurePopup(body, false, { sticky: true, title: "挂账失败 · 账本还是上一份" }); } catch(e) {}
 }
 var ipeLedgerStaleWarned = false;
@@ -3707,12 +3709,12 @@ function ipeNoticeStack() {
     st = d.createElement("div"); st.id = "ipe-notice-stack";
     /* 贴顶不贴底（照小红霞的做法）：body 被加 transform 时 fixed 以 body 盒子为参照、body 高 0，
        bottom:88px 会算到屏幕上方；top:22px 不管参照是谁都落在屏幕顶部 22px。 */
-    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(380px,calc(100vw - 28px));display:flex;flex-direction:column;gap:10px;pointer-events:none;margin:0;padding:0";
+    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(320px,calc(100vw - 28px));display:flex;flex-direction:column;gap:8px;pointer-events:none;margin:0;padding:0";
     /* 面板被强制 translateZ(0) 走了独立合成层；WebKit 上非合成层的浮层有时会被合成层盖住、不认 z-index。
        通知栈同样开合成层，跟面板站到同一条起跑线上。 */
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
     try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
-    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.top = "14px"; } } catch(e) {}
+    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "auto"; st.style.width = "min(300px,calc(100vw - 24px))"; st.style.top = "14px"; } } catch(e) {}
     ipeOverlayHost(d).appendChild(st);
     try {
         var rw2 = ipeRootWindow() || window;
@@ -3746,23 +3748,23 @@ function ipeNotice(opts) {
     card.className = "ipe-notice ipe-notice-" + kind + (mist ? " ipe-mist" : "");
     card.setAttribute("role", "alert");
     card.setAttribute("data-ipe-sticky", sticky ? "1" : "0");
-    card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:14px;border:1px solid " + bd
+    card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:12px;border:1px solid " + bd
         + ";border-left:3px solid " + accent + ";background:" + bg + ";color:" + fg
-        + ";box-shadow:0 10px 30px rgba(0,0,0," + (mist ? ".16" : ".45") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.5;padding:12px 14px 10px"
+        + ";box-shadow:0 8px 24px rgba(0,0,0," + (mist ? ".14" : ".40") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:12px;line-height:1.45;padding:9px 11px 8px"
         + ";opacity:1;visibility:visible;display:block;max-width:100%;box-sizing:border-box";
     /* 不用 backdrop-filter、不用 JS 定时把 opacity 从 0 拉到 1：iOS WebKit 对「毛玻璃 + 淡入」偶发不上屏，
        卡片就存在于 DOM 却看不见。入场动画交给 style.css 的 .ipe-notice 关键帧，CSS 缺了也只是没动画。 */
     card.innerHTML =
         '<div style="display:flex;align-items:flex-start;gap:8px">'
-      +   '<span style="font-size:16px;line-height:1.25;flex:none">' + (opts.icon || "🐚") + '</span>'
+      +   '<span style="font-size:14px;line-height:1.3;flex:none">' + (opts.icon || "🐚") + '</span>'
       +   '<div style="flex:1;min-width:0">'
-      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:13.5px;color:' + fg + ';-webkit-text-fill-color:' + fg + '"></div>'
-      +     '<div class="ipe-notice-body" style="margin-top:4px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';-webkit-text-fill-color:' + sub + ';max-height:40vh;overflow:auto"></div>'
+      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:12.5px;color:' + fg + ';-webkit-text-fill-color:' + fg + '"></div>'
+      +     '<div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';-webkit-text-fill-color:' + sub + ';max-height:128px;overflow:auto;-webkit-overflow-scrolling:touch"></div>'
       +   '</div>'
-      +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:17px;line-height:1;cursor:pointer;padding:0 2px;margin:-3px -4px 0 0;font-family:inherit">×</button>'
+      +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:16px;line-height:1;cursor:pointer;padding:0 2px;margin:-2px -4px 0 0;font-family:inherit">×</button>'
       + '</div>'
       + (sticky
-          ? '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "6px 16px", "12.5px") + '<button type="button" class="ipe-notice-ok" style="padding:6px 16px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12.5px;cursor:pointer;font-family:inherit">知道了</button></div>'
+          ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "4px 12px", "12px") + '<button type="button" class="ipe-notice-ok" style="padding:4px 12px;border-radius:8px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>'
           : '<div class="ipe-notice-bar" style="position:absolute;left:0;bottom:0;height:2px;width:100%;background:' + accent + ';opacity:.55;transform-origin:left center;transform:scaleX(1)"></div>');
     card.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
     card.querySelector(".ipe-notice-body").textContent  = opts.body  || "";
@@ -3849,7 +3851,7 @@ function ipeNoticeMirror(card, opts, accent, closeAll) {
 
 /* 让用户不用真把 API 弄坏就能看一眼报错卡长什么样、在哪儿出现 */
 function ipeNoticeDemo() {
-    var card = ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。", false,
+    var card = ipeShowApiFailurePopup("演示用，账本没有任何变化。真出错时就长这样：常驻不消失，点「知道了」才走。", false,
         { sticky: true, title: "挂账失败 · 账本还是上一份（演示）" });
     /* 自检报告写进卡片正文（镜像里也能读到）：浮层到底在哪、多大、哪个文档、算出来的样式是什么 */
     setTimeout(function(){

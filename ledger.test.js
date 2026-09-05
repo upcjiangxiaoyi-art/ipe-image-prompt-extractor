@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.8") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.9") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -751,6 +751,24 @@ await (async () => {
     st.ledgerAutoRun = false; st.ledgerAutoOffReason = "fail";
     const cb = d.querySelector("#ipe-ledger-auto"); cb.checked = true; cb.dispatchEvent(new w.Event("change", { bubbles: true }));
     eq(st.ledgerAutoOffReason, "", "亲手拨开关也会清掉原因");
+})();
+
+console.log("\n【34】 报错卡尺寸：窄卡、正文限高内滚、超长报错截断");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    withApi(tavern, F, "gpt-5");
+    const d = w.document;
+    const longErr = "x".repeat(400);
+    w.fetch = async () => ({ ok: false, status: 500, text: async () => longErr });
+    await F("ipeLedgerRun")(9, true);
+    const card = d.querySelector('.ipe-notice[data-ipe-sticky="1"]');
+    const body = card.querySelector(".ipe-notice-body");
+    ok(body.textContent.length < 320, "超长报错被截断，正文不超过 320 字", String(body.textContent.length));
+    ok(body.textContent.indexOf("完整错误见挂账页状态行") >= 0, "截断处提示去哪看全文");
+    ok(body.style.maxHeight === "128px" && body.style.overflow === "auto", "正文限高 128px、超出内滚");
+    ok(card.style.fontSize === "12px" && card.style.borderRadius === "12px", "卡片字号 12、圆角 12");
+    const st = d.getElementById("ipe-notice-stack");
+    ok(st.style.width.indexOf("320px") >= 0, "桌面栈宽 320", st.style.width);
 })();
 
 console.log("\n" + "\u2500".repeat(46));
