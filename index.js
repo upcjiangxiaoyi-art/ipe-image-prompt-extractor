@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.7";
+var IPE_VERSION = "2.12.8";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3782,15 +3782,17 @@ function ipeNotice(opts) {
 
     stack.appendChild(card);
     ipeNoticeFixPosition(stack);
-    ipeNoticeMirror(card, opts, accent, close);
-    /* 自检：挂上去之后量一下，量不到就在控制台点名，方便远程排查 */
+    /* 自检：挂上去之后量一下。量得到就只有这一张卡；量不到（尺寸为零 / 飞出屏幕）才在面板里补一条镜像横幅，
+       别让人正常情况下看见两份。 */
+    var bad = true;
     try {
         var rc = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
         var rw3 = ipeRootWindow();
         var vh3 = (rw3 && rw3.innerHeight) || 0;
-        var bad = !rc || rc.width < 10 || rc.height < 10 || (vh3 && (rc.bottom < 0 || rc.top > vh3));
+        bad = !rc || rc.width < 10 || rc.height < 10 || (vh3 && (rc.bottom < 0 || rc.top > vh3));
         if (typeof console !== "undefined") console.log("[IPE] 通知卡", bad ? "⚠ 浮层不可见（已在面板内镜像）" : "✓ 浮层可见", { title: opts.title, rect: rc ? { top: Math.round(rc.top), left: Math.round(rc.left), w: Math.round(rc.width), h: Math.round(rc.height) } : null, doc: d === document ? "self" : "top" });
     } catch(e) {}
+    if (bad) ipeNoticeMirror(card, opts, accent, close);
 
     if (!sticky) {
         var bar = card.querySelector(".ipe-notice-bar");
@@ -3847,7 +3849,7 @@ function ipeNoticeMirror(card, opts, accent, closeAll) {
 
 /* 让用户不用真把 API 弄坏就能看一眼报错卡长什么样、在哪儿出现 */
 function ipeNoticeDemo() {
-    var card = ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。面板里同时有一条横幅镜像。", false,
+    var card = ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。", false,
         { sticky: true, title: "挂账失败 · 账本还是上一份（演示）" });
     /* 自检报告写进卡片正文（镜像里也能读到）：浮层到底在哪、多大、哪个文档、算出来的样式是什么 */
     setTimeout(function(){
@@ -3870,10 +3872,8 @@ function ipeNoticeDemo() {
                 cs ? ("卡样式: disp=" + cs.display + " vis=" + cs.visibility + " op=" + cs.opacity + " bg=" + cs.backgroundColor) : "卡样式: 拿不到"
             ];
             var txt = lines.join("\n");
-            [card, card && card.__ipeMirror].forEach(function(el){
-                if (!el) return;
-                var b = el.querySelector(".ipe-notice-body"); if (b) b.textContent += "\n\n" + txt;
-            });
+            // 自检只进控制台；只有浮层没量到（走了镜像）时才把报告写进镜像正文，方便截图给开发者
+            if (card && card.__ipeMirror) { var b = card.__ipeMirror.querySelector(".ipe-notice-body"); if (b) b.textContent += "\n\n" + txt; }
             if (typeof console !== "undefined") console.log("[IPE] 通知卡自检\n" + txt);
         } catch(e) {}
     }, 120);
