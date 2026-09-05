@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.1";
+var IPE_VERSION = "2.12.2";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3604,71 +3604,108 @@ function ipeShouldRetryApiError(e, userAbort) {
     return true;
 }
 
+/* ============================================================
+   🐚 通知卡（2.12.2）
+   toastr 那块红是酒馆的默认皮，跟小海螺一点不搭。报错也要好看：
+   开灯是雾蓝米霜、关灯是深色玻璃，错误只用一条莫兰迪砖红细边，不整块糊红。
+   sticky 的带「知道了」按钮常驻；不 sticky 的底下一条细线走完自己收起，
+   鼠标放上去暂停。最多叠 4 张，老的非常驻先走。关键样式全内联，不吃 CSS 缓存的亏。
+   ============================================================ */
+function ipeNoticeStack() {
+    var d = ipeRootDocument();
+    var st = d.getElementById("ipe-notice-stack");
+    if (st) return st;
+    st = d.createElement("div"); st.id = "ipe-notice-stack";
+    st.style.cssText = "position:fixed;right:14px;bottom:96px;width:min(380px,calc(100vw - 28px));display:flex;flex-direction:column;gap:10px;pointer-events:none;margin:0;padding:0";
+    try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
+    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.bottom = "88px"; } } catch(e) {}
+    (d.body || d.documentElement).appendChild(st);
+    return st;
+}
+
+function ipeNotice(opts) {
+    opts = opts || {};
+    var kind = opts.kind || "error";                       // error | ok | info
+    var sticky = opts.sticky === true;
+    var ms = Number(opts.timeout) || (kind === "error" ? 9000 : 6000);
+    var mist = false; try { mist = cfg().mistTheme === true; } catch(e) {}
+    var d = ipeRootDocument();
+    var stack = ipeNoticeStack();
+
+    var accent = kind === "error" ? (mist ? "#B8756C" : "#D9A19A")
+               : kind === "ok"    ? (mist ? "#7C93A6" : "#9CC5B0")
+               :                    (mist ? "#7C93A6" : "#A9BDD3");
+    var bg  = mist ? "linear-gradient(168deg, rgba(247,248,250,.98) 0%, rgba(236,240,244,.98) 100%)" : "rgba(30,31,36,.94)";
+    var fg  = mist ? "#4A5662" : "#e2e2e2";
+    var sub = mist ? "#6b7a88" : "#b0b0b0";
+    var bd  = mist ? "rgba(140,156,172,.30)" : "rgba(255,255,255,.10)";
+
+    var card = d.createElement("div");
+    card.className = "ipe-notice ipe-notice-" + kind + (mist ? " ipe-mist" : "");
+    card.setAttribute("role", "alert");
+    card.setAttribute("data-ipe-sticky", sticky ? "1" : "0");
+    card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:14px;border:1px solid " + bd
+        + ";border-left:3px solid " + accent + ";background:" + bg + ";color:" + fg
+        + ";box-shadow:0 10px 30px rgba(0,0,0," + (mist ? ".16" : ".45") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.5;padding:12px 14px 10px"
+        + ";-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);opacity:0;transform:translateY(8px)";
+    card.innerHTML =
+        '<div style="display:flex;align-items:flex-start;gap:8px">'
+      +   '<span style="font-size:16px;line-height:1.25;flex:none">' + (opts.icon || "🐚") + '</span>'
+      +   '<div style="flex:1;min-width:0">'
+      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:13.5px;color:' + fg + '"></div>'
+      +     '<div class="ipe-notice-body" style="margin-top:4px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';max-height:40vh;overflow:auto"></div>'
+      +   '</div>'
+      +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:17px;line-height:1;cursor:pointer;padding:0 2px;margin:-3px -4px 0 0;font-family:inherit">×</button>'
+      + '</div>'
+      + (sticky
+          ? '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="ipe-notice-ok" style="padding:6px 16px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12.5px;cursor:pointer;font-family:inherit">知道了</button></div>'
+          : '<div class="ipe-notice-bar" style="position:absolute;left:0;bottom:0;height:2px;width:100%;background:' + accent + ';opacity:.55;transform-origin:left center;transform:scaleX(1)"></div>');
+    card.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
+    card.querySelector(".ipe-notice-body").textContent  = opts.body  || "";
+
+    var closed = false;
+    function close() {
+        if (closed) return; closed = true;
+        if (card.__ipeTimer) { clearTimeout(card.__ipeTimer); card.__ipeTimer = null; }
+        try { card.style.transition = "opacity .18s ease, transform .18s ease"; card.style.opacity = "0"; card.style.transform = "translateY(8px)"; } catch(e) {}
+        setTimeout(function(){ try { if (card.parentNode) card.parentNode.removeChild(card); } catch(e) {} }, 200);
+    }
+    card.__ipeClose = close;
+    card.querySelector(".ipe-notice-x").addEventListener("click", close);
+    var okb = card.querySelector(".ipe-notice-ok"); if (okb) okb.addEventListener("click", close);
+
+    stack.appendChild(card);
+    setTimeout(function(){ try { card.style.transition = "opacity .22s ease, transform .22s ease"; card.style.opacity = "1"; card.style.transform = "translateY(0)"; } catch(e) {} }, 10);
+
+    if (!sticky) {
+        var bar = card.querySelector(".ipe-notice-bar");
+        function arm(dur) {
+            try { if (bar) { bar.style.transition = "none"; bar.style.transform = "scaleX(1)"; } } catch(e) {}
+            setTimeout(function(){ try { if (bar) { bar.style.transition = "transform " + dur + "ms linear"; bar.style.transform = "scaleX(0)"; } } catch(e) {} }, 30);
+            card.__ipeTimer = setTimeout(close, dur);
+        }
+        arm(ms);
+        card.addEventListener("mouseenter", function(){ if (card.__ipeTimer) { clearTimeout(card.__ipeTimer); card.__ipeTimer = null; } try { if (bar) { bar.style.transition = "none"; bar.style.transform = "scaleX(1)"; } } catch(e) {} });
+        card.addEventListener("mouseleave", function(){ if (!closed && !card.__ipeTimer) arm(3000); });
+    }
+    // 最多叠 4 张：老的、非常驻的先走
+    try {
+        var all = stack.querySelectorAll(".ipe-notice");
+        for (var i = 0; i < all.length - 4; i++) if (all[i].getAttribute("data-ipe-sticky") !== "1" && all[i].__ipeClose) all[i].__ipeClose();
+    } catch(e) {}
+    return card;
+}
+
 /* opts.sticky：不自动消失，必须手点。挂账失败用这个——
    人若没看见弹窗就以为账挂上了，剧情接着走、账本却停在上一楼。
    生图失败不用：它有自动重试，常驻反而吵。 */
 function ipeShowApiFailurePopup(msg, willRetry, opts) {
     opts = opts || {};
-    var sticky = opts.sticky === true;
-    var title = opts.title || "IPE：API 请求失败";
+    var title = opts.title || "小海螺 · 请求失败";
     var body = msg || "API 暂时不可用。";
     if (willRetry) body += "\n10 秒后自动重试一次。";
-
     try {
-        var w = ipeRootWindow();
-        var toastr = w && (w.toastr || (w.parent && w.parent.toastr));
-        if (toastr && typeof toastr.error === "function") {
-            toastr.error(body, title, sticky
-                ? { timeOut: 0, extendedTimeOut: 0, closeButton: true, progressBar: false, tapToDismiss: true, escapeHtml: true }
-                : { timeOut: 9000, extendedTimeOut: 3000, closeButton: true, progressBar: true });
-            return;
-        }
-    } catch(e) {}
-
-    try {
-        var d = ipeRootDocument();
-        var old = d.getElementById("ipe-api-failure-popup");
-        if (old && old.parentNode) old.parentNode.removeChild(old);
-
-        var box = d.createElement("div");
-        box.id = "ipe-api-failure-popup";
-        box.setAttribute("role", "alert");
-        box.style.cssText = [
-            "position:fixed",
-            "right:14px",
-            "bottom:92px",
-            "max-width:min(420px,calc(100vw - 28px))",
-            "z-index:2147483647",
-            "padding:12px 14px",
-            "border-radius:12px",
-            "border:1px solid rgba(255,95,95,.55)",
-            "background:rgba(42,18,24,.96)",
-            "color:#fff",
-            "box-shadow:0 12px 30px rgba(0,0,0,.45)",
-            "font-size:13px",
-            "line-height:1.45",
-            "white-space:pre-wrap",
-            "pointer-events:auto"
-        ].join(";");
-
-        var close = d.createElement("button");
-        close.type = "button";
-        close.textContent = "×";
-        close.style.cssText = "float:right;margin:-4px -4px 4px 8px;border:0;background:transparent;color:#fff;font-size:18px;line-height:1;cursor:pointer";
-        close.addEventListener("click", function(){ try { if (box.parentNode) box.parentNode.removeChild(box); } catch(e) {} });
-
-        var titleEl = d.createElement("div");
-        titleEl.textContent = title;
-        titleEl.style.cssText = "font-weight:700;margin-bottom:4px;color:#ffb4b4";
-
-        var bodyEl = d.createElement("div");
-        bodyEl.textContent = body;
-
-        box.appendChild(close);
-        box.appendChild(titleEl);
-        box.appendChild(bodyEl);
-        (d.body || d.documentElement).appendChild(box);
-        if (!sticky) setTimeout(function(){ try { if (box.parentNode) box.parentNode.removeChild(box); } catch(e) {} }, 10000);
+        return ipeNotice({ kind: "error", title: title, body: body, sticky: opts.sticky === true });
     } catch(e) {
         try { alert(title + "\n" + body); } catch(_) {}
     }
@@ -4614,13 +4651,7 @@ function ipeImgPackBuild(scope) {
 }
 
 function ipeToast(msg, ok) {
-    try {
-        var w = ipeRootWindow();
-        var t = w && (w.toastr || (w.parent && w.parent.toastr));
-        if (t && typeof t[ok ? "success" : "error"] === "function") {
-            t[ok ? "success" : "error"](msg, "🐚 小海螺", { timeOut: ok ? 6000 : 9000, extendedTimeOut: 2000, closeButton: true });
-        }
-    } catch(e) {}
+    try { ipeNotice({ kind: ok ? "ok" : "error", title: ok ? "小海螺 · 完成" : "小海螺 · 出了点问题", body: msg }); } catch(e) {}
     try { setStatus(msg, ok ? "#6ec577" : "#d4726a"); } catch(e) {}
 }
 

@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.1") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.2") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -656,27 +656,42 @@ await (async () => {
     ok(F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-ledger", data: {} })) === null, "账本包拒收，不会串门");
 })();
 
-console.log("\n【32】 挂账失败弹窗常驻：timeOut 0 必须手点；生图失败弹窗仍 9 秒自动消失");
+console.log("\n【32】 通知卡：挂账失败常驻带「知道了」；生图失败带进度线自动收起；样式内联、层级最高；不再碰 toastr");
 await (async () => {
     const { w, tavern, F } = boot(10);
     withApi(tavern, F, "gpt-5");
-    const got = [];
-    w.toastr.error = (body, title, opts) => got.push({ body, title, opts });
+    let toastrCalls = 0; w.toastr.error = () => { toastrCalls++; };
     w.fetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
     await F("ipeLedgerRun")(9, true);
-    eq(got.length, 1, "挂账失败弹了一条");
-    eq(got[0].opts.timeOut, 0, "挂账弹窗不自动消失");
-    eq(got[0].opts.extendedTimeOut, 0, "悬停离开也不消失");
-    ok(got[0].opts.closeButton === true, "有关闭按钮");
-    ok(got[0].title.indexOf("挂账失败") >= 0 && got[0].title.indexOf("上一份") >= 0, "标题直说账本还是上一份", got[0].title);
-    ok(got[0].body.indexOf("重新挂账") >= 0, "正文告诉人怎么补");
-    // 生图那边不变
-    got.length = 0;
+    const d = w.document;
+    const stack = d.getElementById("ipe-notice-stack");
+    ok(!!stack && stack.style.position === "fixed" && stack.style.getPropertyPriority("z-index") === "important", "通知栈 fixed 且 z-index important");
+    const card = d.querySelector('.ipe-notice[data-ipe-sticky="1"]');
+    ok(!!card, "挂账失败出了一张常驻卡");
+    ok(card.querySelector(".ipe-notice-title").textContent.indexOf("挂账失败") >= 0 && card.querySelector(".ipe-notice-title").textContent.indexOf("上一份") >= 0, "标题直说账本还是上一份");
+    ok(card.querySelector(".ipe-notice-body").textContent.indexOf("重新挂账") >= 0, "正文告诉人怎么补");
+    ok(!!card.querySelector(".ipe-notice-ok") && !card.querySelector(".ipe-notice-bar"), "常驻卡有「知道了」、没有倒计时线");
+    ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "14px", "砖红细边 + 圆角，样式内联");
+    eq(toastrCalls, 0, "不再调用 toastr");
+    card.querySelector(".ipe-notice-ok").click();
+    await new Promise(r => setTimeout(r, 260));
+    ok(!d.querySelector('.ipe-notice[data-ipe-sticky="1"]'), "点「知道了」卡片移除");
+    // 生图失败：非常驻
     const st = tavern.extensionSettings[F("EXT_NAME")];
     st.apiEndpoint = "http://x.test/v1"; st.model = "gpt-4.1";
     await F("runExtract")(tavern.chat[9].mes, "", false, 9);
-    eq(got.length, 1, "生图失败也弹了一条");
-    eq(got[0].opts.timeOut, 9000, "生图失败弹窗保持 9 秒自动消失（它有自动重试）");
+    const card2 = d.querySelector('.ipe-notice[data-ipe-sticky="0"]');
+    ok(!!card2, "生图失败出了一张非常驻卡");
+    ok(!!card2.querySelector(".ipe-notice-bar") && !card2.querySelector(".ipe-notice-ok"), "非常驻卡有倒计时线、没有「知道了」");
+    ok(card2.querySelector(".ipe-notice-body").textContent.indexOf("10 秒后自动重试") >= 0, "正文带自动重试提示");
+    card2.querySelector(".ipe-notice-x").click();
+    await new Promise(r => setTimeout(r, 260));
+    ok(!d.querySelector('.ipe-notice[data-ipe-sticky="0"]'), "× 也能关");
+    // 开灯皮跟随
+    st.mistTheme = true;
+    F("ipeImgPackImportText")("not json");
+    const card3 = d.querySelector(".ipe-notice.ipe-mist");
+    ok(!!card3 && card3.style.borderLeftColor.toLowerCase().indexOf("b8756c") >= 0 || (card3 && /184,\s*117,\s*108/.test(card3.style.borderLeftColor)), "开灯皮：卡片带 ipe-mist、砖红 #B8756C 细边", card3 && card3.style.borderLeftColor);
 })();
 
 console.log("\n" + "\u2500".repeat(46));
