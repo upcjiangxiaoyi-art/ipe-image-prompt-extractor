@@ -1877,3 +1877,31 @@ body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
 .ipe-ledger-inline{margin-top:10px;padding:6px 10px;border:1px solid rgba(120,126,172,.35);border-radius:10px;font-size:.9em;text-align:left}
 .ipe-ledger-inline-title{cursor:pointer;user-select:none;opacity:.75;font-weight:600}
 .ipe-ledger-inline-body{white-space:pre-wrap;word-break:break-word;margin-top:6px;line-height:1.6;text-align:left}
+
+/* ---------- ⤢ 放大编辑（2.11.2） ---------- */
+.ipe-zoom-wrap { position: relative; width: 100%; }
+.ipe-zoom-wrap > textarea { width: 100%; box-sizing: border-box; padding-right: 30px; }
+.ipe-zoom-btn { position: absolute; top: 4px; right: 6px; z-index: 2; width: 22px; height: 22px; line-height: 20px; padding: 0; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); background: rgba(28,28,32,0.55); color: #bbb; font-size: 12px; font-family: inherit; cursor: pointer; opacity: 0.7; transition: opacity 0.15s; }
+.ipe-zoom-btn:hover { opacity: 1; }
+.ipe-mist .ipe-zoom-btn { background: rgba(255,255,255,0.75); border-color: rgba(0,0,0,0.12); color: #5a6b7a; }
+#ipe-drawer .ipe-zoom-btn { background: rgba(0,0,0,0.25); color: inherit; border-color: rgba(128,128,128,0.35); }
+.ipe-zoom-overlay { position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box; }
+.ipe-zoom-box { width: min(920px, 100%); height: min(86vh, 100%); background: rgba(28,28,32,0.98); color: #d4d4d4; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 16px 50px rgba(0,0,0,0.5); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; overflow: hidden; }
+.ipe-zoom-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+.ipe-zoom-title { font-weight: 600; font-size: 14px; color: #e8e8e8; }
+.ipe-zoom-count { font-size: 11px; color: #888; margin-left: auto; }
+.ipe-zoom-close { padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(110,197,119,0.35); background: rgba(110,197,119,0.15); color: #6ec577; cursor: pointer; font-size: 13px; font-family: inherit; }
+.ipe-zoom-close:hover { background: rgba(110,197,119,0.25); }
+.ipe-zoom-ta { flex: 1; margin: 12px; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #e6e6e6; font-size: 15px; line-height: 1.6; resize: none; outline: none; font-family: inherit; box-sizing: border-box; }
+.ipe-zoom-ta:focus { border-color: rgba(255,255,255,0.22); }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-box { background: #F7F4EE; color: #2f3d4a; border-color: rgba(0,0,0,0.08); }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-head { border-color: rgba(0,0,0,0.08); }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-title { color: #2f3d4a; }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-count { color: #7C8B99; }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-ta { background: #fff; color: #2f3d4a; border-color: rgba(0,0,0,0.12); }
+.ipe-zoom-overlay.ipe-mist .ipe-zoom-close { background: rgba(242,202,144,0.35); border-color: rgba(242,202,144,0.8); color: #7a5a2a; }
+@media (max-width: 480px) {
+  .ipe-zoom-overlay { padding: 0; }
+  .ipe-zoom-box { width: 100%; height: 100%; border-radius: 0; }
+  .ipe-zoom-ta { font-size: 16px; margin: 8px; }
+}

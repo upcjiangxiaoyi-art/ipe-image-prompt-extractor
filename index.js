@@ -3714,7 +3714,8 @@ function createUI() {
     createPanel();
     createDrawer();
     bindAll();
-    setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); try { ipeImgBindLayerUI(); ipeImgRefreshLayerUI(); } catch(eL) {} }, 120);
+    setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); try { ipeImgBindLayerUI(); ipeImgRefreshLayerUI(); } catch(eL) {} try { ipeInstallZoomButtons(); } catch(eZ) {} }, 120);
+    setTimeout(function(){ try { ipeInstallZoomButtons(); } catch(eZ) {} }, 2500);   // 抽屉晚到也补上
     setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerSync(); ipeLedgerInstallInlineObserver(); }, 160);
 }
 
@@ -4557,6 +4558,94 @@ function ipeForceSaveFromEditors() {
         console.error("[IPE] force save failed:", e);
         setStatus("保存失败", "#d4726a");
     }
+}
+
+/* ============================================================
+   ⤢ 放大编辑（2.11.2）
+   酒馆世界书那种：每个文本框右上角一个 ⤢，点开全屏编辑框，边打边回填，
+   回填走 input 事件，原有的预设保存 / 面板抽屉同步 / 层框重拼全部照常触发。
+   完成、点遮罩、Esc 都关；关的时候补发一次 change。
+   ============================================================ */
+var IPE_ZOOM_TITLES = {
+    "ipe-system-prompt": "系统提示", "ipe-base-template": "基础模板", "ipe-char-anchors": "角色锚点",
+    "ipe-anchor-guide-editor": "通用锚点规则", "ipe-extract-rules": "提取规则", "ipe-preview-text": "生图描述（整段）",
+    "ipe-layer-camera": "📷 镜头层", "ipe-layer-env": "🌆 环境层", "ipe-layer-mood": "🎞️ 氛围层",
+    "ipe-layer-chars": "🧍 人物层", "ipe-layer-pose": "🤝 动作层",
+    "ipe-ledger-text": "账本", "ipe-ledger-order": "User 指令", "ipe-ledger-extra": "这次额外说一句",
+    "ipe-ledger-preview": "副 AI 刚才说了什么", "ipe-ledger-prompt": "挂账规则", "ipe-ledger-note": "本卡要点 / 世界观硬设定"
+};
+function ipeZoomTitleFor(ta) {
+    try {
+        var id = String(ta.id || "").replace(/^iped-/, "ipe-");
+        if (IPE_ZOOM_TITLES[id]) return IPE_ZOOM_TITLES[id];
+        var holder = (ta.parentNode && ta.parentNode.classList && ta.parentNode.classList.contains("ipe-zoom-wrap")) ? ta.parentNode : ta;
+        var lab = (holder.parentNode && holder.parentNode.tagName === "LABEL") ? holder.parentNode : null;
+        if (!lab && holder.previousElementSibling && holder.previousElementSibling.tagName === "LABEL") lab = holder.previousElementSibling;
+        if (lab) {
+            var t = "";
+            for (var i = 0; i < lab.childNodes.length; i++) if (lab.childNodes[i].nodeType === 3) t += lab.childNodes[i].textContent;
+            t = t.trim(); if (t) return t;
+        }
+        var ph = ta.getAttribute("placeholder"); if (ph) return ph.split(/[\n；;。]/)[0].slice(0, 30);
+    } catch(e) {}
+    return "编辑";
+}
+function ipeZoomClose() {
+    try {
+        var d = ipeRootDocument(); var ov = d.getElementById("ipe-zoom-overlay");
+        if (!ov) return;
+        if (ov.__ipeKey) d.removeEventListener("keydown", ov.__ipeKey);
+        if (ov.parentNode) ov.parentNode.removeChild(ov);
+    } catch(e) {}
+}
+function ipeZoomOpen(ta) {
+    if (!ta) return;
+    var d = ipeRootDocument();
+    ipeZoomClose();
+    var ov = d.createElement("div");
+    ov.id = "ipe-zoom-overlay";
+    ov.className = "ipe-zoom-overlay" + (cfg().mistTheme === true ? " ipe-mist" : "");
+    ov.innerHTML = '<div class="ipe-zoom-box">'
+        + '<div class="ipe-zoom-head"><span class="ipe-zoom-title"></span><span class="ipe-zoom-count"></span>'
+        + '<button type="button" class="ipe-zoom-close">完成</button></div>'
+        + '<textarea class="ipe-zoom-ta" spellcheck="false"></textarea></div>';
+    ov.querySelector(".ipe-zoom-title").textContent = ipeZoomTitleFor(ta);
+    var count = ov.querySelector(".ipe-zoom-count");
+    var big = ov.querySelector(".ipe-zoom-ta");
+    big.value = ta.value;
+    big.readOnly = !!ta.readOnly; big.disabled = false;
+    function upd(){ count.textContent = big.value.length + " 字"; }
+    upd();
+    big.addEventListener("input", function(){
+        ta.value = big.value; upd();
+        try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch(e) {}
+    });
+    function done(){
+        try { ta.dispatchEvent(new Event("change", { bubbles: true })); } catch(e) {}
+        ipeZoomClose();
+    }
+    ov.querySelector(".ipe-zoom-close").addEventListener("click", done);
+    ov.addEventListener("click", function(ev){ if (ev.target === ov) done(); });
+    ov.__ipeKey = function(ev){ if (ev.key === "Escape") done(); };
+    d.addEventListener("keydown", ov.__ipeKey);
+    (d.body || d.documentElement).appendChild(ov);
+    setTimeout(function(){ try { big.focus(); big.setSelectionRange(big.value.length, big.value.length); } catch(e) {} }, 30);
+}
+function ipeInstallZoomButtons() {
+    ["#ipe-panel", "#ipe-drawer"].forEach(function(sel){
+        var root = q(sel); if (!root) return;
+        var list = root.querySelectorAll("textarea");
+        for (var i = 0; i < list.length; i++) (function(ta){
+            if (ta.__ipeZoom) return; ta.__ipeZoom = true;
+            var doc = ta.ownerDocument;
+            var wrap = doc.createElement("div"); wrap.className = "ipe-zoom-wrap";
+            ta.parentNode.insertBefore(wrap, ta); wrap.appendChild(ta);
+            var btn = doc.createElement("button");
+            btn.type = "button"; btn.className = "ipe-zoom-btn"; btn.title = "放大编辑"; btn.textContent = "⤢";
+            btn.addEventListener("click", function(ev){ ev.preventDefault(); ev.stopPropagation(); ipeZoomOpen(ta); });
+            wrap.appendChild(btn);
+        })(list[i]);
+    });
 }
 
 function ipeSetStopButtonsState(active) {

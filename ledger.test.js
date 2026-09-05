@@ -61,7 +61,8 @@ function boot(floors) {
         "ipeLedgerIsAbort", "ipeLedgerExport", "ipeLedgerImportText", "ipeLedgerInspectEP",
         "EXT_NAME", "DEFAULTS", "IPE_LEDGER_EP_KEY", "init", "ipeLedgerStripImageTag", "ipeLedgerBuildUser", "ipeLedgerReportBlock", "ipeLedgerPruneMirror",
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
-        "runExtract", "ipeImgParseLayers", "buildInjectTag", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer"];
+        "runExtract", "ipeImgParseLayers", "buildInjectTag", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
+        "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -548,6 +549,39 @@ await (async () => {
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "五层", value: "M={Mood};rest={Description}" }]);
     st.activeBaseTemplate = "tpl_1";
     eq(F("buildInjectTag")("x", { camera: "C", env: "E", mood: "MO", chars: "CH", pose: "P" }), "M=MO;rest=C E CH P", "{Mood} 单放，其余进 {Description}");
+})();
+
+console.log("\n【29】 ⤢ 放大编辑：每个文本框都有按钮，弹窗里打字实时回填并触发原有 input 链，完成后关闭");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    F("ipeInstallZoomButtons")();
+    const d = w.document;
+    const src = d.querySelector("#ipe-layer-pose");
+    ok(src && src.parentNode.classList.contains("ipe-zoom-wrap") && src.parentNode.querySelector(".ipe-zoom-btn"), "动作层框被包了一层并带 ⤢ 按钮");
+    ok(d.querySelector("#ipe-ledger-prompt").parentNode.querySelector(".ipe-zoom-btn"), "挂账规则框也有按钮");
+    // 抽屉要 jQuery + #extensions_settings2，假酒馆没有；用一个假的 iped 框验证 id 映射
+    const fake = d.createElement("textarea"); fake.id = "iped-ledger-note"; d.body.appendChild(fake);
+    F("ipeInstallZoomButtons")();
+    eq(src.parentNode.querySelectorAll(".ipe-zoom-btn").length, 1, "重复安装不重复加按钮");
+    eq(F("ipeZoomTitleFor")(src), "🤝 动作层", "标题按 id 映射");
+    eq(F("ipeZoomTitleFor")(fake), "本卡要点 / 世界观硬设定", "抽屉 iped- 前缀的 id 也能映射");
+    // 先让层框 UI 绑上（init 里是 120ms 定时器）
+    await new Promise(r => setTimeout(r, 200));
+    tavern.extensionSettings[F("EXT_NAME")].imgLayered = true;
+    F("ipeZoomOpen")(src);
+    const ov = d.getElementById("ipe-zoom-overlay");
+    ok(!!ov, "弹窗出现了");
+    const big = ov.querySelector(".ipe-zoom-ta");
+    big.value = "he leans on the door frame.";
+    big.dispatchEvent(new w.Event("input", { bubbles: true }));
+    eq(src.value, "he leans on the door frame.", "源框实时回填");
+    eq(d.querySelector("#ipe-preview-text").value, "he leans on the door frame.", "原有 input 链触发：整段预览随之重拼");
+    eq(ov.querySelector(".ipe-zoom-count").textContent, "27 字", "字数计数");
+    ov.querySelector(".ipe-zoom-close").click();
+    ok(!d.getElementById("ipe-zoom-overlay"), "点完成关闭");
+    F("ipeZoomOpen")(src);
+    d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape" }));
+    ok(!d.getElementById("ipe-zoom-overlay"), "Esc 关闭");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
