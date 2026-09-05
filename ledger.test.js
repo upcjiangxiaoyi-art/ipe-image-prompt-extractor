@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.2") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.3") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -672,10 +672,23 @@ await (async () => {
     ok(card.querySelector(".ipe-notice-body").textContent.indexOf("重新挂账") >= 0, "正文告诉人怎么补");
     ok(!!card.querySelector(".ipe-notice-ok") && !card.querySelector(".ipe-notice-bar"), "常驻卡有「知道了」、没有倒计时线");
     ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "14px", "砖红细边 + 圆角，样式内联");
+    eq(card.style.opacity, "1", "卡片一出生就是可见的，不靠定时淡入");
+    ok(card.style.cssText.indexOf("backdrop-filter") < 0, "不用 backdrop-filter（iOS 毛玻璃+淡入偶发不上屏）");
+    const mirror = d.querySelector("#ipe-panel .ipe-sections .ipe-notice-mirror");
+    ok(!!mirror, "面板内出现横幅镜像");
+    ok(mirror.querySelector(".ipe-notice-title").textContent.indexOf("挂账失败") >= 0 && !!mirror.querySelector(".ipe-notice-ok"), "镜像同标题、同「知道了」");
+    eq(d.querySelector("#ipe-panel .ipe-sections").firstChild, mirror, "镜像插在面板滚动区最顶上");
     eq(toastrCalls, 0, "不再调用 toastr");
     card.querySelector(".ipe-notice-ok").click();
     await new Promise(r => setTimeout(r, 260));
     ok(!d.querySelector('.ipe-notice[data-ipe-sticky="1"]'), "点「知道了」卡片移除");
+    ok(!d.querySelector(".ipe-notice-mirror"), "浮层关了镜像一起走");
+    // 试一下报错卡
+    d.querySelector("#ipe-notice-demo").click();
+    ok(!!d.querySelector('.ipe-notice[data-ipe-sticky="1"]') && !!d.querySelector(".ipe-notice-mirror"), "「试一下报错卡」按钮弹出常驻卡与镜像");
+    d.querySelector(".ipe-notice-mirror .ipe-notice-x").click();
+    await new Promise(r => setTimeout(r, 260));
+    ok(!d.querySelector('.ipe-notice[data-ipe-sticky="1"]') && !d.querySelector(".ipe-notice-mirror"), "从镜像上点 × 两边一起关");
     // 生图失败：非常驻
     const st = tavern.extensionSettings[F("EXT_NAME")];
     st.apiEndpoint = "http://x.test/v1"; st.model = "gpt-4.1";

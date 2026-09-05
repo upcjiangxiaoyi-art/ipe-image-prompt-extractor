@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.2";
+var IPE_VERSION = "2.12.3";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3647,7 +3647,9 @@ function ipeNotice(opts) {
     card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:14px;border:1px solid " + bd
         + ";border-left:3px solid " + accent + ";background:" + bg + ";color:" + fg
         + ";box-shadow:0 10px 30px rgba(0,0,0," + (mist ? ".16" : ".45") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.5;padding:12px 14px 10px"
-        + ";-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);opacity:0;transform:translateY(8px)";
+        + ";opacity:1;visibility:visible;display:block;max-width:100%;box-sizing:border-box";
+    /* 不用 backdrop-filter、不用 JS 定时把 opacity 从 0 拉到 1：iOS WebKit 对「毛玻璃 + 淡入」偶发不上屏，
+       卡片就存在于 DOM 却看不见。入场动画交给 style.css 的 .ipe-notice 关键帧，CSS 缺了也只是没动画。 */
     card.innerHTML =
         '<div style="display:flex;align-items:flex-start;gap:8px">'
       +   '<span style="font-size:16px;line-height:1.25;flex:none">' + (opts.icon || "🐚") + '</span>'
@@ -3667,6 +3669,7 @@ function ipeNotice(opts) {
     function close() {
         if (closed) return; closed = true;
         if (card.__ipeTimer) { clearTimeout(card.__ipeTimer); card.__ipeTimer = null; }
+        try { if (card.__ipeMirror && card.__ipeMirror.parentNode) card.__ipeMirror.parentNode.removeChild(card.__ipeMirror); } catch(e) {}
         try { card.style.transition = "opacity .18s ease, transform .18s ease"; card.style.opacity = "0"; card.style.transform = "translateY(8px)"; } catch(e) {}
         setTimeout(function(){ try { if (card.parentNode) card.parentNode.removeChild(card); } catch(e) {} }, 200);
     }
@@ -3675,7 +3678,15 @@ function ipeNotice(opts) {
     var okb = card.querySelector(".ipe-notice-ok"); if (okb) okb.addEventListener("click", close);
 
     stack.appendChild(card);
-    setTimeout(function(){ try { card.style.transition = "opacity .22s ease, transform .22s ease"; card.style.opacity = "1"; card.style.transform = "translateY(0)"; } catch(e) {} }, 10);
+    ipeNoticeMirror(card, opts, accent, close);
+    /* 自检：挂上去之后量一下，量不到就在控制台点名，方便远程排查 */
+    try {
+        var rc = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+        var rw3 = ipeRootWindow();
+        var vh3 = (rw3 && rw3.innerHeight) || 0;
+        var bad = !rc || rc.width < 10 || rc.height < 10 || (vh3 && (rc.bottom < 0 || rc.top > vh3));
+        if (typeof console !== "undefined") console.log("[IPE] 通知卡", bad ? "⚠ 浮层不可见（已在面板内镜像）" : "✓ 浮层可见", { title: opts.title, rect: rc ? { top: Math.round(rc.top), left: Math.round(rc.left), w: Math.round(rc.width), h: Math.round(rc.height) } : null, doc: d === document ? "self" : "top" });
+    } catch(e) {}
 
     if (!sticky) {
         var bar = card.querySelector(".ipe-notice-bar");
@@ -3694,6 +3705,45 @@ function ipeNotice(opts) {
         for (var i = 0; i < all.length - 4; i++) if (all[i].getAttribute("data-ipe-sticky") !== "1" && all[i].__ipeClose) all[i].__ipeClose();
     } catch(e) {}
     return card;
+}
+
+/* 面板内镜像：浮层卡不管因为什么原因看不见（层级、WebKit 不上屏、被别的插件盖住），
+   面板里那条横幅一定看得见——人报错的时候眼睛就在面板上。浮层关了镜像跟着关，反之亦然。 */
+function ipeNoticeMirror(card, opts, accent, closeAll) {
+    try {
+        var hosts = [];
+        var panel = q("#ipe-panel .ipe-sections"); if (panel) hosts.push(panel);
+        var drawer = q("#ipe-drawer .inline-drawer-content"); if (drawer) hosts.push(drawer);
+        if (!hosts.length) return;
+        var host = hosts[0];
+        var mist = false; try { mist = cfg().mistTheme === true; } catch(e) {}
+        var m = host.ownerDocument.createElement("div");
+        m.className = "ipe-notice-mirror";
+        m.setAttribute("data-ipe-sticky", card.getAttribute("data-ipe-sticky"));
+        m.style.cssText = "margin:8px 12px 2px;padding:10px 12px;border-radius:12px;border:1px solid " + (mist ? "rgba(140,156,172,.30)" : "rgba(255,255,255,.10)")
+            + ";border-left:3px solid " + accent + ";background:" + (mist ? "rgba(255,255,255,.70)" : "rgba(255,255,255,.05)") + ";color:" + (mist ? "#4A5662" : "#dedede")
+            + ";font-size:12.5px;line-height:1.5;display:block";
+        m.innerHTML = '<div style="display:flex;align-items:flex-start;gap:8px">'
+            + '<span style="flex:none">' + (opts.icon || "🐚") + '</span>'
+            + '<div style="flex:1;min-width:0"><div class="ipe-notice-title" style="font-weight:600"></div><div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;opacity:.85"></div></div>'
+            + '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:inherit;opacity:.7;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;font-family:inherit">×</button></div>'
+            + (opts.sticky === true ? '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="ipe-notice-ok" style="padding:5px 14px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>' : '');
+        m.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
+        m.querySelector(".ipe-notice-body").textContent = opts.body || "";
+        m.querySelector(".ipe-notice-x").addEventListener("click", closeAll);
+        var okb = m.querySelector(".ipe-notice-ok"); if (okb) okb.addEventListener("click", closeAll);
+        host.insertBefore(m, host.firstChild);
+        card.__ipeMirror = m;
+        // 镜像也最多 4 条
+        var all = host.querySelectorAll(".ipe-notice-mirror");
+        for (var i = all.length - 1; i >= 4; i--) if (all[i].getAttribute("data-ipe-sticky") !== "1" && all[i].parentNode) all[i].parentNode.removeChild(all[i]);
+    } catch(e) {}
+}
+
+/* 让用户不用真把 API 弄坏就能看一眼报错卡长什么样、在哪儿出现 */
+function ipeNoticeDemo() {
+    ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。面板里同时有一条横幅镜像。", false,
+        { sticky: true, title: "挂账失败 · 账本还是上一份（演示）" });
 }
 
 /* opts.sticky：不自动消失，必须手点。挂账失败用这个——
@@ -4301,6 +4351,7 @@ function createPanel() {
             '<button id="ipe-ledger-export" class="ipe-btn" type="button">\u2B07 \u5BFC\u51FA\u8D26\u672C</button>'+
             '<button id="ipe-ledger-import" class="ipe-btn" type="button">\u2B06 \u5BFC\u5165\u8D26\u672C</button>'+
             '<button id="ipe-ledger-ep" class="ipe-btn" type="button">\u{1F50D} \u770B\u8D34\u8033</button>'+
+            '<button id="ipe-notice-demo" class="ipe-btn" type="button" title="看看报错卡长什么样，不动账本">\uD83D\uDD14 试一下报错卡</button>'+
         '</div>'+
         '<input type="file" id="ipe-ledger-file" accept=".json,application/json" style="display:none">'+
         '<div id="ipe-ledger-ep-box" style="display:none;margin-top:6px">'+
@@ -4487,6 +4538,7 @@ function createDrawer() {
        +   '<input type="button" id="iped-ledger-export" class="menu_button" style="flex:1" value="\u2B07 \u5BFC\u51FA\u8D26\u672C">'
        +   '<input type="button" id="iped-ledger-import" class="menu_button" style="flex:1" value="\u2B06 \u5BFC\u5165\u8D26\u672C">'
        +   '<input type="button" id="iped-ledger-ep" class="menu_button" style="flex:1" value="\u{1F50D} \u770B\u8D34\u8033">'
+       +   '<input type="button" id="iped-notice-demo" class="menu_button" style="flex:1" value="\uD83D\uDD14 试一下报错卡">'
        + '</div>';
     h += '<input type="file" id="iped-ledger-file" accept=".json,application/json" style="display:none">';
     h += '<div id="iped-ledger-ep-box" style="display:none;margin-top:6px">'
@@ -5388,6 +5440,10 @@ function bindAll() {
                 if (box) box.style.display = "none";
             });
         }
+    });
+    ["ipe-notice-demo","iped-notice-demo"].forEach(function(id){
+        var b = q("#" + id);
+        if (b && !b.dataset.ipeBound) { b.dataset.ipeBound = "1"; b.addEventListener("click", function(){ ipeNoticeDemo(); }); }
     });
     ["ipe-ledger-ep","iped-ledger-ep"].forEach(function(id){
         var b = q("#" + id);

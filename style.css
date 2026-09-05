@@ -1905,3 +1905,9 @@ body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
   .ipe-zoom-box { width: 100%; height: 100%; border-radius: 0; }
   .ipe-zoom-ta { font-size: 16px; margin: 8px; }
 }
+
+/* ---------- 🐚 通知卡入场（非关键样式，缺了只是没动画） ---------- */
+@keyframes ipe-notice-in { from { transform: translateY(8px); } to { transform: translateY(0); } }
+.ipe-notice { animation: ipe-notice-in .22s ease both; }
+.ipe-notice-mirror { animation: ipe-notice-in .22s ease both; }
+.ipe-notice-ok:hover, .ipe-notice-x:hover { filter: brightness(1.15); }
