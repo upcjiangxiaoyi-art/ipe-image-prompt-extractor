@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.0";
+var IPE_VERSION = "2.12.1";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -1230,7 +1230,8 @@ function ipeLedgerFailNotice(detail) {
         body += "\n已经连续失败 " + ipeLedgerFailStreak + " 次——多半不是这一楼的问题，"
              +  "换一套 API 预设或换个模型再试。";
     }
-    try { ipeShowApiFailurePopup(body, false); } catch(e) {}
+    body += "\n\n这一楼没挂上，贴耳里还是上一份账本。先别发下一条，去挂账页点「重新挂账」补上；看到后点掉这条。";
+    try { ipeShowApiFailurePopup(body, false, { sticky: true, title: "🐚 挂账失败 · 账本还是上一份" }); } catch(e) {}
 }
 var ipeLedgerStaleWarned = false;
 
@@ -3603,8 +3604,13 @@ function ipeShouldRetryApiError(e, userAbort) {
     return true;
 }
 
-function ipeShowApiFailurePopup(msg, willRetry) {
-    var title = "IPE：API 请求失败";
+/* opts.sticky：不自动消失，必须手点。挂账失败用这个——
+   人若没看见弹窗就以为账挂上了，剧情接着走、账本却停在上一楼。
+   生图失败不用：它有自动重试，常驻反而吵。 */
+function ipeShowApiFailurePopup(msg, willRetry, opts) {
+    opts = opts || {};
+    var sticky = opts.sticky === true;
+    var title = opts.title || "IPE：API 请求失败";
     var body = msg || "API 暂时不可用。";
     if (willRetry) body += "\n10 秒后自动重试一次。";
 
@@ -3612,7 +3618,9 @@ function ipeShowApiFailurePopup(msg, willRetry) {
         var w = ipeRootWindow();
         var toastr = w && (w.toastr || (w.parent && w.parent.toastr));
         if (toastr && typeof toastr.error === "function") {
-            toastr.error(body, title, { timeOut: 9000, extendedTimeOut: 3000, closeButton: true, progressBar: true });
+            toastr.error(body, title, sticky
+                ? { timeOut: 0, extendedTimeOut: 0, closeButton: true, progressBar: false, tapToDismiss: true, escapeHtml: true }
+                : { timeOut: 9000, extendedTimeOut: 3000, closeButton: true, progressBar: true });
             return;
         }
     } catch(e) {}
@@ -3660,7 +3668,7 @@ function ipeShowApiFailurePopup(msg, willRetry) {
         box.appendChild(titleEl);
         box.appendChild(bodyEl);
         (d.body || d.documentElement).appendChild(box);
-        setTimeout(function(){ try { if (box.parentNode) box.parentNode.removeChild(box); } catch(e) {} }, 10000);
+        if (!sticky) setTimeout(function(){ try { if (box.parentNode) box.parentNode.removeChild(box); } catch(e) {} }, 10000);
     } catch(e) {
         try { alert(title + "\n" + body); } catch(_) {}
     }
