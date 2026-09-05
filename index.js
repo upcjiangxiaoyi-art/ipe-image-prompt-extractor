@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.4";
+var IPE_VERSION = "2.12.5";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3679,7 +3679,10 @@ function ipeNoticeStack() {
     if (st) return st;
     st = d.createElement("div"); st.id = "ipe-notice-stack";
     st.style.cssText = "position:fixed;right:14px;bottom:96px;width:min(380px,calc(100vw - 28px));display:flex;flex-direction:column;gap:10px;pointer-events:none;margin:0;padding:0";
+    /* 面板被强制 translateZ(0) 走了独立合成层；WebKit 上非合成层的浮层有时会被合成层盖住、不认 z-index。
+       通知栈同样开合成层，跟面板站到同一条起跑线上。 */
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
+    try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
     try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.bottom = "88px"; } } catch(e) {}
     (d.body || d.documentElement).appendChild(st);
     return st;
@@ -3806,8 +3809,36 @@ function ipeNoticeMirror(card, opts, accent, closeAll) {
 
 /* 让用户不用真把 API 弄坏就能看一眼报错卡长什么样、在哪儿出现 */
 function ipeNoticeDemo() {
-    ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。面板里同时有一条横幅镜像。", false,
+    var card = ipeShowApiFailurePopup("这是一张演示用的报错卡，账本没有任何变化。\n\n真出错时就长这样：常驻不消失，右下角「知道了」点掉才走。面板里同时有一条横幅镜像。", false,
         { sticky: true, title: "挂账失败 · 账本还是上一份（演示）" });
+    /* 自检报告写进卡片正文（镜像里也能读到）：浮层到底在哪、多大、哪个文档、算出来的样式是什么 */
+    setTimeout(function(){
+        try {
+            var d = ipeRootDocument(), rw = ipeRootWindow() || window;
+            var st = d.getElementById("ipe-notice-stack");
+            var cs = (card && (d.defaultView || rw).getComputedStyle) ? (d.defaultView || rw).getComputedStyle(card) : null;
+            var ss = (st && (d.defaultView || rw).getComputedStyle) ? (d.defaultView || rw).getComputedStyle(st) : null;
+            var rc = card && card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+            var rs = st && st.getBoundingClientRect ? st.getBoundingClientRect() : null;
+            var vv = rw.visualViewport;
+            var pnl = q("#ipe-panel"); var rp = pnl && pnl.getBoundingClientRect ? pnl.getBoundingClientRect() : null;
+            function r4(x){ return x ? Math.round(x.left) + "," + Math.round(x.top) + " " + Math.round(x.width) + "×" + Math.round(x.height) : "无"; }
+            var lines = [
+                "—— 自检 v" + IPE_VERSION + " ——",
+                "文档: " + (d === document ? "本页" : "顶层") + "　栈父级: " + (st && st.parentNode ? st.parentNode.tagName : "无") + "　卡片在DOM: " + (card && card.isConnected ? "是" : "否"),
+                "视口: " + rw.innerWidth + "×" + rw.innerHeight + (vv ? "　visualViewport: " + Math.round(vv.width) + "×" + Math.round(vv.height) + " @" + Math.round(vv.offsetLeft) + "," + Math.round(vv.offsetTop) : ""),
+                "栈 rect: " + r4(rs) + "　卡 rect: " + r4(rc) + "　面板 rect: " + r4(rp),
+                ss ? ("栈样式: pos=" + ss.position + " z=" + ss.zIndex + " disp=" + ss.display + " vis=" + ss.visibility + " op=" + ss.opacity + " bottom=" + ss.bottom + " top=" + ss.top) : "栈样式: 拿不到",
+                cs ? ("卡样式: disp=" + cs.display + " vis=" + cs.visibility + " op=" + cs.opacity + " bg=" + cs.backgroundColor) : "卡样式: 拿不到"
+            ];
+            var txt = lines.join("\n");
+            [card, card && card.__ipeMirror].forEach(function(el){
+                if (!el) return;
+                var b = el.querySelector(".ipe-notice-body"); if (b) b.textContent += "\n\n" + txt;
+            });
+            if (typeof console !== "undefined") console.log("[IPE] 通知卡自检\n" + txt);
+        } catch(e) {}
+    }, 120);
 }
 
 /* opts.sticky：不自动消失，必须手点。挂账失败用这个——
