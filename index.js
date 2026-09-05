@@ -49,7 +49,7 @@ const DEFAULTS = {
     ledgerReasoningEffort: "",     // reasoning_effort；空 = 不发，用模型默认
     ledgerMaxTokens: 0,            // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
     imgLayered: false,             // 2.11.0 分层生图：一次请求四层输出（镜头 / 环境 / 人物 / 动作）
-    imgLockCamera: false, imgLockEnv: false, imgLockChars: false, imgLockPose: false
+    imgLockCamera: false, imgLockEnv: false, imgLockMood: false, imgLockChars: false, imgLockPose: false
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -3207,7 +3207,7 @@ function ipeTrimSourceText(text) {
    老路：一次提取吐一整段 Description，改一处全部重来，环境每楼重提会漂，
    多人动作模型读不清谁在哪。
    新路：还是一次请求，但让副 AI 按四个标签分节输出——
-     <camera> 镜头   <env> 环境   <chars> 人物   <pose> 动作与空间关系
+     <camera> 镜头   <env> 环境   <mood> 氛围   <chars> 人物   <pose> 动作与空间关系
    插件机械剥壳（跟挂账认 <ledger> 一个路子），每层一个框、一个锁：
      · 锁住的层不重提，原样喂回去让其他层与之保持一致
      · 环境层：场景没换时副 AI 回 NO_CHANGE，插件沿用本聊天上一楼的环境
@@ -3215,10 +3215,13 @@ function ipeTrimSourceText(text) {
    模板可用 {Camera} {Env} {Chars} {Pose} 单独放置；{Description} 拿没被单独放置的层。
    老模板只写 {Description} 的照样能用，四层按顺序拼成一段。
    ============================================================ */
-var IPE_IMG_LAYERS = ["camera", "env", "chars", "pose"];
-var IPE_IMG_LAYER_LABEL = { camera: "镜头", env: "环境", chars: "人物", pose: "动作" };
-var IPE_IMG_LAYER_ICON  = { camera: "📷", env: "🌆", chars: "🧍", pose: "🤝" };
-var IPE_IMG_LAYER_PH    = { camera: "{Camera}", env: "{Env}", chars: "{Chars}", pose: "{Pose}" };
+var IPE_IMG_LAYERS = ["camera", "env", "mood", "chars", "pose"];
+var IPE_IMG_LAYER_LABEL = { camera: "镜头", env: "环境", mood: "氛围", chars: "人物", pose: "动作" };
+var IPE_IMG_LAYER_ICON  = { camera: "📷", env: "🌆", mood: "🎞️", chars: "🧍", pose: "🤝" };
+var IPE_IMG_LAYER_PH    = { camera: "{Camera}", env: "{Env}", mood: "{Mood}", chars: "{Chars}", pose: "{Pose}" };
+/* 可跨楼沿用的层：环境（物理空间几十楼不换）、氛围（一段戏的基调常常连着几楼）。
+   副 AI 回 NO_CHANGE 就沿用本聊天上一楼；其他层没这个后门。 */
+var IPE_IMG_INHERIT = { env: true, mood: true };
 var IPE_IMG_LAYERS_META_KEY = "ipe_img_layers_v1";
 var IPE_IMG_NOCHANGE = "NO_CHANGE";
 var ipeImgLayersFresh = false;   // 本次预览是否来自成功分层；副 AI 没分层时为 false，注入不拿旧层框填占位符
@@ -3243,7 +3246,7 @@ function ipeImgLayersRead() {
 function ipeImgLayersSave(layers, floor) {
     try {
         var root = ipeMetaRoot(); if (!root) return;
-        var o = { floor: Number(floor) || 0, envFloor: Number(layers && layers.envFloor) || Number(floor) || 0, updatedAt: Date.now() };
+        var o = { floor: Number(floor) || 0, envFloor: Number(layers && layers.envFloor) || Number(floor) || 0, moodFloor: Number(layers && layers.moodFloor) || Number(floor) || 0, updatedAt: Date.now() };
         IPE_IMG_LAYERS.forEach(function(l){ o[l] = String((layers && layers[l]) || ""); });
         root[IPE_IMG_LAYERS_META_KEY] = o;
         var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
@@ -3265,7 +3268,7 @@ function ipeImgLayerBoxValues() {
 function ipeImgPrevLayers(locks) {
     var st = ipeImgLayersRead();
     var box = ipeImgLayerBoxValues();
-    var out = { floor: st ? Number(st.floor) || 0 : 0, envFloor: st ? Number(st.envFloor || st.floor) || 0 : 0 };
+    var out = { floor: st ? Number(st.floor) || 0 : 0, envFloor: st ? Number(st.envFloor || st.floor) || 0 : 0, moodFloor: st ? Number(st.moodFloor || st.floor) || 0 : 0 };
     IPE_IMG_LAYERS.forEach(function(l){
         var stored = st ? String(st[l] || "").trim() : "";
         out[l] = (locks && locks[l] && box[l]) ? box[l] : stored;
@@ -3275,9 +3278,10 @@ function ipeImgPrevLayers(locks) {
 
 function ipeImgLayerContract(prev, locks) {
     var lines = [
-        "任务：把正文拆成四层英文生图描述，按下面四个标签分节输出。标签外不要写任何东西；不要解释；不要标题；不要代码块；不要中文。",
+        "任务：把正文拆成五层英文生图描述，按下面五个标签分节输出。标签外不要写任何东西；不要解释；不要标题；不要代码块；不要中文。",
         "<camera>景别、机位高度、视角、构图、景深。一到两句。</camera>",
-        "<env>地点、室内外、时间、天气、光线来源与色温、关键背景与道具。两到四句。</env>",
+        "<env>只写物理空间：地点、室内外、时间段、天气、关键背景与道具、背景人物的数量与动态。不写光线质感和情绪。两到三句。</env>",
+        "<mood>这一楼的画面感觉，用画面载体写而不是堆形容词：光的方向与质地、色温、明暗对比、空气感（清透 / 潮湿 / 尘光）、天气细节、整体基调。一到三句。</mood>",
         "<chars>只写本楼实际出场且入镜的角色：按角色锚点校准外貌，再写此刻的服装状态、表情、身体状态（受伤、湿发、绷带等）。</chars>",
         "<pose>动作与空间关系，写成明确的空间句：谁在哪、面朝哪、视线落在哪、手放在哪、身体接触点、相对位置与距离。</pose>"
     ];
@@ -3295,7 +3299,13 @@ function ipeImgLayerContract(prev, locks) {
         lines.push("");
         lines.push("【上一楼的环境层】");
         lines.push(prev.env);
-        lines.push("本楼地点、时间、天气、光线都没变时，<env> 里只写 " + IPE_IMG_NOCHANGE + "，其余层照常输出。换了场景才重写环境。");
+        lines.push("本楼地点、时间段、天气、道具都没变时，<env> 里只写 " + IPE_IMG_NOCHANGE + "，其余层照常输出。换了场景才重写环境。");
+    }
+    if (prev && String(prev.mood || "").trim() && !(locks && locks.mood)) {
+        lines.push("");
+        lines.push("【上一楼的氛围层】");
+        lines.push(prev.mood);
+        lines.push("本楼光线、色温、情绪基调都没变时，<mood> 里只写 " + IPE_IMG_NOCHANGE + "。情绪转折、光线变化就重写。");
     }
     return lines.join("\n");
 }
@@ -3305,7 +3315,7 @@ function ipeImgParseLayers(txt) {
     var s0 = String(txt || "").replace(/^\s*```[a-zA-Z]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
     var out = { found: 0 };
     IPE_IMG_LAYERS.forEach(function(l){
-        var re = new RegExp("<\\s*" + l + "\\s*>([\\s\\S]*?)(?:<\\s*\\/\\s*" + l + "\\s*>|(?=<\\s*(?:camera|env|chars|pose)\\s*>)|$)", "i");
+        var re = new RegExp("<\\s*" + l + "\\s*>([\\s\\S]*?)(?:<\\s*\\/\\s*" + l + "\\s*>|(?=<\\s*(?:camera|env|mood|chars|pose)\\s*>)|$)", "i");
         var m = s0.match(re);
         if (m) { out[l] = String(m[1] || "").trim(); out.found++; }
         else out[l] = "";
@@ -3317,16 +3327,18 @@ function ipeImgIsNoChange(v) { return String(v || "").replace(/\s+/g, "").toUppe
 
 /* 合账：锁定层用旧值；NO_CHANGE 或空 → 有旧值就沿用；否则收新值 */
 function ipeImgMergeLayers(parsed, prev, locks, floor) {
-    var out = { notes: [], envFloor: Number(floor) || 0 };
+    var out = { notes: [], envFloor: Number(floor) || 0, moodFloor: Number(floor) || 0 };
     IPE_IMG_LAYERS.forEach(function(l){
         var v = String((parsed && parsed[l]) || "").trim();
         var prevV = prev ? String(prev[l] || "").trim() : "";
         var label = IPE_IMG_LAYER_LABEL[l] || l;
-        if (locks && locks[l] && prevV) { out[l] = prevV; if (l === "env") out.envFloor = Number(prev.envFloor) || Number(floor) || 0; return; }
+        var fk = l + "Floor";                                   // envFloor / moodFloor：这层内容来自哪一楼
+        var prevFloor = prev ? (Number(prev[fk]) || Number(prev.floor) || 0) : 0;
+        if (locks && locks[l] && prevV) { out[l] = prevV; if (IPE_IMG_INHERIT[l]) out[fk] = prevFloor; return; }
         if (!v || ipeImgIsNoChange(v)) {
             if (prevV) {
                 out[l] = prevV;
-                if (l === "env") { out.envFloor = Number(prev.envFloor) || Number(prev.floor) || 0; out.notes.push("环境沿用第 " + out.envFloor + " 楼"); }
+                if (IPE_IMG_INHERIT[l]) { out[fk] = prevFloor; out.notes.push(label + "沿用第 " + prevFloor + " 楼"); }
                 else out.notes.push(label + "层沿用上一楼");
             } else {
                 out[l] = "";
@@ -3393,7 +3405,7 @@ function ipeImgRefreshLayerUI() {
         });
     });
     var st = ipeImgLayersRead();
-    ipeImgSetLayerBoxes(st || { camera: "", env: "", chars: "", pose: "" });
+    ipeImgSetLayerBoxes(st || {});
 }
 
 function ipeImgBindLayerUI() {
@@ -3402,7 +3414,7 @@ function ipeImgBindLayerUI() {
         el.addEventListener("change", function(){
             save("imgLayered", !!el.checked);
             ipeImgRefreshLayerUI();
-            setStatus(el.checked ? "分层提取已开：镜头 / 环境 / 人物 / 动作，各一框一锁" : "分层提取已关，回到整段 Description", "#6ec577");
+            setStatus(el.checked ? "分层提取已开：镜头 / 环境 / 氛围 / 人物 / 动作，各一框一锁" : "分层提取已关，回到整段 Description", "#6ec577");
         });
     });
     IPE_IMG_LAYERS.forEach(function(l){
@@ -4189,11 +4201,11 @@ function createPanel() {
     h += secHTML("preview","预览", false,
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
-        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
+        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
         '<div id="ipe-layers-box" style="display:none">'+
             ipeImgLayerRowsHTML("ipe", false)+
-            '<div class="ipe-hint" style="margin-top:6px">锁住的层不重提，原样沿用框里那段；「只重摇这层」= 其余三层临时锁定。场景没换时环境层自动沿用本聊天上一楼。模板可用 {Camera} {Env} {Chars} {Pose} 单独放置，{Description} 拿剩下的层；只写 {Description} 就是四层拼成一段。下面这框是拼好的整段，直接改也行。</div>'+
+            '<div class="ipe-hint" style="margin-top:6px">锁住的层不重提，原样沿用框里那段；「只重摇这层」= 其余各层临时锁定。场景没换时环境层、基调没变时氛围层，自动沿用本聊天上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose} 单独放置，{Description} 拿剩下的层；只写 {Description} 就是五层拼成一段。下面这框是拼好的整段，直接改也行。</div>'+
         '</div>'+
         '<textarea id="ipe-preview-text" rows="6" placeholder="生成的 Description 将显示在这里…"></textarea>'+
         '<label>补充指令<input type="text" id="ipe-supplement" placeholder="例：这段是冷战不是撒娇"></label>'+
@@ -4383,10 +4395,10 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-add" class="menu_button" value="新增规则"><input type="button" id="iped-rule-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-extract-rules" class="text_pole" rows="4" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>';
     h += '<hr><small><b>预览</b></small>';
-    h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
+    h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
     h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
     h += '<div id="iped-layers-box" style="display:none">' + ipeImgLayerRowsHTML("iped", true)
-       + '<small style="color:#888">锁住的层不重提；「只重摇这层」= 其余三层临时锁定。场景没换时环境层沿用上一楼。模板可用 {Camera} {Env} {Chars} {Pose}，{Description} 拿剩下的层。</small></div>';
+       + '<small style="color:#888">锁住的层不重提；「只重摇这层」= 其余各层临时锁定。环境 / 氛围没变时沿用上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose}，{Description} 拿剩下的层。</small></div>';
     h += '<textarea id="iped-preview-text" class="text_pole" rows="5" placeholder="生成的 Description 将显示在这里…"></textarea>';
     h += '<label>补充指令</label><input type="text" id="iped-supplement" class="text_pole" placeholder="例：这段是冷战不是撒娇">';
     h += '<div style="display:flex;gap:6px;margin-top:6px">';
@@ -5531,10 +5543,10 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
                 ipeImgLayersSave(merged, floorNo);
                 desc = ipeImgJoinLayers(merged);
                 ipeImgLayersFresh = true;
-                layerNote = merged.notes.length ? "（" + merged.notes.join("，") + "）" : "（四层齐全）";
+                layerNote = merged.notes.length ? "（" + merged.notes.join("，") + "）" : "（五层齐全）";
             } else {
                 ipeImgLayersFresh = false;
-                layerNote = "（副 AI 没分层，按整段收下；四个层框未更新）";
+                layerNote = "（副 AI 没分层，按整段收下；层框未更新）";
             }
         }
         currentDesc = desc; setPreview(desc);
@@ -5596,7 +5608,7 @@ async function onRerollLayer(layer) {
         var msg = ctx().chat[currentIdx]; if (!msg) return;
         var ov = {}; IPE_IMG_LAYERS.forEach(function(x){ ov[x] = x !== layer; });   // 其余三层临时锁定
         var sup = q("#ipe-supplement"), supd = q("#iped-supplement");
-        setStatus("只重摇" + IPE_IMG_LAYER_LABEL[layer] + "层，其余三层锁定…", "#6ec577");
+        setStatus("只重摇" + IPE_IMG_LAYER_LABEL[layer] + "层，其余各层锁定…", "#6ec577");
         await runExtract(msg.mes, (sup && sup.value) || (supd && supd.value) || "", false, currentIdx, 0, ov);
     } catch(e) {}
 }

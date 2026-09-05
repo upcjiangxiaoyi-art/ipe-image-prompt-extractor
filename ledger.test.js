@@ -426,7 +426,7 @@ function imgApi(w, tavern, F, content, capture) {
     w.fetch = async (u, o) => { if (capture) capture.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: typeof content === "function" ? content() : content } }] }) }; };
     return st;
 }
-const L4 = (cam, env, chars, pose) => `<camera>${cam}</camera>\n<env>${env}</env>\n<chars>${chars}</chars>\n<pose>${pose}</pose>`;
+const L4 = (cam, env, chars, pose, mood) => `<camera>${cam}</camera>\n<env>${env}</env>\n` + (mood != null ? `<mood>${mood}</mood>\n` : "") + `<chars>${chars}</chars>\n<pose>${pose}</pose>`;
 const box = (w, id) => { const el = w.document.querySelector("#" + id); return el ? el.value : null; };
 const imgStatus = w => { const el = w.document.querySelector("#ipe-status"); return el ? el.textContent : ""; };
 
@@ -464,6 +464,7 @@ await (async () => {
     eq(box(w, "ipe-layer-env"), "A rain-soaked rooftop at dusk, sodium lights below.", "NO_CHANGE → 环境沿用");
     eq(box(w, "ipe-layer-camera"), "close-up.", "其他层照常更新");
     ok(imgStatus(w).indexOf("环境沿用第 10 楼") >= 0, "状态行说明环境沿用自哪一楼", imgStatus(w));
+    ok(imgStatus(w).indexOf("氛围层为空") >= 0, "没给氛围层时状态行点名（提醒该改提取提示词）", imgStatus(w));
     ok(String(box(w, "ipe-preview-text")).indexOf("NO_CHANGE") < 0, "整段里不会出现 NO_CHANGE");
 })();
 
@@ -527,6 +528,26 @@ await (async () => {
     st.imgLayered = false;
     await F("runExtract")(tavern.chat[9].mes, "", false, 9);
     ok(cap.body.messages[1].content.indexOf("<camera>") < 0 && cap.body.messages[1].content.indexOf("只输出最终英文 Description") >= 0, "分层关着：老合同原样");
+})();
+
+console.log("\n【28】 氛围层：独立第五层，拼装在环境之后、人物之前；NO_CHANGE 沿用并报楼号；{Mood} 占位符");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const cap = {};
+    const st = imgApi(w, tavern, F, () => L4("wide shot.", "an empty classroom.", "a boy.", "he sits alone.", "cold fluorescent light, low contrast."), cap);
+    st.imgLayered = true;
+    await F("runExtract")(tavern.chat[9].mes, "", false, 9);
+    eq(box(w, "ipe-layer-mood"), "cold fluorescent light, low contrast.", "氛围框落值");
+    eq(box(w, "ipe-preview-text"), "wide shot. an empty classroom. cold fluorescent light, low contrast. a boy. he sits alone.", "顺序：镜头 环境 氛围 人物 动作");
+    ok(imgStatus(w).indexOf("五层齐全") >= 0, "五层齐全", imgStatus(w));
+    imgApi(w, tavern, F, () => L4("close-up.", "NO_CHANGE", "the boy, eyes shut.", "he presses his palms to his eyes.", "NO_CHANGE"), cap);
+    await F("runExtract")(tavern.chat[9].mes, "", false, 9);
+    ok(cap.body.messages[1].content.indexOf("上一楼的氛围层") >= 0, "上一楼氛围喂给了副 AI");
+    eq(box(w, "ipe-layer-mood"), "cold fluorescent light, low contrast.", "氛围 NO_CHANGE → 沿用");
+    ok(imgStatus(w).indexOf("氛围沿用第 10 楼") >= 0 && imgStatus(w).indexOf("环境沿用第 10 楼") >= 0, "状态行分别报环境与氛围沿用楼号", imgStatus(w));
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "五层", value: "M={Mood};rest={Description}" }]);
+    st.activeBaseTemplate = "tpl_1";
+    eq(F("buildInjectTag")("x", { camera: "C", env: "E", mood: "MO", chars: "CH", pose: "P" }), "M=MO;rest=C E CH P", "{Mood} 单放，其余进 {Description}");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
