@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.9") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.10") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -671,7 +671,7 @@ await (async () => {
     ok(card.querySelector(".ipe-notice-title").textContent.indexOf("挂账失败") >= 0 && card.querySelector(".ipe-notice-title").textContent.indexOf("上一份") >= 0, "标题直说账本还是上一份");
     ok(card.querySelector(".ipe-notice-body").textContent.indexOf("重新挂账") >= 0, "正文告诉人怎么补");
     ok(!!card.querySelector(".ipe-notice-ok") && !card.querySelector(".ipe-notice-bar"), "常驻卡有「知道了」、没有倒计时线");
-    ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "12px", "砖红细边 + 圆角，样式内联");
+    ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "10px", "砖红细边 + 圆角，样式内联");
     eq(card.style.opacity, "1", "卡片一出生就是可见的，不靠定时淡入");
     ok(card.style.cssText.indexOf("backdrop-filter") < 0, "不用 backdrop-filter（iOS 毛玻璃+淡入偶发不上屏）");
     const mirror = d.querySelector("#ipe-panel .ipe-sections .ipe-notice-mirror");
@@ -765,10 +765,10 @@ await (async () => {
     const body = card.querySelector(".ipe-notice-body");
     ok(body.textContent.length < 320, "超长报错被截断，正文不超过 320 字", String(body.textContent.length));
     ok(body.textContent.indexOf("完整错误见挂账页状态行") >= 0, "截断处提示去哪看全文");
-    ok(body.style.maxHeight === "128px" && body.style.overflow === "auto", "正文限高 128px、超出内滚");
-    ok(card.style.fontSize === "12px" && card.style.borderRadius === "12px", "卡片字号 12、圆角 12");
+    ok(body.style.maxHeight === "96px" && body.style.overflow === "auto", "正文限高 96px、超出内滚");
+    ok(card.style.fontSize === "11.5px" && card.style.borderRadius === "10px", "卡片字号 11.5、圆角 10");
     const st = d.getElementById("ipe-notice-stack");
-    ok(st.style.width.indexOf("320px") >= 0, "桌面栈宽 320", st.style.width);
+    ok(st.style.width.indexOf("280px") >= 0, "桌面栈宽 280", st.style.width);
 })();
 
 console.log("\n" + "\u2500".repeat(46));

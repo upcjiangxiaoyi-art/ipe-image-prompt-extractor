@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.9";
+var IPE_VERSION = "2.12.10";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3709,12 +3709,12 @@ function ipeNoticeStack() {
     st = d.createElement("div"); st.id = "ipe-notice-stack";
     /* 贴顶不贴底（照小红霞的做法）：body 被加 transform 时 fixed 以 body 盒子为参照、body 高 0，
        bottom:88px 会算到屏幕上方；top:22px 不管参照是谁都落在屏幕顶部 22px。 */
-    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(320px,calc(100vw - 28px));display:flex;flex-direction:column;gap:8px;pointer-events:none;margin:0;padding:0";
+    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(280px,calc(100vw - 28px));display:flex;flex-direction:column;gap:6px;pointer-events:none;margin:0;padding:0";
     /* 面板被强制 translateZ(0) 走了独立合成层；WebKit 上非合成层的浮层有时会被合成层盖住、不认 z-index。
        通知栈同样开合成层，跟面板站到同一条起跑线上。 */
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
     try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
-    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "auto"; st.style.width = "min(300px,calc(100vw - 24px))"; st.style.top = "14px"; } } catch(e) {}
+    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "auto"; st.style.width = "min(240px,calc(100vw - 24px))"; st.style.top = "12px"; } } catch(e) {}
     ipeOverlayHost(d).appendChild(st);
     try {
         var rw2 = ipeRootWindow() || window;
@@ -3748,23 +3748,23 @@ function ipeNotice(opts) {
     card.className = "ipe-notice ipe-notice-" + kind + (mist ? " ipe-mist" : "");
     card.setAttribute("role", "alert");
     card.setAttribute("data-ipe-sticky", sticky ? "1" : "0");
-    card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:12px;border:1px solid " + bd
+    card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:10px;border:1px solid " + bd
         + ";border-left:3px solid " + accent + ";background:" + bg + ";color:" + fg
-        + ";box-shadow:0 8px 24px rgba(0,0,0," + (mist ? ".14" : ".40") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:12px;line-height:1.45;padding:9px 11px 8px"
+        + ";box-shadow:0 8px 24px rgba(0,0,0," + (mist ? ".14" : ".40") + ");font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:11.5px;line-height:1.4;padding:7px 9px 6px"
         + ";opacity:1;visibility:visible;display:block;max-width:100%;box-sizing:border-box";
     /* 不用 backdrop-filter、不用 JS 定时把 opacity 从 0 拉到 1：iOS WebKit 对「毛玻璃 + 淡入」偶发不上屏，
        卡片就存在于 DOM 却看不见。入场动画交给 style.css 的 .ipe-notice 关键帧，CSS 缺了也只是没动画。 */
     card.innerHTML =
-        '<div style="display:flex;align-items:flex-start;gap:8px">'
-      +   '<span style="font-size:14px;line-height:1.3;flex:none">' + (opts.icon || "🐚") + '</span>'
+        '<div style="display:flex;align-items:flex-start;gap:6px">'
+      +   '<span style="font-size:12px;line-height:1.3;flex:none">' + (opts.icon || "🐚") + '</span>'
       +   '<div style="flex:1;min-width:0">'
-      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:12.5px;color:' + fg + ';-webkit-text-fill-color:' + fg + '"></div>'
-      +     '<div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';-webkit-text-fill-color:' + sub + ';max-height:128px;overflow:auto;-webkit-overflow-scrolling:touch"></div>'
+      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:12px;color:' + fg + ';-webkit-text-fill-color:' + fg + '"></div>'
+      +     '<div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';-webkit-text-fill-color:' + sub + ';max-height:96px;overflow:auto;-webkit-overflow-scrolling:touch"></div>'
       +   '</div>'
       +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:16px;line-height:1;cursor:pointer;padding:0 2px;margin:-2px -4px 0 0;font-family:inherit">×</button>'
       + '</div>'
       + (sticky
-          ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "4px 12px", "12px") + '<button type="button" class="ipe-notice-ok" style="padding:4px 12px;border-radius:8px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>'
+          ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "3px 10px", "11.5px") + '<button type="button" class="ipe-notice-ok" style="padding:3px 10px;border-radius:7px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:11.5px;cursor:pointer;font-family:inherit;line-height:1.5">知道了</button></div>'
           : '<div class="ipe-notice-bar" style="position:absolute;left:0;bottom:0;height:2px;width:100%;background:' + accent + ';opacity:.55;transform-origin:left center;transform:scaleX(1)"></div>');
     card.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
     card.querySelector(".ipe-notice-body").textContent  = opts.body  || "";
