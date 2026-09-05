@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.6";
+var IPE_VERSION = "2.12.7";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3691,9 +3691,9 @@ function ipeNoticeFixPosition(st) {
         var vtop = (vv && vv.offsetTop) || 0;
         if (!vh) return;
         var rc = st.getBoundingClientRect();
-        var off = rc.height > 0 && (rc.top < vtop || rc.bottom > vtop + vh);
+        var off = rc.height > 0 && (rc.top < vtop || rc.top > vtop + vh - 60);
         if (!off && !st.__ipePinned) return;
-        var top = Math.max(vtop + 8, vtop + vh - 88 - rc.height);
+        var top = vtop + 14;
         st.style.setProperty("bottom", "auto", "important");
         st.style.setProperty("top", Math.round(top) + "px", "important");
         st.__ipePinned = true;
@@ -3705,12 +3705,14 @@ function ipeNoticeStack() {
     var st = d.getElementById("ipe-notice-stack");
     if (st) return st;
     st = d.createElement("div"); st.id = "ipe-notice-stack";
-    st.style.cssText = "position:fixed;right:14px;bottom:96px;width:min(380px,calc(100vw - 28px));display:flex;flex-direction:column;gap:10px;pointer-events:none;margin:0;padding:0";
+    /* 贴顶不贴底（照小红霞的做法）：body 被加 transform 时 fixed 以 body 盒子为参照、body 高 0，
+       bottom:88px 会算到屏幕上方；top:22px 不管参照是谁都落在屏幕顶部 22px。 */
+    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(380px,calc(100vw - 28px));display:flex;flex-direction:column;gap:10px;pointer-events:none;margin:0;padding:0";
     /* 面板被强制 translateZ(0) 走了独立合成层；WebKit 上非合成层的浮层有时会被合成层盖住、不认 z-index。
        通知栈同样开合成层，跟面板站到同一条起跑线上。 */
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
     try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
-    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.bottom = "88px"; } } catch(e) {}
+    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "12px"; st.style.width = "auto"; st.style.top = "14px"; } } catch(e) {}
     ipeOverlayHost(d).appendChild(st);
     try {
         var rw2 = ipeRootWindow() || window;
@@ -3754,8 +3756,8 @@ function ipeNotice(opts) {
         '<div style="display:flex;align-items:flex-start;gap:8px">'
       +   '<span style="font-size:16px;line-height:1.25;flex:none">' + (opts.icon || "🐚") + '</span>'
       +   '<div style="flex:1;min-width:0">'
-      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:13.5px;color:' + fg + '"></div>'
-      +     '<div class="ipe-notice-body" style="margin-top:4px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';max-height:40vh;overflow:auto"></div>'
+      +     '<div class="ipe-notice-title" style="font-weight:600;font-size:13.5px;color:' + fg + ';-webkit-text-fill-color:' + fg + '"></div>'
+      +     '<div class="ipe-notice-body" style="margin-top:4px;white-space:pre-wrap;word-break:break-word;color:' + sub + ';-webkit-text-fill-color:' + sub + ';max-height:40vh;overflow:auto"></div>'
       +   '</div>'
       +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:17px;line-height:1;cursor:pointer;padding:0 2px;margin:-3px -4px 0 0;font-family:inherit">×</button>'
       + '</div>'
@@ -3827,7 +3829,7 @@ function ipeNoticeMirror(card, opts, accent, closeAll) {
             + ";font-size:12.5px;line-height:1.5;display:block";
         m.innerHTML = '<div style="display:flex;align-items:flex-start;gap:8px">'
             + '<span style="flex:none">' + (opts.icon || "🐚") + '</span>'
-            + '<div style="flex:1;min-width:0"><div class="ipe-notice-title" style="font-weight:600"></div><div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;opacity:.85"></div></div>'
+            + '<div style="flex:1;min-width:0"><div class="ipe-notice-title" style="font-weight:600;-webkit-text-fill-color:currentColor"></div><div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;opacity:.85;-webkit-text-fill-color:currentColor"></div></div>'
             + '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:inherit;opacity:.7;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;font-family:inherit">×</button></div>'
             + (opts.sticky === true ? '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "5px 14px", "12px") + '<button type="button" class="ipe-notice-ok" style="padding:5px 14px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>' : '');
         m.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
