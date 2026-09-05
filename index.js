@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.3";
+var IPE_VERSION = "2.12.4";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -45,6 +45,7 @@ const DEFAULTS = {
     ledgerPromptPresetsJson: "", activeLedgerPrompt: "lp_1",
     ledgerNotePresetsJson: "",   activeLedgerNote: "ln_1",
     ledgerAutoRun: false,
+    ledgerAutoOffReason: "",       // 2.12.4 自动挂账被插件自己关掉的原因：fail（连续失败）/ shrink（疑似事故）；人手动开回去就清空
     ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
     ledgerIdleTimeout: 300,        // 秒。「连续多少秒一个字节都没收到」才判死；0 = 永不
     ledgerReasoningEffort: "",     // reasoning_effort；空 = 不发，用模型默认
@@ -1223,6 +1224,30 @@ function ipeLedgerIsAbort(e) {
     return !!e && (e.name === "AbortError" || /abort/i.test(String((e && e.message) || "")));
 }
 
+/* 插件自己把自动挂账关掉：记下原因、面板里留提示、弹一张带「重新打开」按钮的常驻卡。
+   以前只在状态行说一句，人根本发现不了，之后几十楼都没记账。 */
+function ipeLedgerAutoOff(reason) {
+    save("ledgerAutoRun", false);
+    save("ledgerAutoOffReason", String(reason || "fail"));
+    try { ipeLedgerRefreshBotEditors(); } catch(e) {}
+    var why = reason === "shrink"
+        ? "上一轮副 AI 交回来的账本比旧版短太多，像是事故，已经拦下没落账。"
+        : "已经连续两次挂账失败，多半是 API 或模型的问题，再撞下去只会烧额度。";
+    try {
+        ipeNotice({
+            kind: "error", sticky: true,
+            title: "自动挂账已被插件关闭",
+            body: why + "\n\n从现在起每一楼都不会自动记账，贴耳里一直是旧账本。处理好之后点下面按钮重开，或者去挂账页点左边那个开关。",
+            actions: [{ label: "重新打开自动挂账", onClick: function(){
+                save("ledgerAutoRun", true); save("ledgerAutoOffReason", "");
+                ipeLedgerFailStreak = 0;
+                try { ipeLedgerRefreshBotEditors(); } catch(e) {}
+                ipeLedgerStatus("自动挂账已重新打开（每来一楼跑一次）", "#6ec577");
+            } }]
+        });
+    } catch(e) {}
+}
+
 /* 状态行在面板里，面板关着就等于没说。失败必须弹到面板外面来。 */
 function ipeLedgerFailNotice(detail) {
     var body = "挂账失败：" + detail;
@@ -1321,7 +1346,7 @@ async function ipeLedgerRun(targetIdx, silent) {
             ipeLedgerShowForce(true);
             // 事故现场就该停车等人来看，不能带着警报继续飞
             var wasAuto = cfg().ledgerAutoRun === true;
-            if (wasAuto) { save("ledgerAutoRun", false); ipeLedgerRefreshBotEditors(); }
+            if (wasAuto) { ipeLedgerAutoOff("shrink"); }
             ipeLedgerStatus("疑似事故已拦截：新账本只有旧版的 "
                 + Math.round(body.length / oldText.length * 100) + "%，账本未改动。"
                 + (wasAuto ? "自动挂账已自动关闭，等你看过再开。" : "")
@@ -1345,8 +1370,7 @@ async function ipeLedgerRun(targetIdx, silent) {
            跟缩水拦截一个道理：事故现场停车，等人来看。 */
         var offNote = "";
         if (ipeLedgerFailStreak >= 2 && cfg().ledgerAutoRun === true) {
-            save("ledgerAutoRun", false);
-            try { ipeLedgerRefreshBotEditors(); } catch(e2) {}
+            ipeLedgerAutoOff("fail");
             offNote = "自动挂账已自动关闭，换好 API 再开。";
         }
         ipeLedgerStatus("挂账失败：" + d + (offNote ? "｜" + offNote : ""), "#d4726a");
@@ -2090,7 +2114,24 @@ function ipeLedgerRefreshBotEditors() {
         el.value = String(Number(cfg().ledgerVersionsN) || 3);
     });
     ["ipe-ledger-auto","iped-ledger-auto"].forEach(function(id){
-        var el = q("#" + id); if (el) el.checked = cfg().ledgerAutoRun === true;
+        var el = q("#" + id); if (!el) return;
+        el.checked = cfg().ledgerAutoRun === true;
+        // 开关在左：老 style.css 里那条 space-between !important 会把它推回右边，这里用 important 压回来
+        try { if (el.parentNode && el.parentNode.tagName === "LABEL") el.parentNode.style.setProperty("justify-content", "flex-start", "important"); } catch(e) {}
+    });
+    ["ipe-ledger-auto-hint","iped-ledger-auto-hint"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var reason = String(cfg().ledgerAutoOffReason || "");
+        var off = cfg().ledgerAutoRun !== true;
+        if (off && reason) {
+            el.style.display = "";
+            el.style.color = "#c9a227";
+            el.textContent = "⚠ 自动挂账不是你关的，是插件自己关的：" + (reason === "shrink" ? "上一轮账本疑似事故被拦下" : "连续两次挂账失败")
+                + "。这期间每一楼都不会自动记账。确认 API 正常后，点左边开关重开。";
+        } else {
+            el.style.display = "none";
+            el.textContent = "";
+        }
     });
     ["ipe-ledger-nochange","iped-ledger-nochange"].forEach(function(id){
         var el = q("#" + id); if (el) el.checked = cfg().ledgerAllowNoChange === true;
@@ -3611,6 +3652,27 @@ function ipeShouldRetryApiError(e, userAbort) {
    sticky 的带「知道了」按钮常驻；不 sticky 的底下一条细线走完自己收起，
    鼠标放上去暂停。最多叠 4 张，老的非常驻先走。关键样式全内联，不吃 CSS 缓存的亏。
    ============================================================ */
+/* 卡片上的动作按钮（如「重新打开自动挂账」）：点了先干活再关卡 */
+function ipeNoticeActionsHTML(opts, accent, pad, fs) {
+    var acts = (opts && Array.isArray(opts.actions)) ? opts.actions : [];
+    var h = "";
+    for (var i = 0; i < acts.length; i++) {
+        var a = acts[i]; if (!a || !a.label) continue;
+        h += '<button type="button" class="ipe-notice-act" data-ipe-act="' + i + '" style="padding:' + pad + ';border-radius:9px;border:1px solid ' + accent + ';background:' + accent + ';color:#fff;font-size:' + fs + ';cursor:pointer;font-family:inherit;font-weight:600">' + String(a.label).replace(/[<>&]/g, "") + '</button>';
+    }
+    return h;
+}
+function ipeNoticeBindActions(root, opts, closeFn) {
+    try {
+        var acts = (opts && Array.isArray(opts.actions)) ? opts.actions : [];
+        var btns = root.querySelectorAll(".ipe-notice-act");
+        for (var i = 0; i < btns.length; i++) (function(b){
+            var a = acts[Number(b.getAttribute("data-ipe-act"))];
+            b.addEventListener("click", function(){ try { if (a && typeof a.onClick === "function") a.onClick(); } catch(e) {} closeFn(); });
+        })(btns[i]);
+    } catch(e) {}
+}
+
 function ipeNoticeStack() {
     var d = ipeRootDocument();
     var st = d.getElementById("ipe-notice-stack");
@@ -3660,7 +3722,7 @@ function ipeNotice(opts) {
       +   '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:' + sub + ';font-size:17px;line-height:1;cursor:pointer;padding:0 2px;margin:-3px -4px 0 0;font-family:inherit">×</button>'
       + '</div>'
       + (sticky
-          ? '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="ipe-notice-ok" style="padding:6px 16px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12.5px;cursor:pointer;font-family:inherit">知道了</button></div>'
+          ? '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "6px 16px", "12.5px") + '<button type="button" class="ipe-notice-ok" style="padding:6px 16px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12.5px;cursor:pointer;font-family:inherit">知道了</button></div>'
           : '<div class="ipe-notice-bar" style="position:absolute;left:0;bottom:0;height:2px;width:100%;background:' + accent + ';opacity:.55;transform-origin:left center;transform:scaleX(1)"></div>');
     card.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
     card.querySelector(".ipe-notice-body").textContent  = opts.body  || "";
@@ -3676,6 +3738,7 @@ function ipeNotice(opts) {
     card.__ipeClose = close;
     card.querySelector(".ipe-notice-x").addEventListener("click", close);
     var okb = card.querySelector(".ipe-notice-ok"); if (okb) okb.addEventListener("click", close);
+    ipeNoticeBindActions(card, opts, close);
 
     stack.appendChild(card);
     ipeNoticeMirror(card, opts, accent, close);
@@ -3727,11 +3790,12 @@ function ipeNoticeMirror(card, opts, accent, closeAll) {
             + '<span style="flex:none">' + (opts.icon || "🐚") + '</span>'
             + '<div style="flex:1;min-width:0"><div class="ipe-notice-title" style="font-weight:600"></div><div class="ipe-notice-body" style="margin-top:3px;white-space:pre-wrap;word-break:break-word;opacity:.85"></div></div>'
             + '<button type="button" class="ipe-notice-x" aria-label="关闭" style="flex:none;border:0;background:transparent;color:inherit;opacity:.7;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;font-family:inherit">×</button></div>'
-            + (opts.sticky === true ? '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="ipe-notice-ok" style="padding:5px 14px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>' : '');
+            + (opts.sticky === true ? '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">' + ipeNoticeActionsHTML(opts, accent, "5px 14px", "12px") + '<button type="button" class="ipe-notice-ok" style="padding:5px 14px;border-radius:9px;border:1px solid ' + accent + ';background:transparent;color:' + accent + ';font-size:12px;cursor:pointer;font-family:inherit">知道了</button></div>' : '');
         m.querySelector(".ipe-notice-title").textContent = opts.title || "小海螺";
         m.querySelector(".ipe-notice-body").textContent = opts.body || "";
         m.querySelector(".ipe-notice-x").addEventListener("click", closeAll);
         var okb = m.querySelector(".ipe-notice-ok"); if (okb) okb.addEventListener("click", closeAll);
+        ipeNoticeBindActions(m, opts, closeAll);
         host.insertBefore(m, host.firstChild);
         card.__ipeMirror = m;
         // 镜像也最多 4 条
@@ -4405,7 +4469,8 @@ function createPanel() {
         '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
             '<button id="ipe-ledger-test" class="ipe-btn" type="button">测试连接</button>'+
         '</div>'+
-        '<div style="color:#888;font-size:12px;margin-bottom:8px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动挂账（每来一楼跑一次） <input type="checkbox" id="ipe-ledger-auto"></label></div>'+
+        '<div style="color:#888;font-size:12px;margin-bottom:8px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-auto"> 自动挂账（每来一楼跑一次）</label></div>'+
+        '<div id="ipe-ledger-auto-hint" class="ipe-hint" style="display:none;margin:-2px 0 8px;line-height:1.6"></div>'+
         '<details class="ipe-fold" open><summary>\uD83D\uDCDD 挂账规则（想记什么写在这儿）</summary><div class="ipe-fold-body">'+
         '<label>规则预设<select id="ipe-ledger-prompt-slot"></select></label>'+
         '<label>预设名称<input type="text" id="ipe-ledger-prompt-name" placeholder="例：修仙 / 爱情 / 大世界"></label>'+
@@ -4579,7 +4644,8 @@ function createDrawer() {
     h += '<small style="color:#888">思考与正文共用。中转默认值太小会让思考模型交白卷（finish_reason=length），填 16000 之类压过它。</small>';
     h += '<div id="iped-ledger-size" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
-    h += '<div style="margin-bottom:6px"><label>自动挂账（每来一楼跑一次） <input type="checkbox" id="iped-ledger-auto"></label></div>';
+    h += '<div style="margin-bottom:6px"><label class="ipe-switch-left"><input type="checkbox" id="iped-ledger-auto"> 自动挂账（每来一楼跑一次）</label></div>';
+    h += '<div id="iped-ledger-auto-hint" style="display:none;color:#c9a227;font-size:11px;margin:-2px 0 6px;line-height:1.6"></div>';
     h += '<label>挂账规则预设</label><select id="iped-ledger-prompt-slot" class="text_pole"></select>';
     h += '<label>预设名称</label><input type="text" id="iped-ledger-prompt-name" class="text_pole" placeholder="例：修仙 / 爱情 / 大世界">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-ledger-prompt-add" class="menu_button" value="新增"><input type="button" id="iped-ledger-prompt-del" class="menu_button" value="删除当前"><input type="button" id="iped-ledger-prompt-reset" class="menu_button" value="恢复默认"></div>';
@@ -5670,6 +5736,7 @@ function bindAll() {
         var el = q("#" + id); if (!el) return;
         el.addEventListener("change", function(){
             save("ledgerAutoRun", !!el.checked);
+            save("ledgerAutoOffReason", "");          // 人亲手动过开关，之前"插件自己关的"提示就该撤
             ipeLedgerRefreshBotEditors();
             ipeLedgerStatus(el.checked ? "自动挂账已开（每来一楼跑一次）" : "自动挂账已关", "#6ec577");
         });

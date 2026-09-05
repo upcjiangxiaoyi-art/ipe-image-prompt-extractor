@@ -1911,3 +1911,6 @@ body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
 .ipe-notice { animation: ipe-notice-in .22s ease both; }
 .ipe-notice-mirror { animation: ipe-notice-in .22s ease both; }
 .ipe-notice-ok:hover, .ipe-notice-x:hover { filter: brightness(1.15); }
+
+/* ---------- 自动挂账开关在左（2.12.4，防误触） ---------- */
+#ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) > label.ipe-switch-left { justify-content: flex-start !important; gap: 10px !important; }

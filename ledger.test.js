@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.3") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.4") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -705,6 +705,42 @@ await (async () => {
     F("ipeImgPackImportText")("not json");
     const card3 = d.querySelector(".ipe-notice.ipe-mist");
     ok(!!card3 && card3.style.borderLeftColor.toLowerCase().indexOf("b8756c") >= 0 || (card3 && /184,\s*117,\s*108/.test(card3.style.borderLeftColor)), "开灯皮：卡片带 ipe-mist、砖红 #B8756C 细边", card3 && card3.style.borderLeftColor);
+})();
+
+console.log("\n【33】 自动挂账被插件关掉要让人知道：提示常驻在开关下、卡片带「重新打开」；开关在左");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-5");
+    const d = w.document;
+    const lab = d.querySelector("#ipe-ledger-auto").parentNode;
+    eq(lab.firstElementChild.id, "ipe-ledger-auto", "面板：开关是 label 里第一个元素（在左边）");
+    st.ledgerAutoRun = true;
+    w.fetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
+    await F("ipeLedgerRun")(9, true);
+    eq(st.ledgerAutoRun, true, "撞一次还开着");
+    await F("ipeLedgerRun")(9, true);
+    eq(st.ledgerAutoRun, false, "连撞两次自动关");
+    eq(st.ledgerAutoOffReason, "fail", "记下了是插件自己关的、原因 fail");
+    const hint = d.querySelector("#ipe-ledger-auto-hint");
+    ok(hint && hint.style.display !== "none" && hint.textContent.indexOf("插件自己关的") >= 0 && hint.textContent.indexOf("连续两次") >= 0, "开关下面常驻提示：不是你关的，是插件关的", hint && hint.textContent);
+    const cards = Array.from(d.querySelectorAll('.ipe-notice[data-ipe-sticky="1"]'));
+    const offCard = cards.find(c => c.querySelector(".ipe-notice-title").textContent.indexOf("自动挂账已被插件关闭") >= 0);
+    ok(!!offCard, "弹了一张「自动挂账已被插件关闭」常驻卡");
+    const act = offCard && offCard.querySelector(".ipe-notice-act");
+    ok(!!act && act.textContent.indexOf("重新打开") >= 0, "卡上有「重新打开自动挂账」按钮");
+    const mirrorAct = d.querySelector("#ipe-panel .ipe-notice-mirror .ipe-notice-act");
+    ok(!!mirrorAct, "面板镜像上也有这个按钮");
+    act.click();
+    await new Promise(r => setTimeout(r, 260));
+    eq(st.ledgerAutoRun, true, "一键重开：自动挂账回到开");
+    eq(st.ledgerAutoOffReason, "", "原因清空");
+    eq(F("failStreak")(), 0, "失败计数归零，不会下一楼立刻又关");
+    eq(hint.style.display, "none", "提示撤下");
+    ok(!Array.from(d.querySelectorAll(".ipe-notice-title")).some(x => x.textContent.indexOf("自动挂账已被插件关闭") >= 0), "卡片关掉");
+    // 人手动关再开，也不该有"插件关的"提示
+    st.ledgerAutoRun = false; st.ledgerAutoOffReason = "fail";
+    const cb = d.querySelector("#ipe-ledger-auto"); cb.checked = true; cb.dispatchEvent(new w.Event("change", { bubbles: true }));
+    eq(st.ledgerAutoOffReason, "", "亲手拨开关也会清掉原因");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
