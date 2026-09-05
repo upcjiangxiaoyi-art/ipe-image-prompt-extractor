@@ -1231,7 +1231,7 @@ function ipeLedgerFailNotice(detail) {
              +  "换一套 API 预设或换个模型再试。";
     }
     body += "\n\n这一楼没挂上，贴耳里还是上一份账本。先别发下一条，去挂账页点「重新挂账」补上；看到后点掉这条。";
-    try { ipeShowApiFailurePopup(body, false, { sticky: true, title: "🐚 挂账失败 · 账本还是上一份" }); } catch(e) {}
+    try { ipeShowApiFailurePopup(body, false, { sticky: true, title: "挂账失败 · 账本还是上一份" }); } catch(e) {}
 }
 var ipeLedgerStaleWarned = false;
 
