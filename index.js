@@ -47,7 +47,9 @@ const DEFAULTS = {
     ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
     ledgerIdleTimeout: 300,        // 秒。「连续多少秒一个字节都没收到」才判死；0 = 永不
     ledgerReasoningEffort: "",     // reasoning_effort；空 = 不发，用模型默认
-    ledgerMaxTokens: 0             // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
+    ledgerMaxTokens: 0,            // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
+    imgLayered: false,             // 2.11.0 分层生图：一次请求四层输出（镜头 / 环境 / 人物 / 动作）
+    imgLockCamera: false, imgLockEnv: false, imgLockChars: false, imgLockPose: false
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -3200,7 +3202,231 @@ function ipeTrimSourceText(text) {
     return text;
 }
 
-function buildVisionUserPrompt(text, supplement) {
+/* ============================================================
+   🎨 分层生图（2.11.0）
+   老路：一次提取吐一整段 Description，改一处全部重来，环境每楼重提会漂，
+   多人动作模型读不清谁在哪。
+   新路：还是一次请求，但让副 AI 按四个标签分节输出——
+     <camera> 镜头   <env> 环境   <chars> 人物   <pose> 动作与空间关系
+   插件机械剥壳（跟挂账认 <ledger> 一个路子），每层一个框、一个锁：
+     · 锁住的层不重提，原样喂回去让其他层与之保持一致
+     · 环境层：场景没换时副 AI 回 NO_CHANGE，插件沿用本聊天上一楼的环境
+     · 只重摇某一层 = 其余三层临时按锁定处理
+   模板可用 {Camera} {Env} {Chars} {Pose} 单独放置；{Description} 拿没被单独放置的层。
+   老模板只写 {Description} 的照样能用，四层按顺序拼成一段。
+   ============================================================ */
+var IPE_IMG_LAYERS = ["camera", "env", "chars", "pose"];
+var IPE_IMG_LAYER_LABEL = { camera: "镜头", env: "环境", chars: "人物", pose: "动作" };
+var IPE_IMG_LAYER_ICON  = { camera: "📷", env: "🌆", chars: "🧍", pose: "🤝" };
+var IPE_IMG_LAYER_PH    = { camera: "{Camera}", env: "{Env}", chars: "{Chars}", pose: "{Pose}" };
+var IPE_IMG_LAYERS_META_KEY = "ipe_img_layers_v1";
+var IPE_IMG_NOCHANGE = "NO_CHANGE";
+var ipeImgLayersFresh = false;   // 本次预览是否来自成功分层；副 AI 没分层时为 false，注入不拿旧层框填占位符
+
+function ipeImgLayeredOn() { return cfg().imgLayered === true; }
+function ipeImgLockKey(l) { return "imgLock" + l.charAt(0).toUpperCase() + l.slice(1); }
+function ipeImgLocks(override) {
+    var out = {};
+    IPE_IMG_LAYERS.forEach(function(l){ out[l] = override ? !!override[l] : cfg()[ipeImgLockKey(l)] === true; });
+    return out;
+}
+
+/* 本聊天上一次的四层，存 chat_metadata；换聊天自然各用各的 */
+function ipeImgLayersRead() {
+    try {
+        var root = ipeMetaRoot();
+        var v = root && root[IPE_IMG_LAYERS_META_KEY];
+        if (v && typeof v === "object") return v;
+    } catch(e) {}
+    return null;
+}
+function ipeImgLayersSave(layers, floor) {
+    try {
+        var root = ipeMetaRoot(); if (!root) return;
+        var o = { floor: Number(floor) || 0, envFloor: Number(layers && layers.envFloor) || Number(floor) || 0, updatedAt: Date.now() };
+        IPE_IMG_LAYERS.forEach(function(l){ o[l] = String((layers && layers[l]) || ""); });
+        root[IPE_IMG_LAYERS_META_KEY] = o;
+        var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+    } catch(e) {}
+}
+
+/* 面板里四个框此刻的值（面板优先，抽屉兜底） */
+function ipeImgLayerBoxValues() {
+    var out = {};
+    IPE_IMG_LAYERS.forEach(function(l){
+        var a = q("#ipe-layer-" + l), b = q("#iped-layer-" + l);
+        out[l] = String((a && a.value) || (b && b.value) || "").trim();
+    });
+    return out;
+}
+
+/* 喂给副 AI 的"上一楼"：环境继承只认本聊天存档（框里的值可能是别的聊天留下的）；
+   锁定层以框里的值为准——人改过再锁，就是"照这个来"。 */
+function ipeImgPrevLayers(locks) {
+    var st = ipeImgLayersRead();
+    var box = ipeImgLayerBoxValues();
+    var out = { floor: st ? Number(st.floor) || 0 : 0, envFloor: st ? Number(st.envFloor || st.floor) || 0 : 0 };
+    IPE_IMG_LAYERS.forEach(function(l){
+        var stored = st ? String(st[l] || "").trim() : "";
+        out[l] = (locks && locks[l] && box[l]) ? box[l] : stored;
+    });
+    return out;
+}
+
+function ipeImgLayerContract(prev, locks) {
+    var lines = [
+        "任务：把正文拆成四层英文生图描述，按下面四个标签分节输出。标签外不要写任何东西；不要解释；不要标题；不要代码块；不要中文。",
+        "<camera>景别、机位高度、视角、构图、景深。一到两句。</camera>",
+        "<env>地点、室内外、时间、天气、光线来源与色温、关键背景与道具。两到四句。</env>",
+        "<chars>只写本楼实际出场且入镜的角色：按角色锚点校准外貌，再写此刻的服装状态、表情、身体状态（受伤、湿发、绷带等）。</chars>",
+        "<pose>动作与空间关系，写成明确的空间句：谁在哪、面朝哪、视线落在哪、手放在哪、身体接触点、相对位置与距离。</pose>"
+    ];
+    var lockLines = [];
+    IPE_IMG_LAYERS.forEach(function(l){
+        if (locks && locks[l] && prev && String(prev[l] || "").trim()) lockLines.push("<" + l + ">" + prev[l] + "</" + l + ">");
+    });
+    if (lockLines.length) {
+        lines.push("");
+        lines.push("【已锁定的层 · 原样沿用，不要重写】");
+        lines.push(lockLines.join("\n"));
+        lines.push("锁定层只输出 " + IPE_IMG_NOCHANGE + " 即可；其余层必须与锁定层保持一致（同一空间、同一光线、同一批人）。");
+    }
+    if (prev && String(prev.env || "").trim() && !(locks && locks.env)) {
+        lines.push("");
+        lines.push("【上一楼的环境层】");
+        lines.push(prev.env);
+        lines.push("本楼地点、时间、天气、光线都没变时，<env> 里只写 " + IPE_IMG_NOCHANGE + "，其余层照常输出。换了场景才重写环境。");
+    }
+    return lines.join("\n");
+}
+
+/* 机械剥壳：四个标签各取一段。漏闭标签就取到下一个开标签或末尾；大小写、空格都容忍。 */
+function ipeImgParseLayers(txt) {
+    var s0 = String(txt || "").replace(/^\s*```[a-zA-Z]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+    var out = { found: 0 };
+    IPE_IMG_LAYERS.forEach(function(l){
+        var re = new RegExp("<\\s*" + l + "\\s*>([\\s\\S]*?)(?:<\\s*\\/\\s*" + l + "\\s*>|(?=<\\s*(?:camera|env|chars|pose)\\s*>)|$)", "i");
+        var m = s0.match(re);
+        if (m) { out[l] = String(m[1] || "").trim(); out.found++; }
+        else out[l] = "";
+    });
+    return out;
+}
+
+function ipeImgIsNoChange(v) { return String(v || "").replace(/\s+/g, "").toUpperCase() === IPE_IMG_NOCHANGE; }
+
+/* 合账：锁定层用旧值；NO_CHANGE 或空 → 有旧值就沿用；否则收新值 */
+function ipeImgMergeLayers(parsed, prev, locks, floor) {
+    var out = { notes: [], envFloor: Number(floor) || 0 };
+    IPE_IMG_LAYERS.forEach(function(l){
+        var v = String((parsed && parsed[l]) || "").trim();
+        var prevV = prev ? String(prev[l] || "").trim() : "";
+        var label = IPE_IMG_LAYER_LABEL[l] || l;
+        if (locks && locks[l] && prevV) { out[l] = prevV; if (l === "env") out.envFloor = Number(prev.envFloor) || Number(floor) || 0; return; }
+        if (!v || ipeImgIsNoChange(v)) {
+            if (prevV) {
+                out[l] = prevV;
+                if (l === "env") { out.envFloor = Number(prev.envFloor) || Number(prev.floor) || 0; out.notes.push("环境沿用第 " + out.envFloor + " 楼"); }
+                else out.notes.push(label + "层沿用上一楼");
+            } else {
+                out[l] = "";
+                out.notes.push(label + "层为空");
+            }
+            return;
+        }
+        out[l] = v;
+    });
+    return out;
+}
+
+function ipeImgJoinLayers(layers, skip) {
+    var parts = [];
+    IPE_IMG_LAYERS.forEach(function(l){
+        if (skip && skip[l]) return;
+        var v = String((layers && layers[l]) || "").trim();
+        if (v) parts.push(v);
+    });
+    return parts.join(" ");
+}
+
+function ipeImgSetLayerBoxes(layers) {
+    IPE_IMG_LAYERS.forEach(function(l){
+        ["ipe-layer-", "iped-layer-"].forEach(function(pre){
+            var el = q("#" + pre + l); if (el) el.value = String((layers && layers[l]) || "");
+        });
+    });
+}
+
+/* 面板 / 抽屉：四行框 + 锁 + 只重摇这层 */
+function ipeImgLayerRowsHTML(prefix, drawer) {
+    var h = "";
+    IPE_IMG_LAYERS.forEach(function(l){
+        var label = IPE_IMG_LAYER_ICON[l] + " " + IPE_IMG_LAYER_LABEL[l];
+        if (drawer) {
+            h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">'
+               + '<span style="font-size:12px">' + label + '</span>'
+               + '<span style="display:flex;gap:8px;align-items:center;font-size:12px">'
+               + '<label style="display:inline-flex;align-items:center;gap:4px">🔒 锁 <input type="checkbox" id="' + prefix + '-lock-' + l + '"></label>'
+               + '<input type="button" id="' + prefix + '-reroll-' + l + '" class="menu_button" value="只重摇这层">'
+               + '</span></div>'
+               + '<textarea id="' + prefix + '-layer-' + l + '" class="text_pole" rows="2"></textarea>';
+        } else {
+            h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;color:#888;font-size:12px">'
+               + '<span>' + label + '</span>'
+               + '<span style="display:flex;gap:8px;align-items:center">'
+               + '<label style="display:flex;flex-direction:row;align-items:center;gap:4px">🔒 锁 <input type="checkbox" id="' + prefix + '-lock-' + l + '"></label>'
+               + '<button type="button" id="' + prefix + '-reroll-' + l + '" class="ipe-btn" style="flex:none;padding:2px 8px">只重摇这层</button>'
+               + '</span></div>'
+               + '<textarea id="' + prefix + '-layer-' + l + '" rows="2"></textarea>';
+        }
+    });
+    return h;
+}
+
+function ipeImgRefreshLayerUI() {
+    var on = ipeImgLayeredOn();
+    ["ipe-layered", "iped-layered"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = on; });
+    ["ipe-layers-box", "iped-layers-box"].forEach(function(id){ var el = q("#" + id); if (el) el.style.display = on ? "" : "none"; });
+    IPE_IMG_LAYERS.forEach(function(l){
+        ["ipe-lock-", "iped-lock-"].forEach(function(pre){
+            var el = q("#" + pre + l); if (el) el.checked = cfg()[ipeImgLockKey(l)] === true;
+        });
+    });
+    var st = ipeImgLayersRead();
+    ipeImgSetLayerBoxes(st || { camera: "", env: "", chars: "", pose: "" });
+}
+
+function ipeImgBindLayerUI() {
+    ["ipe-layered", "iped-layered"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("imgLayered", !!el.checked);
+            ipeImgRefreshLayerUI();
+            setStatus(el.checked ? "分层提取已开：镜头 / 环境 / 人物 / 动作，各一框一锁" : "分层提取已关，回到整段 Description", "#6ec577");
+        });
+    });
+    IPE_IMG_LAYERS.forEach(function(l){
+        ["ipe", "iped"].forEach(function(pre){
+            var lk = q("#" + pre + "-lock-" + l);
+            if (lk && !lk.__ipeBound) { lk.__ipeBound = true; lk.addEventListener("change", function(){
+                save(ipeImgLockKey(l), !!lk.checked);
+                var o = q("#" + (pre === "ipe" ? "iped" : "ipe") + "-lock-" + l); if (o) o.checked = lk.checked;
+                setStatus((lk.checked ? "已锁定" : "已解锁") + IPE_IMG_LAYER_LABEL[l] + "层" + (lk.checked ? "：之后提取原样沿用框里这段" : ""), "#6ec577");
+            }); }
+            var rr = q("#" + pre + "-reroll-" + l);
+            if (rr && !rr.__ipeBound) { rr.__ipeBound = true; rr.addEventListener("click", function(){ onRerollLayer(l); }); }
+            var ta = q("#" + pre + "-layer-" + l);
+            if (ta && !ta.__ipeBound) { ta.__ipeBound = true; ta.addEventListener("input", function(){
+                var o = q("#" + (pre === "ipe" ? "iped" : "ipe") + "-layer-" + l); if (o && o !== ta) o.value = ta.value;
+                var joined = ipeImgJoinLayers(ipeImgLayerBoxValues());
+                ipeImgLayersFresh = true;
+                currentDesc = joined; setPreview(joined);
+            }); }
+        });
+    });
+}
+
+function buildVisionUserPrompt(text, supplement, lockOverride) {
     var c = cfg();
     var user = "";
 
@@ -3215,6 +3441,12 @@ function buildVisionUserPrompt(text, supplement) {
     user += "【正文内容】\n" + ipeTrimSourceText(text);
 
     if (supplement) user += "\n\n【补充指令】\n" + supplement;
+
+    if (ipeImgLayeredOn()) {
+        var locks = ipeImgLocks(lockOverride);
+        user += "\n\n" + ipeImgLayerContract(ipeImgPrevLayers(locks), locks);
+        return user;
+    }
 
     user += "\n\n任务：把正文转成英文生图 Description。\n";
     user += "要求：只输出最终英文 Description；不要解释；不要标题；不要代码块；不要中文；不要复述任务。\n";
@@ -3245,7 +3477,7 @@ function ipeAbortCurrentRequest() {
     }
 }
 
-async function callAPI(text, supplement) {
+async function callAPI(text, supplement, lockOverride) {
     var c = cfg();
     if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
     if (!c.model) throw new Error("请先加载并选择模型");
@@ -3268,7 +3500,7 @@ async function callAPI(text, supplement) {
         model: c.model,
         messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: buildVisionUserPrompt(text, supplement || "") }
+            { role: "user", content: buildVisionUserPrompt(text, supplement || "", lockOverride) }
         ],
         temperature: 0.4,
         stream: false
@@ -3421,7 +3653,7 @@ function ipeShowApiFailurePopup(msg, willRetry) {
     }
 }
 
-function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAttempt, msg) {
+function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAttempt, msg, lockOverride) {
     ipeClearApiRetry();
     retryAttempt = Number(retryAttempt || 0);
     if (retryAttempt >= 1) {
@@ -3458,7 +3690,7 @@ function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAt
                 }
             }
             setStatus("正在自动重试 API 请求…", "#6ec577");
-            runExtract(text, supplement || "", autoInjectNow, targetIdx, retryAttempt + 1);
+            runExtract(text, supplement || "", autoInjectNow, targetIdx, retryAttempt + 1, lockOverride);
         } catch(e) {
             setStatus("自动重试启动失败：" + e.message, "#d4726a");
         }
@@ -3470,7 +3702,7 @@ function createUI() {
     createPanel();
     createDrawer();
     bindAll();
-    setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); }, 120);
+    setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); try { ipeImgBindLayerUI(); ipeImgRefreshLayerUI(); } catch(eL) {} }, 120);
     setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerSync(); ipeLedgerInstallInlineObserver(); }, 160);
 }
 
@@ -3957,7 +4189,12 @@ function createPanel() {
     h += secHTML("preview","预览", false,
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
+        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
+        '<div id="ipe-layers-box" style="display:none">'+
+            ipeImgLayerRowsHTML("ipe", false)+
+            '<div class="ipe-hint" style="margin-top:6px">锁住的层不重提，原样沿用框里那段；「只重摇这层」= 其余三层临时锁定。场景没换时环境层自动沿用本聊天上一楼。模板可用 {Camera} {Env} {Chars} {Pose} 单独放置，{Description} 拿剩下的层；只写 {Description} 就是四层拼成一段。下面这框是拼好的整段，直接改也行。</div>'+
+        '</div>'+
         '<textarea id="ipe-preview-text" rows="6" placeholder="生成的 Description 将显示在这里…"></textarea>'+
         '<label>补充指令<input type="text" id="ipe-supplement" placeholder="例：这段是冷战不是撒娇"></label>'+
         '<div class="ipe-preview-actions">'+
@@ -4146,7 +4383,10 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-add" class="menu_button" value="新增规则"><input type="button" id="iped-rule-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-extract-rules" class="text_pole" rows="4" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>';
     h += '<hr><small><b>预览</b></small>';
+    h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
     h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
+    h += '<div id="iped-layers-box" style="display:none">' + ipeImgLayerRowsHTML("iped", true)
+       + '<small style="color:#888">锁住的层不重提；「只重摇这层」= 其余三层临时锁定。场景没换时环境层沿用上一楼。模板可用 {Camera} {Env} {Chars} {Pose}，{Description} 拿剩下的层。</small></div>';
     h += '<textarea id="iped-preview-text" class="text_pole" rows="5" placeholder="生成的 Description 将显示在这里…"></textarea>';
     h += '<label>补充指令</label><input type="text" id="iped-supplement" class="text_pole" placeholder="例：这段是冷战不是撒娇">';
     h += '<div style="display:flex;gap:6px;margin-top:6px">';
@@ -5072,6 +5312,7 @@ function bindAll() {
                 setTimeout(function(){
                     ipeLedgerSync();
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
+                    try { ipeImgRefreshLayerUI(); } catch(eL) {}   // 四个层框换成本聊天的
                 }, 200);
             });
             console.log("[IPE] 已绑定换聊天事件");
@@ -5152,8 +5393,17 @@ function bindAll() {
     ipeRefreshTemplateEditors();
 }
 
-function buildInjectTag(desc) {
+function buildInjectTag(desc, layers) {
     var tpl = ipeGetTemplateValue() || cfg().baseTemplate || "image###{Description}###";
+    desc = String(desc == null ? "" : desc);
+    if (layers) {
+        var used = {}, any = false;
+        IPE_IMG_LAYERS.forEach(function(l){
+            var ph = IPE_IMG_LAYER_PH[l];
+            if (tpl.indexOf(ph) >= 0) { tpl = tpl.split(ph).join(String(layers[l] || "").trim()); used[l] = true; any = true; }
+        });
+        if (any) desc = ipeImgJoinLayers(layers, used);   // {Description} 只拿没被单独放置的层
+    }
     return tpl.indexOf("{Description}") >= 0 ? tpl.replace("{Description}", desc) : tpl + desc;
 }
 
@@ -5163,13 +5413,19 @@ function injectDescToMessage(desc, targetIdx) {
 
     var pv=q("#ipe-preview-text"), pvd=q("#iped-preview-text");
     if (!desc) desc = (pv&&pv.value)||(pvd&&pvd.value)||currentDesc;
+    var layers = null;
+    if (ipeImgLayeredOn() && ipeImgLayersFresh) {
+        var bx = ipeImgLayerBoxValues();
+        if (ipeImgJoinLayers(bx)) layers = bx;
+        if (!desc) desc = ipeImgJoinLayers(bx);
+    }
     if (!desc) throw new Error("没有内容");
 
     var c = ctx();
     var msg = c.chat[idx];
     if (!msg) throw new Error("消息不存在");
 
-    var tag = buildInjectTag(desc);
+    var tag = buildInjectTag(desc, layers);
     if (String(msg.mes || "").indexOf(tag) >= 0) {
         return { injected: false, reason: "duplicate", tag: tag };
     }
@@ -5255,32 +5511,49 @@ async function onExtract() {
     } catch(e){setStatus("错误: "+e.message,"#d4726a");}
 }
 
-async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttempt) {
+async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttempt, lockOverride) {
     retryAttempt = Number(retryAttempt || 0);
     if (retryAttempt === 0) ipeClearApiRetry();
 
     processing = true;
     var ball = q("#ipe-chat-quick-entry"); if(ball)ball.classList.add("processing");
-    setStatus(retryAttempt > 0 ? "正在自动重试提取…" : "正在提取…","#6ec577"); setBtns(false,false);
+    setStatus(retryAttempt > 0 ? "正在自动重试提取…" : (ipeImgLayeredOn() ? "正在分层提取…" : "正在提取…"),"#6ec577"); setBtns(false,false);
+    var layerNote = "";
     try {
-        var desc = await callAPI(text, supplement||"");
+        var desc = await callAPI(text, supplement||"", lockOverride);
+        if (ipeImgLayeredOn()) {
+            var parsed = ipeImgParseLayers(desc);
+            if (parsed.found > 0) {
+                var floorNo = (typeof targetIdx === "number" ? targetIdx : currentIdx) + 1;
+                var locks = ipeImgLocks(lockOverride);
+                var merged = ipeImgMergeLayers(parsed, ipeImgPrevLayers(locks), locks, floorNo);
+                ipeImgSetLayerBoxes(merged);
+                ipeImgLayersSave(merged, floorNo);
+                desc = ipeImgJoinLayers(merged);
+                ipeImgLayersFresh = true;
+                layerNote = merged.notes.length ? "（" + merged.notes.join("，") + "）" : "（四层齐全）";
+            } else {
+                ipeImgLayersFresh = false;
+                layerNote = "（副 AI 没分层，按整段收下；四个层框未更新）";
+            }
+        }
         currentDesc = desc; setPreview(desc);
 
         if (autoInjectNow) {
             var result = injectDescToMessage(desc, typeof targetIdx === "number" ? targetIdx : currentIdx);
             if (result && result.injected) {
-                setStatus("提取完成并已自动注入 ✓","#6ec577");
+                setStatus("提取完成并已自动注入 ✓" + layerNote,"#6ec577");
                 setBtns(false,false);
                 var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
                 if(s1)s1.value=""; if(s2)s2.value="";
                 if(ball) ball.classList.remove("has-result");
             } else {
-                setStatus("提取完成，跳过自动注入（可能已注入）","#6ec577");
+                setStatus("提取完成，跳过自动注入（可能已注入）" + layerNote,"#6ec577");
                 setBtns(true,true);
                 if(ball) ball.classList.add("has-result");
             }
         } else {
-            setStatus("提取完成 — 可编辑后确认注入","#6ec577");
+            setStatus("提取完成 — 可编辑后确认注入" + layerNote,"#6ec577");
             setBtns(true,true);
             if(ball) ball.classList.add("has-result");
         }
@@ -5295,7 +5568,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         setBtns(true,false); if(ball)ball.classList.remove("processing");
 
         if (ipeShouldRetryApiError(e, userAbort)) {
-            ipeScheduleApiRetry(text, supplement || "", !!autoInjectNow, targetIdx, retryAttempt, msg);
+            ipeScheduleApiRetry(text, supplement || "", !!autoInjectNow, targetIdx, retryAttempt, msg, lockOverride);
         }
     }
     ipeAbortController = null;
@@ -5309,6 +5582,23 @@ async function onReroll() {
     try{var msg=ctx().chat[currentIdx];if(!msg)return;
     var sup=q("#ipe-supplement");var supd=q("#iped-supplement");
     await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", false, currentIdx);}catch(e){}
+}
+
+async function onRerollLayer(layer) {
+    if (processing) return;
+    if (!ipeImgLayeredOn()) { setStatus("先打开「分层提取」", "#c9a227"); return; }
+    if (currentIdx < 0) {
+        // 还没提取过：默认盯最后一条 AI 楼
+        try { var ch = ctx().chat || []; for (var i = ch.length - 1; i >= 0; i--) { if (ch[i] && !ch[i].is_user) { currentIdx = i; break; } } } catch(e) {}
+        if (currentIdx < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }
+    }
+    try {
+        var msg = ctx().chat[currentIdx]; if (!msg) return;
+        var ov = {}; IPE_IMG_LAYERS.forEach(function(x){ ov[x] = x !== layer; });   // 其余三层临时锁定
+        var sup = q("#ipe-supplement"), supd = q("#iped-supplement");
+        setStatus("只重摇" + IPE_IMG_LAYER_LABEL[layer] + "层，其余三层锁定…", "#6ec577");
+        await runExtract(msg.mes, (sup && sup.value) || (supd && supd.value) || "", false, currentIdx, 0, ov);
+    } catch(e) {}
 }
 
 function onInject() {
