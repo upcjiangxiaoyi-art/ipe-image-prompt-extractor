@@ -671,7 +671,7 @@ await (async () => {
     ok(card.querySelector(".ipe-notice-title").textContent.indexOf("挂账失败") >= 0 && card.querySelector(".ipe-notice-title").textContent.indexOf("上一份") >= 0, "标题直说账本还是上一份");
     ok(card.querySelector(".ipe-notice-body").textContent.indexOf("重新挂账") >= 0, "正文告诉人怎么补");
     ok(!!card.querySelector(".ipe-notice-ok") && !card.querySelector(".ipe-notice-bar"), "常驻卡有「知道了」、没有倒计时线");
-    ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "14px", "砖红细边 + 圆角，样式内联");
+    ok(card.style.borderLeft.indexOf("3px") >= 0 && card.style.borderRadius === "12px", "砖红细边 + 圆角，样式内联");
     eq(card.style.opacity, "1", "卡片一出生就是可见的，不靠定时淡入");
     ok(card.style.cssText.indexOf("backdrop-filter") < 0, "不用 backdrop-filter（iOS 毛玻璃+淡入偶发不上屏）");
     const mirror = d.querySelector("#ipe-panel .ipe-sections .ipe-notice-mirror");
