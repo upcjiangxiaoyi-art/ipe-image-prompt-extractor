@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.10";
+var IPE_VERSION = "2.12.11";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -3709,12 +3709,13 @@ function ipeNoticeStack() {
     st = d.createElement("div"); st.id = "ipe-notice-stack";
     /* 贴顶不贴底（照小红霞的做法）：body 被加 transform 时 fixed 以 body 盒子为参照、body 高 0，
        bottom:88px 会算到屏幕上方；top:22px 不管参照是谁都落在屏幕顶部 22px。 */
-    st.style.cssText = "position:fixed;right:14px;top:22px;bottom:auto;width:min(280px,calc(100vw - 28px));display:flex;flex-direction:column;gap:6px;pointer-events:none;margin:0;padding:0";
+    /* 水平居中（群友要求）：left:50% + translateX(-50%)，跟系统通知一个位置，也不挡右上角 */
+    st.style.cssText = "position:fixed;left:50%;right:auto;top:22px;bottom:auto;width:min(280px,calc(100vw - 28px));display:flex;flex-direction:column;gap:6px;pointer-events:none;margin:0;padding:0";
     /* 面板被强制 translateZ(0) 走了独立合成层；WebKit 上非合成层的浮层有时会被合成层盖住、不认 z-index。
        通知栈同样开合成层，跟面板站到同一条起跑线上。 */
     try { st.style.setProperty("z-index", "2147483647", "important"); } catch(e) {}
-    try { st.style.setProperty("transform", "translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
-    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.right = "12px"; st.style.left = "auto"; st.style.width = "min(240px,calc(100vw - 24px))"; st.style.top = "12px"; } } catch(e) {}
+    try { st.style.setProperty("transform", "translateX(-50%) translateZ(0)", "important"); st.style.setProperty("will-change", "transform", "important"); st.style.setProperty("visibility", "visible", "important"); st.style.setProperty("display", "flex", "important"); } catch(e) {}
+    try { var rw = ipeRootWindow(); if (rw && rw.innerWidth && rw.innerWidth <= 480) { st.style.width = "min(240px,calc(100vw - 24px))"; st.style.top = "12px"; } } catch(e) {}
     ipeOverlayHost(d).appendChild(st);
     try {
         var rw2 = ipeRootWindow() || window;

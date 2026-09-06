@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.10") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.11") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -689,7 +689,8 @@ await (async () => {
     await new Promise(r => setTimeout(r, 200));
     ok(d.querySelector(".ipe-notice-mirror .ipe-notice-body").textContent.indexOf("自检 v") >= 0 && d.querySelector(".ipe-notice-mirror .ipe-notice-body").textContent.indexOf("栈 rect") >= 0, "浮层量不到时（jsdom rect 为 0）镜像正文带自检报告");
     ok(d.querySelector('.ipe-notice[data-ipe-sticky="1"] .ipe-notice-body').textContent.indexOf("自检 v") < 0, "浮层卡本身不再显示自检文字");
-    ok(d.getElementById("ipe-notice-stack").style.transform === "translateZ(0)", "通知栈开了合成层 translateZ(0)");
+    ok(d.getElementById("ipe-notice-stack").style.transform === "translateX(-50%) translateZ(0)", "通知栈水平居中 + 合成层");
+    ok(d.getElementById("ipe-notice-stack").style.left === "50%" && d.getElementById("ipe-notice-stack").style.right === "auto", "left:50% 居中，不再贴右");
     eq(d.getElementById("ipe-notice-stack").parentNode.tagName, "HTML", "通知栈挂在 <html> 上，不挂 body（body 被加 transform 时 fixed 会失准）");
     ok(d.getElementById("ipe-notice-stack").style.top === "22px" && d.getElementById("ipe-notice-stack").style.bottom === "auto", "通知栈贴顶不贴底（top:22px，同小红霞）");
     ok(String(d.querySelector(".ipe-notice .ipe-notice-title").style.cssText).indexOf("-webkit-text-fill-color") >= 0 || true, "标题带 text-fill-color 防主题染透明（jsdom 可能不认该属性）");
