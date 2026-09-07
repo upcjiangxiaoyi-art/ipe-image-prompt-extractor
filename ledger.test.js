@@ -37,6 +37,7 @@ function makeTavern(floors) {
             MESSAGE_DELETED: "MESSAGE_DELETED", CHAT_CHANGED: "CHAT_CHANGED"
         },
         chatMetadata: {},
+        characters: [{ name: "苑无忧", avatar: "yuan.png" }, { name: "顾寒", avatar: "gu.png" }], characterId: 0, groupId: null, name2: "苑无忧",
         getCurrentChatId() { return "test-chat"; },
         setExtensionPrompt(key, value, pos, depth, scan, role) {
             extensionPrompts[key] = { value, position: pos, depth, role };
@@ -64,7 +65,8 @@ function boot(floors) {
         "runExtract", "ipeImgParseLayers", "buildInjectTag", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
-        "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText"];
+        "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
+        "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -576,7 +578,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.1") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.2") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -852,6 +854,59 @@ await (async () => {
     // UI：面板里有开关和行
     const d = w.document;
     ok(!!d.querySelector("#ipe-ledger-mode-on") && !!d.querySelector("#ipe-ledger-mode-rows"), "面板有场景模式区");
+})();
+
+console.log("\n【36】 卡槽按角色卡记忆：每张卡各有 Normal / nsfw 槽，没设的跟随全局，换卡自动各用各的");
+await (async () => {
+    const { w, tavern, F } = boot(12);
+    const st = withApi(tavern, F, "gpt-4.1");
+    st.ledgerPromptPresetsJson = JSON.stringify([
+        { id: "lp_1", name: "日常烟火", value: "RULE-DAILY" }, { id: "lp_2", name: "大剧情", value: "RULE-EPIC" },
+        { id: "lp_3", name: "现代NSFW", value: "RULE-MODERN-N" }, { id: "lp_4", name: "古代NSFW", value: "RULE-ANCIENT-N" }]);
+    st.activeLedgerPrompt = "lp_1";
+    st.ledgerModesJson = JSON.stringify([{ name: "nsfw", preset: "lp_3", oneShot: false }]);
+    st.ledgerModeEnabled = true;
+    eq(F("ipeLedgerCardKey")(), "char:yuan.png", "卡键按头像文件名");
+    const PV = F("ipeLedgerPromptValueForMode");
+    eq(PV("normal"), "RULE-DAILY", "没单独设：Normal 跟随下拉");
+    eq(PV("nsfw"), "RULE-MODERN-N", "没单独设：nsfw 跟随模式行");
+    // 苑无忧这张卡：Normal 用大剧情，nsfw 用古代
+    F("ipeLedgerCardSlotSet")("normal", "lp_2"); F("ipeLedgerCardSlotSet")("nsfw", "lp_4");
+    eq(PV("normal"), "RULE-EPIC", "本卡 Normal 槽 → 大剧情"); eq(PV("nsfw"), "RULE-ANCIENT-N", "本卡 nsfw 槽 → 古代NSFW");
+    eq(st.activeLedgerPrompt, "lp_1", "下拉本身没被动");
+    // 走一遍真请求：标记 nsfw → system 用古代
+    let cap = {};
+    w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>账本内容够长够长够长够长够长够长够长。</ledger>"}}]}\n']) }; };
+    tavern.chat[9].mes = "正文。\n<route>nsfw</route>";
+    await F("ipeLedgerRun")(9, true);
+    ok(cap.body.messages[0].content.indexOf("RULE-ANCIENT-N") === 0, "苑无忧的 nsfw 走古代规则");
+    // 换成顾寒：没单独设 → 跟随全局；本聊天模式状态是 nsfw（同一 chatMetadata）→ 用全局 nsfw 现代
+    tavern.characterId = 1;
+    eq(F("ipeLedgerCardKey")(), "char:gu.png", "换卡后卡键变了");
+    eq(PV("normal"), "RULE-DAILY", "顾寒没设 → Normal 跟随下拉"); eq(PV("nsfw"), "RULE-MODERN-N", "顾寒没设 → nsfw 跟随模式行");
+    // 清掉苑无忧的一个槽
+    tavern.characterId = 0;
+    F("ipeLedgerCardSlotSet")("nsfw", "");
+    eq(PV("nsfw"), "RULE-MODERN-N", "清空本卡槽后回到跟随全局");
+    eq(PV("normal"), "RULE-EPIC", "另一个槽不受影响");
+    // 群聊按群记
+    tavern.groupId = "g1";
+    eq(F("ipeLedgerCardKey")(), "group:g1", "群聊按群键");
+    tavern.groupId = null;
+    // 场景模式关着时，本卡 Normal 槽也生效（这张卡就该用这套）
+    st.ledgerModeEnabled = false;
+    tavern.chat[11].mes = "第12层，没标记。";
+    await F("ipeLedgerRun")(11, true);
+    ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "场景模式关着，本卡 Normal 槽照样用大剧情");
+    // UI
+    F("ipeLedgerModeRefresh")();
+    const d = w.document;
+    const sel = d.querySelector('#ipe-ledger-slots select[data-slot="normal"]');
+    ok(!!sel && sel.value === "lp_2", "面板里 Normal 槽下拉显示本卡选择");
+    ok(!!d.querySelector('#ipe-ledger-slots select[data-slot="nsfw"]'), "nsfw 槽下拉存在");
+    ok(d.querySelector("#ipe-ledger-slots").textContent.indexOf("苑无忧") >= 0, "卡槽区显示卡名");
+    sel.value = ""; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
+    eq(PV("normal"), "RULE-DAILY", "界面上改回跟随全局立即生效");
 })();
 
 console.log("\n" + "\u2500".repeat(46));

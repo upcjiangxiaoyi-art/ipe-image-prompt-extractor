@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.13.1";
+var IPE_VERSION = "2.13.2";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -49,6 +49,7 @@ const DEFAULTS = {
     ledgerModeEnabled: false,      // 2.13.1 场景模式：与枢轨共用楼尾路由标记
     ledgerModeTag: "route, ipe_mode", // 新标记优先，兼容 2.13.0 的 <ipe_mode>
     ledgerModesJson: "",           // [{name, preset(挂账规则预设 id), oneShot}]
+    ledgerSlotsByCardJson: "",     // 2.13.2 卡槽按角色卡记忆：{ "char:avatar.png": { normal: 预设id, nsfw: 预设id } }
     ledgerModeManual: "",          // 手动指定：空 = 自动听标记；"normal" 或某个模式名 = 一直用它       // 2.12.4 自动挂账被插件自己关掉的原因：fail（连续失败）/ shrink（疑似事故）；人手动开回去就清空
     ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
     ledgerIdleTimeout: 300,        // 秒。「连续多少秒一个字节都没收到」才判死；0 = 永不
@@ -2036,7 +2037,67 @@ function ipeLedgerModeEffective() {
     return ipeLedgerModeState().mode || "normal";
 }
 /* 模式 → 挂账规则文本；normal 或没映射 → 当前选中的预设 */
+/* ---- 卡槽按角色卡记忆（2.13.2） ----
+   每张卡的日常挂账不一样，NSFW 也不一定相似。Normal 槽和各模式槽按角色卡各记各的，
+   群聊按群记；没单独设过的卡跟随全局（Normal 跟随「规则预设」当前选中，模式跟随模式行里选的）。
+   于是「规则预设」下拉回归本职：只决定你现在在编辑哪套文本。 */
+function ipeLedgerCardKey() {
+    try {
+        var c = ctx();
+        if (c.groupId) return "group:" + String(c.groupId);
+        var ch = (Array.isArray(c.characters) && c.characterId != null && c.characterId !== "") ? c.characters[c.characterId] : null;
+        if (ch && ch.avatar) return "char:" + String(ch.avatar);
+        if (ch && ch.name) return "char:" + String(ch.name);
+        if (c.characterId != null && c.characterId !== "") return "char:" + String(c.characterId);
+    } catch(e) {}
+    return "";
+}
+function ipeLedgerCardName() {
+    try {
+        var c = ctx();
+        if (c.groupId) return "群聊";
+        var ch = (Array.isArray(c.characters) && c.characterId != null) ? c.characters[c.characterId] : null;
+        return (ch && ch.name) || c.name2 || "当前卡";
+    } catch(e) { return "当前卡"; }
+}
+function ipeLedgerSlotsAll() {
+    var o = ipeSafeJsonParse(cfg().ledgerSlotsByCardJson, null);
+    return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+}
+function ipeLedgerCardSlots() {
+    var k = ipeLedgerCardKey(); if (!k) return {};
+    var v = ipeLedgerSlotsAll()[k];
+    return (v && typeof v === "object") ? v : {};
+}
+function ipeLedgerCardSlotSet(slot, presetId) {
+    var k = ipeLedgerCardKey(); if (!k) return false;
+    var all = ipeLedgerSlotsAll();
+    var v = (all[k] && typeof all[k] === "object") ? all[k] : {};
+    if (presetId) v[String(slot)] = String(presetId); else delete v[String(slot)];
+    if (Object.keys(v).length) all[k] = v; else delete all[k];
+    save("ledgerSlotsByCardJson", JSON.stringify(all));
+    return true;
+}
+function ipeLedgerPromptItemById(id) {
+    if (!id) return null;
+    var list = ipePresetList.apply(null, LP);
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return null;
+}
+/* 某个槽此刻实际用哪套：本卡单独选的 > 全局（normal=下拉当前选中；模式=模式行里选的） */
+function ipeLedgerSlotResolve(slot) {
+    var m = String(slot || "normal").toLowerCase() || "normal";
+    var own = ipeLedgerPromptItemById(ipeLedgerCardSlots()[m]);
+    if (own) return { item: own, source: "card" };
+    if (m === "normal") return { item: ipePresetItem.apply(null, LP), source: "global" };
+    var it = ipeLedgerModeItem(m);
+    var g = it ? ipeLedgerPromptItemById(it.preset) : null;
+    return g ? { item: g, source: "global" } : { item: null, source: "none" };
+}
+
 function ipeLedgerPromptValueForMode(mode) {
+    var r = ipeLedgerSlotResolve(mode);
+    if (r.item && r.source === "card") return String(r.item.value || "") || ipeLedgerPromptValue();
     if (!mode || mode === "normal") return ipeLedgerPromptValue();
     var it = ipeLedgerModeItem(mode);
     if (!it || !it.preset) return ipeLedgerPromptValue();
@@ -2172,11 +2233,32 @@ function ipeLedgerModeRowsHTML(prefix, drawer) {
     }
     return h;
 }
+function ipeLedgerSlotsHTML(prefix, drawer) {
+    var key = ipeLedgerCardKey();
+    var lp = ipePresetList.apply(null, LP);
+    var cls = drawer ? ' class="text_pole"' : '';
+    var box = '<div class="ipe-slots" style="margin-top:8px;padding:8px;border:1px solid rgba(128,128,128,.25);border-radius:10px">'
+            + '<div style="font-weight:600;font-size:12px;margin-bottom:4px">🎴 本卡卡槽 · ' + esc(ipeLedgerCardName()) + '</div>';
+    if (!key) return box + '<div class="ipe-hint">没识别到角色卡，卡槽不可用；全局设置照常生效。</div></div>';
+    var slots = ["normal"].concat(ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean));
+    var own = ipeLedgerCardSlots();
+    slots.forEach(function(sl){
+        var r = ipeLedgerSlotResolve(sl);
+        var globalName = sl === "normal" ? ((ipePresetItem.apply(null, LP) || {}).name || "?") : ((ipeLedgerModeItem(sl) && ipeLedgerPromptItemById(ipeLedgerModeItem(sl).preset) || {}).name || "未配置");
+        var opts = '<option value="">跟随全局（' + esc(globalName) + '）</option>';
+        for (var j = 0; j < lp.length; j++) opts += '<option value="' + esc(lp[j].id) + '"' + (own[sl] === lp[j].id ? ' selected' : '') + '>' + esc(lp[j].name || lp[j].id) + '</option>';
+        box += '<label style="margin-top:4px">' + (sl === "normal" ? "Normal 槽" : esc(sl) + " 槽") + (r.source === "card" ? "（本卡单独设）" : "") + '<select class="ipe-slot-sel"' + cls + ' data-slot="' + esc(sl) + '">' + opts + '</select></label>';
+    });
+    box += '<div class="ipe-hint">每张卡各记各的：这张卡 Normal 用日常、nsfw 用现代版，另一张卡可以完全不同。跟随全局 = Normal 用上面「规则预设」当前选中的，模式用模式行里选的。</div></div>';
+    return box;
+}
 function ipeLedgerModeRefresh() {
     var on = cfg().ledgerModeEnabled === true;
     var doc = ipeRootDocument();
     ["ipe","iped"].forEach(function(pre){
         var drawer = pre === "iped";
+        var slotsEl = q("#" + pre + "-ledger-slots");
+        if (slotsEl && !slotsEl.contains(doc.activeElement)) slotsEl.innerHTML = ipeLedgerSlotsHTML(pre, drawer);
         var cb = q("#" + pre + "-ledger-mode-on"); if (cb) cb.checked = on;
         var tg = q("#" + pre + "-ledger-mode-tag"); if (tg && doc.activeElement !== tg) tg.value = ipeLedgerModeTagNames().join(", ");
         var sel = q("#" + pre + "-ledger-mode-manual");
@@ -2191,7 +2273,13 @@ function ipeLedgerModeRefresh() {
         if (rows && !rows.contains(doc.activeElement)) rows.innerHTML = ipeLedgerModeRowsHTML(pre, drawer);
         var sn = q("#" + pre + "-ledger-mode-snippet"); if (sn) sn.value = ipeLedgerModeSnippet();
         var now = q("#" + pre + "-ledger-mode-now");
-        if (now) now.textContent = on ? ("当前生效：" + ipeLedgerModeEffective() + (String(cfg().ledgerModeManual || "").trim() ? "（手动指定）" : "（自动，本聊天记忆）")) : "场景模式未启用，一直用当前选中的挂账规则。";
+        if (now) {
+            var eff = ipeLedgerModeEffective(); var rr = ipeLedgerSlotResolve(eff);
+            var using = rr.item ? ("「" + (rr.item.name || rr.item.id) + "」" + (rr.source === "card" ? "（本卡）" : "（全局）")) : "（该槽没配预设，回落到 Normal）";
+            now.textContent = on
+                ? ("当前生效：模式 " + eff + (String(cfg().ledgerModeManual || "").trim() ? "（手动指定）" : "（自动，本聊天记忆）") + "，实际用 " + using)
+                : ("场景模式未启用。本卡 Normal 槽实际用 " + using + "。");
+        }
     });
 }
 function ipeLedgerModeBind() {
@@ -2222,6 +2310,17 @@ function ipeLedgerModeBind() {
             l.push({ name: "", preset: (lp[0] && lp[0].id) || "", oneShot: false });
             ipeLedgerModesSave(l); ipeLedgerRefreshBotEditors();
         }); }
+        var slotsEl = q("#" + pre + "-ledger-slots");
+        if (slotsEl && !slotsEl.__ipeBound) { slotsEl.__ipeBound = true;
+            slotsEl.addEventListener("change", function(ev){
+                var t = ev.target; if (!t || !t.classList || !t.classList.contains("ipe-slot-sel")) return;
+                var sl = String(t.getAttribute("data-slot") || "normal");
+                ipeLedgerCardSlotSet(sl, String(t.value || ""));
+                ipeLedgerRefreshBotEditors();
+                var r = ipeLedgerSlotResolve(sl);
+                ipeLedgerStatus("本卡 " + (sl === "normal" ? "Normal" : sl) + " 槽 → " + (r.item ? r.item.name : "未配置") + (t.value ? "（只对这张卡）" : "（跟随全局）"), "#6ec577");
+            });
+        }
         var rows = q("#" + pre + "-ledger-mode-rows");
         if (rows && !rows.__ipeBound) { rows.__ipeBound = true;
             function readRows() {
@@ -4784,6 +4883,7 @@ function createPanel() {
             '<label>监听标签名（逗号分隔）<input type="text" id="ipe-ledger-mode-tag" placeholder="route, ipe_mode"></label>'+
             '<label>手动指定当前模式<select id="ipe-ledger-mode-manual"></select></label>'+
             '<div class="ipe-hint">「自动」= 听标记。选了具体模式就一直用它，直到改回自动。</div>'+
+            '<div id="ipe-ledger-slots"></div>'+
             '<div id="ipe-ledger-mode-rows"></div>'+
             '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-ledger-mode-add" class="ipe-btn" type="button">新增模式</button></div>'+
             '<div class="ipe-hint">每个模式：名字、用哪套挂账规则预设、是否「用完一轮回普通」（事后承接那种一次性模式勾这个）。</div>'+
@@ -4974,6 +5074,7 @@ function createDrawer() {
     h += '<small style="color:#888">与枢轨共用楼尾 &lt;route&gt;xxx&lt;/route&gt;，预测下一轮模式；默认兼容旧 &lt;ipe_mode&gt;，正文引用不误触。</small>';
     h += '<label>监听标签名（逗号分隔）</label><input type="text" id="iped-ledger-mode-tag" class="text_pole" placeholder="route, ipe_mode">';
     h += '<label>手动指定当前模式</label><select id="iped-ledger-mode-manual" class="text_pole"></select>';
+    h += '<div id="iped-ledger-slots"></div>';
     h += '<div id="iped-ledger-mode-rows"></div>';
     h += '<div style="margin-top:6px"><input type="button" id="iped-ledger-mode-add" class="menu_button" value="新增模式"></div>';
     h += '<label>给主 AI 的那几句（复制进常驻区）</label><textarea id="iped-ledger-mode-snippet" class="text_pole" rows="4" readonly></textarea>';
@@ -6208,6 +6309,7 @@ function bindAll() {
                 setTimeout(function(){
                     ipeLedgerSync();
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
+                    try { ipeLedgerModeRefresh(); } catch(eS) {}   // 卡槽显示换成这张卡的
                     try { ipeImgRefreshLayerUI(); } catch(eL) {}   // 四个层框换成本聊天的
                 }, 200);
             });
