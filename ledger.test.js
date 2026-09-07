@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 
-const SRC = fs.readFileSync(path.join(__dirname, "../ipe-image-prompt-extractor-main/index.js"), "utf8");
+const SRC = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
 
 let pass = 0, fail = 0;
 function ok(cond, name, extra) {
@@ -576,7 +576,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.1") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -783,7 +783,7 @@ await (async () => {
     ok(st.style.width.indexOf("280px") >= 0, "桌面栈宽 280", st.style.width);
 })();
 
-console.log("\n【35】 场景模式路由：读标记换挂账规则、没标记沿用、一次性模式回普通、手动优先、关着不动、标记不喂副 AI");
+console.log("\n【35】 场景模式路由：与枢轨共用楼尾标记、前瞻语义、一次性模式采用后才回普通");
 await (async () => {
     const { w, tavern, F } = boot(12);
     const st = withApi(tavern, F, "gpt-4.1");
@@ -794,29 +794,33 @@ await (async () => {
     st.activeLedgerPrompt = "lp_1";
     st.ledgerModesJson = JSON.stringify([{ name: "hot", preset: "lp_2", oneShot: false }, { name: "after", preset: "lp_3", oneShot: true }]);
     const P = F("ipeLedgerReadModeMarker"), S = F("ipeLedgerStripModeTag");
-    eq(P("正文……\n<ipe_mode>hot</ipe_mode>"), "hot", "读到标记");
-    eq(P("<ipe_mode> HOT </ipe_mode> 后面又写 <IPE_MODE>after</IPE_MODE>"), "after", "多个取最后一个、大小写不敏感");
+    eq(P("正文……\n<route>hot</route>"), "hot", "默认读取与枢轨相同的 route 标记");
+    eq(P("正文……\n<IPE_MODE> HOT </IPE_MODE>"), "hot", "兼容旧 ipe_mode，大小写不敏感");
+    eq(P("正文引用 <route>hot</route> 作为例子，后面还有正文。"), "", "正文中引用标签不误切，只认楼尾");
+    eq(P("正文\n<route>hot</ipe_mode>"), "", "开闭标签不一致不认");
+    eq(P("正文\n<ipe_mode>hot</ipe_mode>\n<route>after</route>"), "after", "楼尾多个标记取最后一个");
     eq(P("没有标记"), "", "没标记返回空");
-    eq(S("正文。\n<ipe_mode>hot</ipe_mode>"), "正文。", "剥掉标记");
+    eq(S("正文。\n<route>hot</route>"), "正文。", "剥掉楼尾标记");
+    eq(S("正文引用 <route>hot</route> 作为例子。"), "正文引用 <route>hot</route> 作为例子。", "正文引用不从副 AI 输入里误删");
     // 关着：永远普通
     let cap = {};
     const okStream = () => ({ ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>账本内容够长够长够长够长够长够长够长。</ledger>"}}]}\n']) });
     w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return okStream(); };
-    tavern.chat[9].mes = "第10层正文。\n<ipe_mode>hot</ipe_mode>";
+    tavern.chat[9].mes = "第10层正文。\n<route>hot</route>";
     await F("ipeLedgerRun")(9, true);
     ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "场景模式关着：用当前选中的普通规则");
     // 开：读标记切 hot
     st.ledgerModeEnabled = true;
     await F("ipeLedgerRun")(9, true);
     ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "读到 hot → 用亲密规则", cap.body.messages[0].content.slice(0, 30));
-    ok(cap.body.messages[1].content.indexOf("<ipe_mode>") < 0, "标记不喂给副 AI");
+    ok(cap.body.messages[1].content.indexOf("<route>") < 0, "标记不喂给副 AI");
     eq(F("ipeLedgerModeState")().mode, "hot", "状态记在本聊天");
     // 下一楼没标记：沿用
     tavern.chat[11].mes = "第12层正文，没写标记，够长够长够长。";
     await F("ipeLedgerRun")(11, true);
     ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "没标记 → 沿用 hot，不掉回普通");
     // 一次性模式
-    tavern.chat[11].mes = "第12层结束了。\n<ipe_mode>after</ipe_mode>";
+    tavern.chat[11].mes = "第12层结束了。\n<route>after</route>";
     await F("ipeLedgerRun")(11, true);
     ok(cap.body.messages[0].content.indexOf("RULE-B") === 0, "读到 after → 用事后规则");
     eq(F("ipeLedgerModeState")().mode, "normal", "一次性模式用完一轮自动回 normal");
@@ -824,12 +828,12 @@ await (async () => {
     await F("ipeLedgerRun")(11, true);
     ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "回普通后没标记就是普通");
     // 未配置的名字不认
-    tavern.chat[11].mes = "第12层。\n<ipe_mode>whatever</ipe_mode>";
+    tavern.chat[11].mes = "第12层。\n<route>whatever</route>";
     await F("ipeLedgerRun")(11, true);
     ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "没配过的模式名不认，状态不变");
     // 手动优先
     st.ledgerModeManual = "hot";
-    tavern.chat[11].mes = "第12层。\n<ipe_mode>normal</ipe_mode>";
+    tavern.chat[11].mes = "第12层。\n<route>normal</route>";
     await F("ipeLedgerRun")(11, true);
     ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "手动指定 hot 时，标记写 normal 也不听");
     st.ledgerModeManual = "";
@@ -837,6 +841,14 @@ await (async () => {
     st.ledgerModeTag = "scene";
     eq(P("<scene>hot</scene>"), "hot", "标签名改成 scene 也认"); eq(P("<ipe_mode>hot</ipe_mode>"), "", "改了标签名后旧标签不认");
     ok(F("ipeLedgerModeSnippet")().indexOf("<scene>hot</scene>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("<scene>after</scene>") >= 0, "给主 AI 的那几句按配置生成");
+    ok(F("ipeLedgerModeSnippet")().indexOf("预测下一轮") >= 0 && F("ipeLedgerModeSnippet")().indexOf("提前一轮") >= 0, "提示词与枢轨一致：预测下一轮、提前切换");
+    // 一次性模式不能在 API 仅仅返回时就消耗；账本真正落地后才回普通
+    st.ledgerModeTag = "route, ipe_mode";
+    await F("ipeLedgerCallAPI")("预览正文。\n<route>after</route>", "", 12);
+    eq(F("ipeLedgerModeState")().mode, "after", "API 返回但结果尚未采用：一次性模式保留");
+    tavern.chat[11].mes = "第12层采用正文。\n<route>after</route>";
+    await F("ipeLedgerRun")(11, true);
+    eq(F("ipeLedgerModeState")().mode, "normal", "账本真正采用后：一次性模式才回 normal");
     // UI：面板里有开关和行
     const d = w.document;
     ok(!!d.querySelector("#ipe-ledger-mode-on") && !!d.querySelector("#ipe-ledger-mode-rows"), "面板有场景模式区");

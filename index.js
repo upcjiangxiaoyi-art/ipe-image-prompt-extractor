@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.13.0";
+var IPE_VERSION = "2.13.1";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -46,8 +46,8 @@ const DEFAULTS = {
     ledgerNotePresetsJson: "",   activeLedgerNote: "ln_1",
     ledgerAutoRun: false,
     ledgerAutoOffReason: "",
-    ledgerModeEnabled: false,      // 2.13.0 场景模式：按正文末尾的标记自动换挂账规则预设
-    ledgerModeTag: "ipe_mode",     // 标记标签名：<ipe_mode>xxx</ipe_mode>
+    ledgerModeEnabled: false,      // 2.13.1 场景模式：与枢轨共用楼尾路由标记
+    ledgerModeTag: "route, ipe_mode", // 新标记优先，兼容 2.13.0 的 <ipe_mode>
     ledgerModesJson: "",           // [{name, preset(挂账规则预设 id), oneShot}]
     ledgerModeManual: "",          // 手动指定：空 = 自动听标记；"normal" 或某个模式名 = 一直用它       // 2.12.4 自动挂账被插件自己关掉的原因：fail（连续失败）/ shrink（疑似事故）；人手动开回去就清空
     ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
@@ -1074,7 +1074,6 @@ async function ipeLedgerCallAPI(text, extra, atFloor) {
             finish = ipeLedgerFinishOf(data);
         }
         if (!out) throw new Error(ipeLedgerEmptyReason(finish, reasonChars));
-        ipeLedgerModeAfterRun();                // 一次性模式用完这轮就回普通
         return out;
     } catch(e) {
         if (dog.fired()) {
@@ -1159,6 +1158,7 @@ function ipeLedgerAdoptPreview(which) {
     if (!t) { ipeLedgerStatus("预览是空的，没什么可采用", "#c9a227"); return; }
     var f = ipeLedgerPreviewFloor || 0;   // 预览那份正文取自哪层，就盖哪层
     ipeLedgerCommit(t, f);
+    ipeLedgerModeAfterRun(ipeLedgerPreviewMode);
     ipeLedgerHidePreview();
     ipeLedgerClearExtra();
     ipeLedgerSync();
@@ -1194,6 +1194,7 @@ async function ipeLedgerRunManual() {
     try {
         var ex  = ipeLedgerExtraOnce();
         var out = await ipeLedgerCallAPI(msg.mes, ex, msgFloor);
+        ipeLedgerPreviewMode = ipeLedgerLastMode;
         var got = ipeLedgerExtract(out);          // 有标签顺手剥，没标签原样给
         var body = (got && got.text) ? got.text : String(out || "");
         ipeLedgerShowPreview(body, !got || got.level === 4);
@@ -1291,6 +1292,8 @@ function ipeLedgerSetBusy(on) {
 }
 var ipeLedgerPending = null;      // 缩水拦截暂存，点「强制采用」才落盘
 var ipeLedgerPreviewFloor = 0;    // 预览那份正文取自哪一层，采用时照这个盖戳
+var ipeLedgerPendingMode = "normal"; // 被保护闸拦下的结果实际用了哪套规则
+var ipeLedgerPreviewMode = "normal"; // 手动预览实际用了哪套规则；采用后才消费一次性模式
 
 function ipeLedgerShowForce(on) {
     ["ipe-ledger-force","iped-ledger-force"].forEach(function(id){
@@ -1321,6 +1324,7 @@ async function ipeLedgerRun(targetIdx, silent) {
     ipeLedgerStatus("自动挂账中…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var out = await ipeLedgerCallAPI(msg.mes, "", msgFloor);
+        var usedMode = ipeLedgerLastMode;
         var got = ipeLedgerExtract(out);
 
         if (!got || !got.text) {                               // 保底 2/3：整个回复是空的
@@ -1334,6 +1338,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         ipeLedgerFailStreak = 0;
 
         if (body.replace(/\s+/g, "") === IPE_LEDGER_SENTINEL) { // 静默哨兵
+            ipeLedgerModeAfterRun(usedMode);
             ipeLedgerStatus("本轮无变化（第 " + (msgFloor || ipeFloorNo()) + " 楼）" + note, "#6ec577");
             return;
         }
@@ -1343,6 +1348,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         // 兜底级 + 账本原本为空 + 内容极短 → 大概率是拒答/寒暄，压住等确认
         if (got.level === 4 && !oldText.trim() && body.length < IPE_LEDGER_MIN_LEN) {
             ipeLedgerPending = body;
+            ipeLedgerPendingMode = usedMode;
             ipeLedgerShowForce(true);
             ipeLedgerStatus("副 AI 没写包裹，且回复很短（" + body.length + " 字），像是拒答而不是账本，已拦下。"
                 + "确实要用请点「强制采用」。｜原文：" + body.slice(0, 40), "#c9a227");
@@ -1351,6 +1357,7 @@ async function ipeLedgerRun(targetIdx, silent) {
 
         if (oldText.trim() && body.length < oldText.length * IPE_LEDGER_SHRINK) {   // 保底 4
             ipeLedgerPending = body;
+            ipeLedgerPendingMode = usedMode;
             ipeLedgerShowForce(true);
             // 事故现场就该停车等人来看，不能带着警报继续飞
             var wasAuto = cfg().ledgerAutoRun === true;
@@ -1363,6 +1370,7 @@ async function ipeLedgerRun(targetIdx, silent) {
         }
 
         ipeLedgerCommit(body, msgFloor);
+        ipeLedgerModeAfterRun(usedMode);
         ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜模式 " + ipeLedgerLastMode : "")
             + (ipeLedgerReportTruncated ? "（report 层已截断）" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
@@ -1939,9 +1947,9 @@ function ipeLedgerWrapHint() {
 }
 
 /* ============================================================
-   🎭 场景模式路由（2.13.0）
+   🎭 场景模式路由（2.13.1）
    不额外叫一个 AI 判断。主 AI 在正文末尾留一个极短标记：
-     <ipe_mode>normal</ipe_mode> / <ipe_mode>nsfw</ipe_mode> / <ipe_mode>aftercare</ipe_mode>
+     <route>normal</route> / <route>nsfw</route> / <route>aftercare</route>
    插件机械读标记，换用对应的挂账规则预设；模式名和映射全由用户配，插件不关心叫什么。
    三态语义：
      · 读到标记 → 切到该模式（只认配过的名字和 normal）
@@ -1964,22 +1972,42 @@ function ipeLedgerModes() {
     return out;
 }
 function ipeLedgerModesSave(list) { save("ledgerModesJson", JSON.stringify(list || [])); }
+function ipeLedgerModeTagNames() {
+    var raw = String(cfg().ledgerModeTag || "route, ipe_mode");
+    var parts = raw.split(/[,\s，、]+/), out = [], seen = {};
+    for (var i = 0; i < parts.length; i++) {
+        var t = String(parts[i] || "").trim().replace(/[^\w-]/g, "").toLowerCase();
+        if (t && !seen[t]) { seen[t] = true; out.push(t); }
+    }
+    if (!out.length) out = ["route", "ipe_mode"];
+    /* 2.13.0 的默认值自动升级：新旧标记都认，不掐断旧聊天。自定义标签保持原样。 */
+    if (out.length === 1 && out[0] === "ipe_mode") out.unshift("route");
+    return out;
+}
 function ipeLedgerModeTagName() {
-    var t = String(cfg().ledgerModeTag || "ipe_mode").trim().replace(/[^\w-]/g, "");
-    return t || "ipe_mode";
+    return ipeLedgerModeTagNames()[0] || "route";
 }
 function ipeLedgerModeRe() {
-    var t = ipeEscRe(ipeLedgerModeTagName());
-    return new RegExp("<\\s*" + t + "\\s*>\\s*([\\w-]+)\\s*<\\s*\\/\\s*" + t + "\\s*>", "gi");
+    var tags = ipeLedgerModeTagNames().map(ipeEscRe).join("|");
+    return new RegExp("<\\s*(" + tags + ")\\s*>\\s*([\\w-]+)\\s*<\\s*\\/\\s*\\1\\s*>", "gi");
+}
+function ipeLedgerTailModeMatch(text) {
+    var re = ipeLedgerModeRe(), m, hit = null;
+    var s0 = String(text || "");
+    while ((m = re.exec(s0)) !== null) {
+        if (!s0.slice(re.lastIndex).trim()) hit = { mode: String(m[2] || "").toLowerCase(), index: m.index, end: re.lastIndex };
+    }
+    return hit;
 }
 function ipeLedgerReadModeMarker(text) {
-    var re = ipeLedgerModeRe(), m, last = "";
-    var s0 = String(text || "");
-    while ((m = re.exec(s0)) !== null) last = m[1];
-    return last ? last.toLowerCase() : "";
+    var hit = ipeLedgerTailModeMatch(text);
+    return hit ? hit.mode : "";
 }
 function ipeLedgerStripModeTag(text) {
-    return String(text || "").replace(ipeLedgerModeRe(), "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    var out = String(text || ""), hit;
+    /* 只剥楼尾连续标记；正文中引用的示例标签原样留给副 AI。 */
+    while ((hit = ipeLedgerTailModeMatch(out))) out = out.slice(0, hit.index);
+    return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 function ipeLedgerModeState() {
     try {
@@ -2019,24 +2047,28 @@ function ipeLedgerPromptValueForMode(mode) {
 /* 一楼正文进来：读标记、更新状态。返回本次生效的模式。 */
 function ipeLedgerModeIngest(text, floor) {
     if (cfg().ledgerModeEnabled !== true) { ipeLedgerLastMode = "normal"; return "normal"; }
-    var mk = ipeLedgerReadModeMarker(text);
+    var source = text;
+    try { source = ipeLedgerStripImageTag(text); } catch(e) {}
+    var mk = ipeLedgerReadModeMarker(source);
     if (mk && (mk === "normal" || ipeLedgerModeItem(mk))) ipeLedgerModeSet(mk, floor);
     ipeLedgerLastMode = ipeLedgerModeEffective();
     return ipeLedgerLastMode;
 }
 /* 一次挂账跑成：一次性模式自动回普通（只动自动状态，不动手动指定） */
-function ipeLedgerModeAfterRun() {
+function ipeLedgerModeAfterRun(usedMode) {
     if (cfg().ledgerModeEnabled !== true) return;
+    if (String(cfg().ledgerModeManual || "").trim()) return;
+    var mode = String(usedMode || "").trim().toLowerCase();
     var st = ipeLedgerModeState();
-    var it = ipeLedgerModeItem(st.mode);
-    if (it && it.oneShot) ipeLedgerModeSet("normal", st.floor);
+    var it = ipeLedgerModeItem(mode);
+    if (it && it.oneShot && st.mode === mode) ipeLedgerModeSet("normal", st.floor);
 }
 /* 给主 AI 的那几句，按配好的模式名生成 */
 function ipeLedgerModeSnippet() {
     var t = ipeLedgerModeTagName();
     var names = ["normal"].concat(ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean));
     var opts = names.map(function(n){ return "<" + t + ">" + n + "</" + t + ">"; }).join("、");
-    return "每轮正文的最后一行，按本轮已经发生的场景单独输出一个标记：" + opts + "。只判断本轮实际发生的，不预测下一轮；没有变化就照上一轮写。标记之外不要解释。";
+    return "每轮正文的最后一行，预测下一轮回复应使用的预设模式，并单独输出一个标记：" + opts + "。根据当前情节走向判断：下一轮即将进入或仍处于对应特殊场景时写相应模式；下一轮应回到常规场景时写 normal。必须提前一轮切换，不要等特殊场景已经写出后才标记。标记之外不要解释。";
 }
 
 function ipeLedgerSystemText() {
@@ -2146,7 +2178,7 @@ function ipeLedgerModeRefresh() {
     ["ipe","iped"].forEach(function(pre){
         var drawer = pre === "iped";
         var cb = q("#" + pre + "-ledger-mode-on"); if (cb) cb.checked = on;
-        var tg = q("#" + pre + "-ledger-mode-tag"); if (tg && doc.activeElement !== tg) tg.value = String(cfg().ledgerModeTag || "ipe_mode");
+        var tg = q("#" + pre + "-ledger-mode-tag"); if (tg && doc.activeElement !== tg) tg.value = ipeLedgerModeTagNames().join(", ");
         var sel = q("#" + pre + "-ledger-mode-manual");
         if (sel) {
             var names = ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean);
@@ -2171,7 +2203,12 @@ function ipeLedgerModeBind() {
         }); }
         var tg = q("#" + pre + "-ledger-mode-tag");
         if (tg && !tg.__ipeBound) { tg.__ipeBound = true; tg.addEventListener("change", function(){
-            var v = String(tg.value || "").trim().replace(/[<>\/\s]/g, "") || "ipe_mode";
+            var raw = String(tg.value || "").split(/[,\s，、]+/), clean = [], seen = {};
+            for (var i = 0; i < raw.length; i++) {
+                var tag = String(raw[i] || "").trim().replace(/[^\w-]/g, "").toLowerCase();
+                if (tag && !seen[tag]) { seen[tag] = true; clean.push(tag); }
+            }
+            var v = clean.length ? clean.join(", ") : "route, ipe_mode";
             save("ledgerModeTag", v); ipeLedgerRefreshBotEditors();
         }); }
         var sel = q("#" + pre + "-ledger-mode-manual");
@@ -4743,8 +4780,8 @@ function createPanel() {
         '</div></details>'+
         '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（按正文标记自动换挂账规则）</summary><div class="ipe-fold-body">'+
             '<div style="color:#888;font-size:12px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-mode-on"> 启用场景模式</label></div>'+
-            '<div class="ipe-hint">主 AI 在正文最后一行写一个标记，比如 &lt;ipe_mode&gt;nsfw&lt;/ipe_mode&gt;，插件读到就换用对应的挂账规则预设。没写标记就沿用上一楼的模式，不会掉回去；写 normal 回普通。模式名随你起，插件不关心叫什么。标记在发给副 AI 前会剥掉，聊天里的隐藏用酒馆正则。</div>'+
-            '<label>标记标签名<input type="text" id="ipe-ledger-mode-tag" placeholder="ipe_mode"></label>'+
+            '<div class="ipe-hint">与枢轨共用楼尾标记，比如 &lt;route&gt;nsfw&lt;/route&gt;。标记预测下一轮应使用的模式；小海螺据此换挂账规则，枢轨据此换整套预设。默认也兼容旧 &lt;ipe_mode&gt;。正文里引用标签不会误触，标记发给副 AI 前会剥掉。</div>'+
+            '<label>监听标签名（逗号分隔）<input type="text" id="ipe-ledger-mode-tag" placeholder="route, ipe_mode"></label>'+
             '<label>手动指定当前模式<select id="ipe-ledger-mode-manual"></select></label>'+
             '<div class="ipe-hint">「自动」= 听标记。选了具体模式就一直用它，直到改回自动。</div>'+
             '<div id="ipe-ledger-mode-rows"></div>'+
@@ -4934,8 +4971,8 @@ function createDrawer() {
     h += '</div></details>';
     h += '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（按正文标记自动换挂账规则）</summary><div class="ipe-fold-body">';
     h += '<div style="margin-bottom:6px"><label class="ipe-switch-left"><input type="checkbox" id="iped-ledger-mode-on"> 启用场景模式</label></div>';
-    h += '<small style="color:#888">主 AI 在正文最后一行写 &lt;ipe_mode&gt;xxx&lt;/ipe_mode&gt;，插件读到就换对应挂账规则；没标记沿用上一楼；normal 回普通。</small>';
-    h += '<label>标记标签名</label><input type="text" id="iped-ledger-mode-tag" class="text_pole" placeholder="ipe_mode">';
+    h += '<small style="color:#888">与枢轨共用楼尾 &lt;route&gt;xxx&lt;/route&gt;，预测下一轮模式；默认兼容旧 &lt;ipe_mode&gt;，正文引用不误触。</small>';
+    h += '<label>监听标签名（逗号分隔）</label><input type="text" id="iped-ledger-mode-tag" class="text_pole" placeholder="route, ipe_mode">';
     h += '<label>手动指定当前模式</label><select id="iped-ledger-mode-manual" class="text_pole"></select>';
     h += '<div id="iped-ledger-mode-rows"></div>';
     h += '<div style="margin-top:6px"><input type="button" id="iped-ledger-mode-add" class="menu_button" value="新增模式"></div>';
@@ -5851,6 +5888,7 @@ function bindAll() {
         el.addEventListener("click", function(){
             if (ipeLedgerPending == null) { ipeLedgerStatus("没有待确认的结果", "#c9a227"); return; }
             ipeLedgerCommit(ipeLedgerPending, ipeLedgerPreviewFloor || 0);
+            ipeLedgerModeAfterRun(ipeLedgerPendingMode);
             ipeLedgerPending = null;
             ipeLedgerShowForce(false);
             ipeLedgerSync();
