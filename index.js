@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.13.3";
+var IPE_VERSION = "2.13.4";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4708,6 +4708,9 @@ function createPanel() {
         '<div style="font-weight:600;font-size:12px;margin-bottom:6px">\uD83E\uDD16 副 AI（谁来记账）</div>'+
         '<label>挂账用哪套 API<select id="ipe-ledger-api"></select></label>'+
         '<div class="ipe-hint" style="margin-bottom:6px">在生图页配好地址密钥，这儿选一套用。跟生图各用各的，不打架。</div>'+
+        '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
+            '<button id="ipe-ledger-test" class="ipe-btn" type="button">测试连接（测的是上面这套 API）</button>'+
+        '</div>'+
         '<details class="ipe-fold"><summary>\u2699\uFE0F 高级设置（不懂就别动，默认就挺好）</summary><div class="ipe-fold-body">'+
             '<div class="ipe-hint">副 AI 每次能看到：本卡要点 + User 指令 + 最近几楼摘要 + 最近几版账本 + 楼层数 + 这一楼正文。不看角色卡和世界书。</div>'+
             '<label>让它往回看几楼（0 = 不看）<input type="text" inputmode="numeric" id="ipe-ledger-rep-floors" placeholder="10"></label>'+
@@ -4750,9 +4753,6 @@ function createPanel() {
             '<textarea id="ipe-ledger-mode-snippet" rows="4" readonly></textarea>'+
             '<div id="ipe-ledger-mode-now" class="ipe-hint"></div>'+
         '</div></details>'+
-        '<div class="ipe-preview-actions" style="margin-bottom:8px">'+
-            '<button id="ipe-ledger-test" class="ipe-btn" type="button">测试连接</button>'+
-        '</div>'+
         '<div style="color:#888;font-size:12px;margin-bottom:8px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-auto"> 自动挂账（每来一楼跑一次）</label></div>'+
         '<div id="ipe-ledger-auto-hint" class="ipe-hint" style="display:none;margin:-2px 0 8px;line-height:1.6"></div>'+
         '<details class="ipe-fold" open><summary>\uD83D\uDCDD 挂账规则（想记什么写在这儿）</summary><div class="ipe-fold-body">'+
