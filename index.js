@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.12.11";
+var IPE_VERSION = "2.12.12";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -4406,7 +4406,7 @@ function createPanel() {
             '<button id="ipe-pack-import" class="ipe-btn" type="button">\u2B06 导入预设包</button>'+
         '</div>'+
         '<input type="file" id="ipe-pack-file" accept=".json,application/json" style="display:none">'+
-        '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 角色锚点 / 通用锚点规则，不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示、锚点各一份，发给别人用这个。</div>');
+        '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 通用锚点规则，不含角色锚点（那是各人自己卡的）、不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示各一份，发给别人用这个。角色锚点要备份的话，去锚点区点「备份锚点」。</div>');
 
     h += secHTML("char-anchors","角色锚点", true,
         '<label>锚点预设<select id="ipe-anchor-slot"></select></label>'+
@@ -4414,6 +4414,7 @@ function createPanel() {
         '<div class="ipe-preview-actions" style="margin-top:2px">'+
             '<button id="ipe-anchor-add" class="ipe-btn" type="button">新增锚点</button>'+
             '<button id="ipe-anchor-delete" class="ipe-btn" type="button">删除当前</button>'+
+            '<button id="ipe-pack-export-anchors" class="ipe-btn" type="button" title="只导出角色锚点，给自己备份换设备用">\u2B07 备份锚点</button>'+
         '</div>'+
         '<textarea id="ipe-char-anchors" rows="5" placeholder="陆星河：a man, 28 years old, tall..."></textarea>'+
         '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>'+
@@ -4627,11 +4628,11 @@ function createDrawer() {
     h += '<small style="color:#888">可无限新增模板。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}</small>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
     h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
-    h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 锚点 / 通用锚点规则，不含 API 与密钥；导入按名字合并，同名覆盖前会问。</small>';
+    h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。</small>';
     h += '<hr><small><b>角色锚点</b></small>';
     h += '<label>锚点预设</label><select id="iped-anchor-slot" class="text_pole"></select>';
     h += '<label>锚点名称</label><input type="text" id="iped-anchor-name" class="text_pole" value="" placeholder="例如：陆星河 / 苑无忧">';
-    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"></div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"><input type="button" id="iped-pack-export-anchors" class="menu_button" value="\u2B07 备份锚点"></div>';
     h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
     h += '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。<div style="display:flex;gap:6px;margin-top:8px"><input type="button" id="iped-anchor-guide-toggle" class="menu_button" value="编辑通用规则"><input type="button" id="iped-anchor-guide-reset" class="menu_button" value="恢复默认"></div><div id="iped-anchor-guide-editor-wrap" class="ipe-anchor-guide-editor-wrap" style="display:none"><textarea id="iped-anchor-guide-editor" class="text_pole" rows="6" placeholder="通用角色锚点调用规则"></textarea><small style="color:#888">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</small></div></div>';
     h += '<hr><small><b>提取规则</b></small>';
@@ -4816,6 +4817,14 @@ function ipeForceSaveFromEditors() {
 var IPE_IMG_PACK_FMT = "ipe-image-pack";
 
 function ipeImgPackBuild(scope) {
+    /* 角色锚点是每个人自己卡的东西，跟画风包不混：all / current 都不带锚点；
+       只有 scope === "anchors" 才导出锚点（给自己备份、换设备用）。 */
+    if (scope === "anchors") {
+        var al = ipeGetAnchorPresets(), ao = [];
+        for (var k = 0; k < al.length; k++) if (al[k]) ao.push({ id: al[k].id, name: al[k].name, value: String(al[k].value || "") });
+        return { _fmt: IPE_IMG_PACK_FMT, _v: 1, exportedAt: new Date().toISOString(), pluginVersion: IPE_VERSION, scope: "anchors",
+                 templates: [], rules: [], systemPrompts: [], anchors: ao, anchorGuide: "" };
+    }
     var onlyCur = scope === "current";
     function pick(list, activeId) {
         var out = [];
@@ -4835,7 +4844,7 @@ function ipeImgPackBuild(scope) {
         templates:     pick(ipeGetBaseTemplates(),      ipeGetActiveTemplateId()),
         rules:         pick(ipeGetRulePresets(),        ipeGetActiveRuleId()),
         systemPrompts: pick(ipeGetSystemPromptPresets(), ipeGetActiveSystemPromptId()),
-        anchors:       pick(ipeGetAnchorPresets(),      ipeGetActiveAnchorId()),
+        anchors:       [],
         anchorGuide:   guide
     };
 }
@@ -4848,7 +4857,7 @@ function ipeToast(msg, ok) {
 function ipeImgPackExport(scope) {
     var pack = ipeImgPackBuild(scope);
     var n = pack.templates.length + pack.rules.length + pack.systemPrompts.length + pack.anchors.length;
-    var name = "ipe-image-pack-" + (pack.scope === "current" ? "current-" : "") + new Date().toISOString().slice(0, 10) + ".json";
+    var name = (pack.scope === "anchors" ? "ipe-anchors-" : "ipe-image-pack-" + (pack.scope === "current" ? "current-" : "")) + new Date().toISOString().slice(0, 10) + ".json";
     try {
         var blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
         var url  = URL.createObjectURL(blob);
@@ -4856,8 +4865,10 @@ function ipeImgPackExport(scope) {
         a.href = url; a.download = name;
         document.body.appendChild(a); a.click();
         setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 200);
-        ipeToast("已导出 " + name + "：模板 " + pack.templates.length + " / 规则 " + pack.rules.length
-            + " / 系统提示 " + pack.systemPrompts.length + " / 锚点 " + pack.anchors.length + (pack.anchorGuide ? " / 通用锚点规则" : "") + "（不含 API 与密钥）", true);
+        ipeToast(pack.scope === "anchors"
+            ? "已导出 " + name + "：角色锚点 " + pack.anchors.length + " 套（只给自己备份用，别分享）"
+            : "已导出 " + name + "：模板 " + pack.templates.length + " / 规则 " + pack.rules.length
+              + " / 系统提示 " + pack.systemPrompts.length + (pack.anchorGuide ? " / 通用锚点规则" : "") + "（不含角色锚点、API 与密钥）", true);
         return true;
     } catch(e) {
         ipeToast("导出失败：" + (e && e.message ? e.message : String(e)), false);
@@ -4929,8 +4940,8 @@ function ipeImgPackImportText(txt, opts) {
     if (!pack) { ipeToast("导入失败：这不是小海螺的生图预设包（也不是模板数组）", false); return null; }
 
     var pv = ipeImgPackPreview(pack);
-    var totalRep = pv.templates.replaced + pv.rules.replaced + pv.systemPrompts.replaced + pv.anchors.replaced;
-    var totalAdd = pv.templates.added + pv.rules.added + pv.systemPrompts.added + pv.anchors.added;
+    var totalRep = pv.templates.replaced + pv.rules.replaced + pv.systemPrompts.replaced + (pack.scope === "anchors" ? pv.anchors.replaced : 0);
+    var totalAdd = pv.templates.added + pv.rules.added + pv.systemPrompts.added + (pack.scope === "anchors" ? pv.anchors.added : 0);
     var guideIn = String(pack.anchorGuide || "").trim();
     var guideChange = !!guideIn && guideIn !== String(cfg().anchorUsageGuide || "").trim();
     if (!opts.force && (totalRep > 0 || guideChange)) {
@@ -4946,11 +4957,21 @@ function ipeImgPackImportText(txt, opts) {
         if (!okc) { ipeToast("已取消导入，什么都没动", false); return null; }
     }
 
+    /* 包里带角色锚点：分享来的包一般不该要（那是别人卡的角色），只有自己备份的锚点包才要。问一句，默认不要。 */
+    var wantAnchors = false, anchorsN = Array.isArray(pack.anchors) ? pack.anchors.length : 0;
+    if (anchorsN > 0) {
+        if (typeof opts.anchors === "boolean") wantAnchors = opts.anchors;
+        else if (pack.scope === "anchors") wantAnchors = true;
+        else {
+            wantAnchors = false;
+            try { var rw2 = ipeRootWindow(); if (rw2 && typeof rw2.confirm === "function") wantAnchors = !!rw2.confirm("这个包里还带了 " + anchorsN + " 套角色锚点。\n分享来的画风包一般不要（那是别人卡的角色）；只有你自己备份的才要。\n\n要一起导入锚点吗？（取消 = 只导其他内容）"); } catch(e) {}
+        }
+    }
     var tpl = ipeGetBaseTemplates(), rul = ipeGetRulePresets(), sys = ipeGetSystemPromptPresets(), anc = ipeGetAnchorPresets();
     var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl");
     var r2 = ipeImgPackMergeList(rul, pack.rules, "rule");
     var r3 = ipeImgPackMergeList(sys, pack.systemPrompts, "sys", { matchIdFirst: true, fixedSlots: true });
-    var r4 = ipeImgPackMergeList(anc, pack.anchors, "anchor");
+    var r4 = wantAnchors ? ipeImgPackMergeList(anc, pack.anchors, "anchor") : { added: 0, replaced: 0, skipped: anchorsN };
     ipeSaveBaseTemplates(tpl); ipeSaveRulePresets(rul); ipeSaveSystemPromptPresets(sys); ipeSaveAnchorPresets(anc);
     if (guideChange) {
         ipeSetAnchorUsageGuide(guideIn === IPE_DEFAULT_ANCHOR_USAGE_GUIDE ? "" : guideIn);
@@ -4961,7 +4982,7 @@ function ipeImgPackImportText(txt, opts) {
 
     var sum = { templates: r1, rules: r2, systemPrompts: r3, anchors: r4, guide: guideChange };
     function fmt(label, r) { return (r.added || r.replaced) ? label + " +" + r.added + "/覆盖" + r.replaced : ""; }
-    var parts = [fmt("模板", r1), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : ""].filter(Boolean);
+    var parts = [fmt("模板", r1), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : "", (r4.skipped ? "角色锚点 " + r4.skipped + " 套已跳过" : "")].filter(Boolean);
     ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") : "包是空的或与现有内容完全一致，什么都没变", true);
     return sum;
 }
@@ -5534,6 +5555,8 @@ function bindAll() {
         var bA = q("#" + ids[0]), bC = q("#" + ids[1]), bI = q("#" + ids[2]), fi = q("#" + ids[3]);
         if (bA && !bA.dataset.ipeBound) { bA.dataset.ipeBound = "1"; bA.addEventListener("click", function(){ ipeImgPackExport("all"); }); }
         if (bC && !bC.dataset.ipeBound) { bC.dataset.ipeBound = "1"; bC.addEventListener("click", function(){ ipeImgPackExport("current"); }); }
+        var bAn = q("#" + ids[0].replace("pack-export", "pack-export-anchors"));
+        if (bAn && !bAn.dataset.ipeBound) { bAn.dataset.ipeBound = "1"; bAn.addEventListener("click", function(){ ipeImgPackExport("anchors"); }); }
         if (bI && fi && !bI.dataset.ipeBound) { bI.dataset.ipeBound = "1"; bI.addEventListener("click", function(){ try { fi.value = ""; fi.click(); } catch(e){} }); }
         if (fi && !fi.dataset.ipeBound) {
             fi.dataset.ipeBound = "1";

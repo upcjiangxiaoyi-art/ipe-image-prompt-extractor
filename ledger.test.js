@@ -575,7 +575,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.11") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.12.12") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -606,11 +606,15 @@ console.log("\n【30】 生图预设包：导出不带密钥，「只导出当�
     eq(all.templates.length, 2, "全部：两套模板都在");
     eq(all.rules.length, 2, "全部：两条规则都在");
     eq(all.anchorGuide, "我改过的规则", "带用户改过的通用锚点规则");
+    eq(all.anchors.length, 0, "预设包不带角色锚点（那是各人自己卡的）");
+    const ap = F("ipeImgPackBuild")("anchors");
+    eq(ap.scope, "anchors", "锚点包 scope=anchors"); eq(ap.anchors.length, 1, "锚点包只带锚点"); eq(ap.templates.length, 0, "锚点包不带模板");
     ok(JSON.stringify(all).indexOf("sk-SECRET") < 0 && JSON.stringify(all).indexOf("http://x") < 0, "不含 API 地址与密钥");
     const cur = F("ipeImgPackBuild")("current");
     eq(cur.templates.length, 1, "当前：只有一套模板"); eq(cur.templates[0].name, "暗色油画", "是选中的那套");
     eq(cur.rules.length, 1, "当前：只有一条规则"); eq(cur.rules[0].name, "GPT-image-2", "是选中的那条");
     eq(cur.systemPrompts.length, 1, "当前：系统提示只带选中的一槽");
+    eq(cur.anchors.length, 0, "当前包同样不带锚点");
 }
 
 console.log("\n【31】 导入：按名字合并，新名字追加、同名覆盖、别人的原有预设一个不少；系统提示按 id 对槽；裸数组当模板");
@@ -641,7 +645,13 @@ await (async () => {
     const sys = F("ipeGetSystemPromptPresets")();
     eq(sys.find(x => x.id === "sys_plot").value, "PLOT-NEW", "系统提示按 id 对槽覆盖");
     eq(sys.length, 2, "系统提示仍是两槽，对不上号的不硬塞");
-    ok(F("ipeGetAnchorPresets")().find(x => x.name === "苑无忧"), "锚点追加");
+    ok(F("ipeGetAnchorPresets")().find(x => x.name === "苑无忧"), "包里带锚点、confirm 同意 → 锚点追加");
+    // 不同意导锚点：其他照导，锚点跳过
+    const r0 = F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-image-pack", templates: [{ name: "只要模板", value: "T0" }], anchors: [{ name: "别人的角色", value: "npc" }] }), { anchors: false });
+    eq(r0.templates.added, 1, "模板照导"); eq(r0.anchors.skipped, 1, "锚点跳过 1 套");
+    ok(!F("ipeGetAnchorPresets")().find(x => x.name === "别人的角色"), "别人的角色没进来");
+    const r00 = F("ipeImgPackImportText")(JSON.stringify(F("ipeImgPackBuild")("anchors").anchors.length ? { _fmt: "ipe-image-pack", scope: "anchors", anchors: [{ name: "自备份", value: "me" }] } : {}));
+    ok(r00 && F("ipeGetAnchorPresets")().find(x => x.name === "自备份"), "锚点包（scope=anchors）不问直接导");
     eq(F("ipeGetAnchorUsageGuide")(), "对方的规则", "通用锚点规则替换");
     // 取消 = 什么都不动
     w.confirm = () => false;
