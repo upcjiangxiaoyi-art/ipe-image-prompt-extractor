@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.13.2";
+var IPE_VERSION = "2.13.3";
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -48,8 +48,7 @@ const DEFAULTS = {
     ledgerAutoOffReason: "",
     ledgerModeEnabled: false,      // 2.13.1 场景模式：与枢轨共用楼尾路由标记
     ledgerModeTag: "route, ipe_mode", // 新标记优先，兼容 2.13.0 的 <ipe_mode>
-    ledgerModesJson: "",           // [{name, preset(挂账规则预设 id), oneShot}]
-    ledgerSlotsByCardJson: "",     // 2.13.2 卡槽按角色卡记忆：{ "char:avatar.png": { normal: 预设id, nsfw: 预设id } }
+    ledgerPromptNsfwPresetsJson: "", activeLedgerPromptNsfw: "lpn_1",   // 2.13.3 NSFW 槽：自己的预设库，选哪个就是哪个
     ledgerModeManual: "",          // 手动指定：空 = 自动听标记；"normal" 或某个模式名 = 一直用它       // 2.12.4 自动挂账被插件自己关掉的原因：fail（连续失败）/ shrink（疑似事故）；人手动开回去就清空
     ledgerStream: true,            // 2.10.0 流式接收：思考模型边想边流，中转不会因空闲把连接掐断
     ledgerIdleTimeout: 300,        // 秒。「连续多少秒一个字节都没收到」才判死；0 = 永不
@@ -1372,7 +1371,7 @@ async function ipeLedgerRun(targetIdx, silent) {
 
         ipeLedgerCommit(body, msgFloor);
         ipeLedgerModeAfterRun(usedMode);
-        ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜模式 " + ipeLedgerLastMode : "")
+        ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜" + ipeLedgerLastMode + " 槽" + (ipeLedgerNsfwFellBack ? "（内容为空，已用 Normal 槽）" : "") : "")
             + (ipeLedgerReportTruncated ? "（report 层已截断）" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
@@ -1962,17 +1961,11 @@ function ipeLedgerWrapHint() {
 var IPE_LEDGER_MODE_META = "ipe_ledger_mode_v1";
 var ipeLedgerLastMode = "normal";     // 本次挂账实际用的模式，给状态行报
 
-function ipeLedgerModes() {
-    var l = ipeSafeJsonParse(cfg().ledgerModesJson, null);
-    if (!Array.isArray(l)) return [];
-    var out = [];
-    for (var i = 0; i < l.length; i++) {
-        var x = l[i]; if (!x || typeof x !== "object") continue;
-        out.push({ name: String(x.name || "").trim().toLowerCase(), preset: String(x.preset || ""), oneShot: x.oneShot === true });
-    }
-    return out;
-}
-function ipeLedgerModesSave(list) { save("ledgerModesJson", JSON.stringify(list || [])); }
+/* 只有两个槽：normal / nsfw。路由的是槽，不是预设。
+   Normal 槽 = 「挂账规则」面板（预设库 LP，选哪个就是哪个）；
+   NSFW 槽  = 「NSFW 槽 · 挂账规则」面板（自己的预设库 LPN，选哪个就是哪个）。
+   一次只可能用一个槽，标记二选一。 */
+var IPE_LEDGER_KNOWN_MODES = ["nsfw"];
 function ipeLedgerModeTagNames() {
     var raw = String(cfg().ledgerModeTag || "route, ipe_mode");
     var parts = raw.split(/[,\s，、]+/), out = [], seen = {};
@@ -2025,9 +2018,8 @@ function ipeLedgerModeSet(mode, floor) {
     } catch(e) {}
 }
 function ipeLedgerModeItem(name) {
-    var l = ipeLedgerModes();
-    for (var i = 0; i < l.length; i++) if (l[i].name === name) return l[i];
-    return null;
+    var n = String(name || "").toLowerCase();
+    return IPE_LEDGER_KNOWN_MODES.indexOf(n) >= 0 ? { name: n } : null;
 }
 /* 当前生效模式：手动优先，其次自动状态；关着就 normal */
 function ipeLedgerModeEffective() {
@@ -2036,73 +2028,15 @@ function ipeLedgerModeEffective() {
     if (man) return man;
     return ipeLedgerModeState().mode || "normal";
 }
-/* 模式 → 挂账规则文本；normal 或没映射 → 当前选中的预设 */
-/* ---- 卡槽按角色卡记忆（2.13.2） ----
-   每张卡的日常挂账不一样，NSFW 也不一定相似。Normal 槽和各模式槽按角色卡各记各的，
-   群聊按群记；没单独设过的卡跟随全局（Normal 跟随「规则预设」当前选中，模式跟随模式行里选的）。
-   于是「规则预设」下拉回归本职：只决定你现在在编辑哪套文本。 */
-function ipeLedgerCardKey() {
-    try {
-        var c = ctx();
-        if (c.groupId) return "group:" + String(c.groupId);
-        var ch = (Array.isArray(c.characters) && c.characterId != null && c.characterId !== "") ? c.characters[c.characterId] : null;
-        if (ch && ch.avatar) return "char:" + String(ch.avatar);
-        if (ch && ch.name) return "char:" + String(ch.name);
-        if (c.characterId != null && c.characterId !== "") return "char:" + String(c.characterId);
-    } catch(e) {}
-    return "";
-}
-function ipeLedgerCardName() {
-    try {
-        var c = ctx();
-        if (c.groupId) return "群聊";
-        var ch = (Array.isArray(c.characters) && c.characterId != null) ? c.characters[c.characterId] : null;
-        return (ch && ch.name) || c.name2 || "当前卡";
-    } catch(e) { return "当前卡"; }
-}
-function ipeLedgerSlotsAll() {
-    var o = ipeSafeJsonParse(cfg().ledgerSlotsByCardJson, null);
-    return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
-}
-function ipeLedgerCardSlots() {
-    var k = ipeLedgerCardKey(); if (!k) return {};
-    var v = ipeLedgerSlotsAll()[k];
-    return (v && typeof v === "object") ? v : {};
-}
-function ipeLedgerCardSlotSet(slot, presetId) {
-    var k = ipeLedgerCardKey(); if (!k) return false;
-    var all = ipeLedgerSlotsAll();
-    var v = (all[k] && typeof all[k] === "object") ? all[k] : {};
-    if (presetId) v[String(slot)] = String(presetId); else delete v[String(slot)];
-    if (Object.keys(v).length) all[k] = v; else delete all[k];
-    save("ledgerSlotsByCardJson", JSON.stringify(all));
-    return true;
-}
-function ipeLedgerPromptItemById(id) {
-    if (!id) return null;
-    var list = ipePresetList.apply(null, LP);
-    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
-    return null;
-}
-/* 某个槽此刻实际用哪套：本卡单独选的 > 全局（normal=下拉当前选中；模式=模式行里选的） */
-function ipeLedgerSlotResolve(slot) {
-    var m = String(slot || "normal").toLowerCase() || "normal";
-    var own = ipeLedgerPromptItemById(ipeLedgerCardSlots()[m]);
-    if (own) return { item: own, source: "card" };
-    if (m === "normal") return { item: ipePresetItem.apply(null, LP), source: "global" };
-    var it = ipeLedgerModeItem(m);
-    var g = it ? ipeLedgerPromptItemById(it.preset) : null;
-    return g ? { item: g, source: "global" } : { item: null, source: "none" };
-}
-
+var ipeLedgerNsfwFellBack = false;   // NSFW 槽选的预设是空的 → 这一轮回落到 Normal，状态行提示
 function ipeLedgerPromptValueForMode(mode) {
-    var r = ipeLedgerSlotResolve(mode);
-    if (r.item && r.source === "card") return String(r.item.value || "") || ipeLedgerPromptValue();
-    if (!mode || mode === "normal") return ipeLedgerPromptValue();
-    var it = ipeLedgerModeItem(mode);
-    if (!it || !it.preset) return ipeLedgerPromptValue();
-    var list = ipePresetList.apply(null, LP);
-    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === it.preset) return String(list[i].value || "") || ipeLedgerPromptValue();
+    var m = String(mode || "normal").toLowerCase();
+    ipeLedgerNsfwFellBack = false;
+    if (m === "nsfw") {
+        var v = String(ipePresetItem.apply(null, LPN).value || "").trim();
+        if (v) return v;
+        ipeLedgerNsfwFellBack = true;
+    }
     return ipeLedgerPromptValue();
 }
 /* 一楼正文进来：读标记、更新状态。返回本次生效的模式。 */
@@ -2116,20 +2050,11 @@ function ipeLedgerModeIngest(text, floor) {
     return ipeLedgerLastMode;
 }
 /* 一次挂账跑成：一次性模式自动回普通（只动自动状态，不动手动指定） */
-function ipeLedgerModeAfterRun(usedMode) {
-    if (cfg().ledgerModeEnabled !== true) return;
-    if (String(cfg().ledgerModeManual || "").trim()) return;
-    var mode = String(usedMode || "").trim().toLowerCase();
-    var st = ipeLedgerModeState();
-    var it = ipeLedgerModeItem(mode);
-    if (it && it.oneShot && st.mode === mode) ipeLedgerModeSet("normal", st.floor);
-}
-/* 给主 AI 的那几句，按配好的模式名生成 */
+function ipeLedgerModeAfterRun(usedMode) { /* 2.13.3 起没有一次性模式；保留签名给各调用点 */ }
 function ipeLedgerModeSnippet() {
     var t = ipeLedgerModeTagName();
-    var names = ["normal"].concat(ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean));
-    var opts = names.map(function(n){ return "<" + t + ">" + n + "</" + t + ">"; }).join("、");
-    return "每轮正文的最后一行，预测下一轮回复应使用的预设模式，并单独输出一个标记：" + opts + "。根据当前情节走向判断：下一轮即将进入或仍处于对应特殊场景时写相应模式；下一轮应回到常规场景时写 normal。必须提前一轮切换，不要等特殊场景已经写出后才标记。标记之外不要解释。";
+    var opts = ["normal"].concat(IPE_LEDGER_KNOWN_MODES).map(function(n){ return "<" + t + ">" + n + "</" + t + ">"; }).join("、");
+    return "每轮正文的最后一行，预测下一轮回复应使用的预设模式，并单独输出一个标记：" + opts + "。根据当前情节走向判断：下一轮即将进入或仍处于亲密场景时写 nsfw；下一轮应回到常规场景时写 normal。必须提前一轮切换，不要等场景已经写出后才标记。标记之外不要解释。";
 }
 
 function ipeLedgerSystemText() {
@@ -2202,7 +2127,9 @@ function ipePresetDelete(jsonKey, activeKey, seedId, seedName, seedValue) {
 
 var LP = ["ledgerPromptPresetsJson","activeLedgerPrompt","lp_1","飞地·大事件挂账", IPE_LEDGER_PROMPT_DEFAULT];
 var LN = ["ledgerNotePresetsJson","activeLedgerNote","ln_1","本卡要点", IPE_LEDGER_NOTE_DEFAULT];
+var LPN = ["ledgerPromptNsfwPresetsJson","activeLedgerPromptNsfw","lpn_1","NSFW 挂账规则", ""];   // NSFW 槽自己的库
 function ipeLedgerPromptValue(){ return ipePresetItem.apply(null, LP).value || IPE_LEDGER_PROMPT_DEFAULT; }
+function ipeLedgerPromptNsfwValue(){ return ipePresetItem.apply(null, LPN).value || ""; }
 function ipeLedgerNoteValue(){ return ipePresetItem.apply(null, LN).value || ""; }
 
 /* ---- 状态行 ---- */
@@ -2214,71 +2141,28 @@ function ipeLedgerStatus(t, color) {
 
 /* ---- 版本信息（取代 v1 的账龄栏）---- */
 /* 场景模式 UI：面板 ipe- / 抽屉 iped- 同一套 */
-function ipeLedgerModeRowsHTML(prefix, drawer) {
-    var modes = ipeLedgerModes();
-    var lp = ipePresetList.apply(null, LP);
-    var h = "";
-    if (!modes.length) return '<div class="ipe-hint">还没有模式。点「新增模式」，起个名（比如 nsfw、aftercare），选一套挂账规则预设。</div>';
-    for (var i = 0; i < modes.length; i++) {
-        var m = modes[i];
-        var opts = '<option value="">（未选预设）</option>';
-        for (var j = 0; j < lp.length; j++) opts += '<option value="' + esc(lp[j].id) + '"' + (lp[j].id === m.preset ? ' selected' : '') + '>' + esc(lp[j].name || lp[j].id) + '</option>';
-        var cls = drawer ? ' class="text_pole"' : '';
-        h += '<div class="ipe-mode-row" data-i="' + i + '" style="display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:8px;border:1px solid rgba(128,128,128,.25);border-radius:10px">'
-           + '<div style="display:flex;gap:6px;align-items:center"><input type="text" class="ipe-mode-name"' + cls + ' value="' + esc(m.name) + '" placeholder="模式名，如 nsfw" style="flex:1;min-width:0">'
-           + (drawer ? '<input type="button" class="ipe-mode-del menu_button" value="删">' : '<button type="button" class="ipe-mode-del ipe-btn" style="flex:none;padding:4px 10px">删</button>') + '</div>'
-           + '<select class="ipe-mode-preset"' + cls + '>' + opts + '</select>'
-           + '<label style="display:flex;flex-direction:row;align-items:center;gap:6px;font-size:12px"><input type="checkbox" class="ipe-mode-oneshot"' + (m.oneShot ? ' checked' : '') + '> 用完一轮自动回普通（事后承接那种）</label>'
-           + '</div>';
-    }
-    return h;
-}
-function ipeLedgerSlotsHTML(prefix, drawer) {
-    var key = ipeLedgerCardKey();
-    var lp = ipePresetList.apply(null, LP);
-    var cls = drawer ? ' class="text_pole"' : '';
-    var box = '<div class="ipe-slots" style="margin-top:8px;padding:8px;border:1px solid rgba(128,128,128,.25);border-radius:10px">'
-            + '<div style="font-weight:600;font-size:12px;margin-bottom:4px">🎴 本卡卡槽 · ' + esc(ipeLedgerCardName()) + '</div>';
-    if (!key) return box + '<div class="ipe-hint">没识别到角色卡，卡槽不可用；全局设置照常生效。</div></div>';
-    var slots = ["normal"].concat(ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean));
-    var own = ipeLedgerCardSlots();
-    slots.forEach(function(sl){
-        var r = ipeLedgerSlotResolve(sl);
-        var globalName = sl === "normal" ? ((ipePresetItem.apply(null, LP) || {}).name || "?") : ((ipeLedgerModeItem(sl) && ipeLedgerPromptItemById(ipeLedgerModeItem(sl).preset) || {}).name || "未配置");
-        var opts = '<option value="">跟随全局（' + esc(globalName) + '）</option>';
-        for (var j = 0; j < lp.length; j++) opts += '<option value="' + esc(lp[j].id) + '"' + (own[sl] === lp[j].id ? ' selected' : '') + '>' + esc(lp[j].name || lp[j].id) + '</option>';
-        box += '<label style="margin-top:4px">' + (sl === "normal" ? "Normal 槽" : esc(sl) + " 槽") + (r.source === "card" ? "（本卡单独设）" : "") + '<select class="ipe-slot-sel"' + cls + ' data-slot="' + esc(sl) + '">' + opts + '</select></label>';
-    });
-    box += '<div class="ipe-hint">每张卡各记各的：这张卡 Normal 用日常、nsfw 用现代版，另一张卡可以完全不同。跟随全局 = Normal 用上面「规则预设」当前选中的，模式用模式行里选的。</div></div>';
-    return box;
-}
 function ipeLedgerModeRefresh() {
     var on = cfg().ledgerModeEnabled === true;
     var doc = ipeRootDocument();
     ["ipe","iped"].forEach(function(pre){
-        var drawer = pre === "iped";
-        var slotsEl = q("#" + pre + "-ledger-slots");
-        if (slotsEl && !slotsEl.contains(doc.activeElement)) slotsEl.innerHTML = ipeLedgerSlotsHTML(pre, drawer);
         var cb = q("#" + pre + "-ledger-mode-on"); if (cb) cb.checked = on;
         var tg = q("#" + pre + "-ledger-mode-tag"); if (tg && doc.activeElement !== tg) tg.value = ipeLedgerModeTagNames().join(", ");
         var sel = q("#" + pre + "-ledger-mode-manual");
         if (sel) {
-            var names = ipeLedgerModes().map(function(m){ return m.name; }).filter(Boolean);
-            var h = '<option value="">自动（听标记）</option><option value="normal">normal（普通）</option>';
-            names.forEach(function(n){ h += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
-            sel.innerHTML = h;
+            sel.innerHTML = '<option value="">自动（听标记）</option><option value="normal">锁定 normal</option><option value="nsfw">锁定 nsfw</option>';
             sel.value = String(cfg().ledgerModeManual || "");
         }
-        var rows = q("#" + pre + "-ledger-mode-rows");
-        if (rows && !rows.contains(doc.activeElement)) rows.innerHTML = ipeLedgerModeRowsHTML(pre, drawer);
+        var fold = q("#" + pre + "-ledger-nsfw-fold"); if (fold) fold.style.display = on ? "" : "none";   // 关着就藏
         var sn = q("#" + pre + "-ledger-mode-snippet"); if (sn) sn.value = ipeLedgerModeSnippet();
         var now = q("#" + pre + "-ledger-mode-now");
         if (now) {
-            var eff = ipeLedgerModeEffective(); var rr = ipeLedgerSlotResolve(eff);
-            var using = rr.item ? ("「" + (rr.item.name || rr.item.id) + "」" + (rr.source === "card" ? "（本卡）" : "（全局）")) : "（该槽没配预设，回落到 Normal）";
+            var eff = ipeLedgerModeEffective();
+            var normalName = (ipePresetItem.apply(null, LP) || {}).name || "?";
+            var nsfwItem = ipePresetItem.apply(null, LPN) || {};
+            var nsfwName = (nsfwItem.name || "?") + (String(nsfwItem.value || "").trim() ? "" : "（内容为空，会回落到 Normal）");
             now.textContent = on
-                ? ("当前生效：模式 " + eff + (String(cfg().ledgerModeManual || "").trim() ? "（手动指定）" : "（自动，本聊天记忆）") + "，实际用 " + using)
-                : ("场景模式未启用。本卡 Normal 槽实际用 " + using + "。");
+                ? ("当前生效：" + eff + (String(cfg().ledgerModeManual || "").trim() ? "（手动锁定）" : "（自动，本聊天记忆）") + "　｜　Normal 槽 → " + normalName + "　NSFW 槽 → " + nsfwName)
+                : "场景模式未启用：一直用 Normal 槽 → " + normalName;
         }
     });
 }
@@ -2287,7 +2171,7 @@ function ipeLedgerModeBind() {
         var cb = q("#" + pre + "-ledger-mode-on");
         if (cb && !cb.__ipeBound) { cb.__ipeBound = true; cb.addEventListener("change", function(){
             save("ledgerModeEnabled", !!cb.checked); ipeLedgerRefreshBotEditors();
-            ipeLedgerStatus(cb.checked ? "场景模式已启用：正文末尾的标记会决定用哪套挂账规则" : "场景模式已关：一直用当前选中的挂账规则", "#6ec577");
+            ipeLedgerStatus(cb.checked ? "场景模式已启用：楼尾标记决定用 Normal 槽还是 NSFW 槽" : "场景模式已关：一直用 Normal 槽", "#6ec577");
         }); }
         var tg = q("#" + pre + "-ledger-mode-tag");
         if (tg && !tg.__ipeBound) { tg.__ipeBound = true; tg.addEventListener("change", function(){
@@ -2302,44 +2186,8 @@ function ipeLedgerModeBind() {
         var sel = q("#" + pre + "-ledger-mode-manual");
         if (sel && !sel.__ipeBound) { sel.__ipeBound = true; sel.addEventListener("change", function(){
             save("ledgerModeManual", String(sel.value || "")); ipeLedgerRefreshBotEditors();
-            ipeLedgerStatus(sel.value ? "已手动指定模式 " + sel.value + "，改回「自动」才会听标记" : "已改回自动，听正文标记", "#6ec577");
+            ipeLedgerStatus(sel.value ? "已锁定 " + sel.value + " 槽，改回「自动」才会听标记" : "已改回自动，听楼尾标记", "#6ec577");
         }); }
-        var add = q("#" + pre + "-ledger-mode-add");
-        if (add && !add.__ipeBound) { add.__ipeBound = true; add.addEventListener("click", function(){
-            var l = ipeLedgerModes(); var lp = ipePresetList.apply(null, LP);
-            l.push({ name: "", preset: (lp[0] && lp[0].id) || "", oneShot: false });
-            ipeLedgerModesSave(l); ipeLedgerRefreshBotEditors();
-        }); }
-        var slotsEl = q("#" + pre + "-ledger-slots");
-        if (slotsEl && !slotsEl.__ipeBound) { slotsEl.__ipeBound = true;
-            slotsEl.addEventListener("change", function(ev){
-                var t = ev.target; if (!t || !t.classList || !t.classList.contains("ipe-slot-sel")) return;
-                var sl = String(t.getAttribute("data-slot") || "normal");
-                ipeLedgerCardSlotSet(sl, String(t.value || ""));
-                ipeLedgerRefreshBotEditors();
-                var r = ipeLedgerSlotResolve(sl);
-                ipeLedgerStatus("本卡 " + (sl === "normal" ? "Normal" : sl) + " 槽 → " + (r.item ? r.item.name : "未配置") + (t.value ? "（只对这张卡）" : "（跟随全局）"), "#6ec577");
-            });
-        }
-        var rows = q("#" + pre + "-ledger-mode-rows");
-        if (rows && !rows.__ipeBound) { rows.__ipeBound = true;
-            function readRows() {
-                var out = [];
-                var rs = rows.querySelectorAll(".ipe-mode-row");
-                for (var i = 0; i < rs.length; i++) {
-                    var nm = rs[i].querySelector(".ipe-mode-name"), ps = rs[i].querySelector(".ipe-mode-preset"), os = rs[i].querySelector(".ipe-mode-oneshot");
-                    out.push({ name: String(nm && nm.value || "").trim().toLowerCase(), preset: String(ps && ps.value || ""), oneShot: !!(os && os.checked) });
-                }
-                return out;
-            }
-            rows.addEventListener("change", function(){ ipeLedgerModesSave(readRows()); ipeLedgerRefreshBotEditors(); });
-            rows.addEventListener("click", function(ev){
-                var b = ev.target && ev.target.closest ? ev.target.closest(".ipe-mode-del") : null; if (!b) return;
-                var row = b.closest(".ipe-mode-row"); var i = row ? Number(row.getAttribute("data-i")) : -1;
-                var l = ipeLedgerModes(); if (i >= 0 && i < l.length) l.splice(i, 1);
-                ipeLedgerModesSave(l); ipeLedgerRefreshBotEditors();
-            });
-        }
     });
 }
 
@@ -2409,6 +2257,7 @@ function ipeLedgerRefreshBotEditors() {
     ipeLedgerUpgradePrompts();
     var pv = ipePresetItem.apply(null, LP);
     var nv = ipePresetItem.apply(null, LN);
+    var pnv = ipePresetItem.apply(null, LPN);
     var apiList = ipeGetApiProfiles();
     var apiId = cfg().ledgerApiProfile || "";
     var doc = ipeRootDocument();
@@ -2426,8 +2275,12 @@ function ipeLedgerRefreshBotEditors() {
     ipeFillSelect("iped-ledger-prompt-slot", ipePresetList.apply(null, LP), pv.id);
     ipeFillSelect("ipe-ledger-note-slot",    ipePresetList.apply(null, LN), nv.id);
     ipeFillSelect("iped-ledger-note-slot",   ipePresetList.apply(null, LN), nv.id);
+    ipeFillSelect("ipe-ledger-prompt-n-slot",  ipePresetList.apply(null, LPN), pnv.id);
+    ipeFillSelect("iped-ledger-prompt-n-slot", ipePresetList.apply(null, LPN), pnv.id);
 
-    [["ipe-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT], ["iped-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT],
+    [["ipe-ledger-prompt-n", pnv.value || ""], ["iped-ledger-prompt-n", pnv.value || ""],
+     ["ipe-ledger-prompt-n-name", pnv.name || ""], ["iped-ledger-prompt-n-name", pnv.name || ""],
+     ["ipe-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT], ["iped-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT],
      ["ipe-ledger-prompt-name", pv.name || ""], ["iped-ledger-prompt-name", pv.name || ""],
      ["ipe-ledger-note", nv.value || ""], ["iped-ledger-note", nv.value || ""],
      ["ipe-ledger-note-name", nv.name || ""], ["iped-ledger-note-name", nv.name || ""],
@@ -4877,16 +4730,22 @@ function createPanel() {
             '<div class="ipe-hint">思考 token 和正文共用这个上限。中转给的默认值太小时，思考模型会把额度想光、正文交白卷（状态行会报 finish_reason=length）。填 16000 之类的大数压过它。</div>'+
             '<div id="ipe-ledger-size" class="ipe-hint" style="margin-top:6px"></div>'+
         '</div></details>'+
-        '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（按正文标记自动换挂账规则）</summary><div class="ipe-fold-body">'+
-            '<div style="color:#888;font-size:12px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-mode-on"> 启用场景模式</label></div>'+
-            '<div class="ipe-hint">与枢轨共用楼尾标记，比如 &lt;route&gt;nsfw&lt;/route&gt;。标记预测下一轮应使用的模式；小海螺据此换挂账规则，枢轨据此换整套预设。默认也兼容旧 &lt;ipe_mode&gt;。正文里引用标签不会误触，标记发给副 AI 前会剥掉。</div>'+
+        '<details class="ipe-fold" id="ipe-ledger-nsfw-fold" style="display:none" open><summary>\uD83D\uDD1E NSFW 槽 · 挂账规则（标记为 nsfw 时用这套）</summary><div class="ipe-fold-body">'+
+        '<label>规则预设<select id="ipe-ledger-prompt-n-slot"></select></label>'+
+        '<label>预设名称<input type="text" id="ipe-ledger-prompt-n-name" placeholder="例：现代 NSFW / 古代 NSFW"></label>'+
+        '<div class="ipe-preview-actions" style="margin-top:2px">'+
+            '<button id="ipe-ledger-prompt-n-add" class="ipe-btn" type="button">新增</button>'+
+            '<button id="ipe-ledger-prompt-n-del" class="ipe-btn" type="button">删除当前</button>'+
+        '</div>'+
+        '<textarea id="ipe-ledger-prompt-n" rows="7" placeholder="亲密场景下副 AI 该怎么记账。留空则回落到 Normal 槽。"></textarea>'+
+        '<div class="ipe-hint">这个槽有自己的预设库，跟上面 Normal 槽互不混。一次只用一个槽：楼尾标记 nsfw 用这套，normal 用上面那套。</div>'+
+        '</div></details>'+
+        '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（楼尾标记二选一：Normal 槽 / NSFW 槽）</summary><div class="ipe-fold-body">'+
+            '<div style="color:#888;font-size:12px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-mode-on"> 启用场景模式（开了才出现 NSFW 槽）</label></div>'+
+            '<div class="ipe-hint">与枢轨共用楼尾标记 &lt;route&gt;nsfw&lt;/route&gt; / &lt;route&gt;normal&lt;/route&gt;。小海螺据此在两个槽之间二选一，枢轨据此换整套预设。没标记沿用上一楼。默认也兼容旧 &lt;ipe_mode&gt;，正文里引用标签不会误触，标记发给副 AI 前会剥掉。</div>'+
             '<label>监听标签名（逗号分隔）<input type="text" id="ipe-ledger-mode-tag" placeholder="route, ipe_mode"></label>'+
-            '<label>手动指定当前模式<select id="ipe-ledger-mode-manual"></select></label>'+
-            '<div class="ipe-hint">「自动」= 听标记。选了具体模式就一直用它，直到改回自动。</div>'+
-            '<div id="ipe-ledger-slots"></div>'+
-            '<div id="ipe-ledger-mode-rows"></div>'+
-            '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-ledger-mode-add" class="ipe-btn" type="button">新增模式</button></div>'+
-            '<div class="ipe-hint">每个模式：名字、用哪套挂账规则预设、是否「用完一轮回普通」（事后承接那种一次性模式勾这个）。</div>'+
+            '<label>手动锁定<select id="ipe-ledger-mode-manual"></select></label>'+
+            '<div class="ipe-hint">「自动」= 听标记。锁定某个槽就一直用它，模型判断错了拨这个纠正，改回自动继续听。</div>'+
             '<label style="margin-top:8px">给主 AI 的那几句（复制进常驻区）</label>'+
             '<textarea id="ipe-ledger-mode-snippet" rows="4" readonly></textarea>'+
             '<div id="ipe-ledger-mode-now" class="ipe-hint"></div>'+
@@ -5069,14 +4928,18 @@ function createDrawer() {
     h += '<small style="color:#888">思考与正文共用。中转默认值太小会让思考模型交白卷（finish_reason=length），填 16000 之类压过它。</small>';
     h += '<div id="iped-ledger-size" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
-    h += '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（按正文标记自动换挂账规则）</summary><div class="ipe-fold-body">';
-    h += '<div style="margin-bottom:6px"><label class="ipe-switch-left"><input type="checkbox" id="iped-ledger-mode-on"> 启用场景模式</label></div>';
-    h += '<small style="color:#888">与枢轨共用楼尾 &lt;route&gt;xxx&lt;/route&gt;，预测下一轮模式；默认兼容旧 &lt;ipe_mode&gt;，正文引用不误触。</small>';
+    h += '<details class="ipe-fold" id="iped-ledger-nsfw-fold" style="display:none" open><summary>\uD83D\uDD1E NSFW 槽 · 挂账规则（标记为 nsfw 时用这套）</summary><div class="ipe-fold-body">';
+    h += '<label>规则预设</label><select id="iped-ledger-prompt-n-slot" class="text_pole"></select>';
+    h += '<label>预设名称</label><input type="text" id="iped-ledger-prompt-n-name" class="text_pole" placeholder="例：现代 NSFW / 古代 NSFW">';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-ledger-prompt-n-add" class="menu_button" value="新增"><input type="button" id="iped-ledger-prompt-n-del" class="menu_button" value="删除当前"></div>';
+    h += '<textarea id="iped-ledger-prompt-n" class="text_pole" rows="6" placeholder="亲密场景下副 AI 该怎么记账。留空则回落到 Normal 槽。"></textarea>';
+    h += '<small style="color:#888">自己的预设库，跟 Normal 槽互不混；楼尾标记 nsfw 用这套。</small>';
+    h += '</div></details>';
+    h += '<details class="ipe-fold"><summary>\uD83C\uDFAD 场景模式（楼尾标记二选一：Normal 槽 / NSFW 槽）</summary><div class="ipe-fold-body">';
+    h += '<div style="margin-bottom:6px"><label class="ipe-switch-left"><input type="checkbox" id="iped-ledger-mode-on"> 启用场景模式（开了才出现 NSFW 槽）</label></div>';
+    h += '<small style="color:#888">与枢轨共用楼尾 &lt;route&gt;nsfw&lt;/route&gt; / &lt;route&gt;normal&lt;/route&gt;，两个槽二选一；没标记沿用；兼容旧 &lt;ipe_mode&gt;。</small>';
     h += '<label>监听标签名（逗号分隔）</label><input type="text" id="iped-ledger-mode-tag" class="text_pole" placeholder="route, ipe_mode">';
-    h += '<label>手动指定当前模式</label><select id="iped-ledger-mode-manual" class="text_pole"></select>';
-    h += '<div id="iped-ledger-slots"></div>';
-    h += '<div id="iped-ledger-mode-rows"></div>';
-    h += '<div style="margin-top:6px"><input type="button" id="iped-ledger-mode-add" class="menu_button" value="新增模式"></div>';
+    h += '<label>手动锁定</label><select id="iped-ledger-mode-manual" class="text_pole"></select>';
     h += '<label>给主 AI 的那几句（复制进常驻区）</label><textarea id="iped-ledger-mode-snippet" class="text_pole" rows="4" readonly></textarea>';
     h += '<div id="iped-ledger-mode-now" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
@@ -6204,6 +6067,7 @@ function bindAll() {
 
     // 两套预设：值 / 名称 / 新增 / 删除
     [["ipe-ledger-prompt", LP], ["iped-ledger-prompt", LP],
+     ["ipe-ledger-prompt-n", LPN], ["iped-ledger-prompt-n", LPN],
      ["ipe-ledger-note", LN],   ["iped-ledger-note", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("input", function(){
@@ -6214,6 +6078,7 @@ function bindAll() {
         });
     });
     [["ipe-ledger-prompt-name", LP], ["iped-ledger-prompt-name", LP],
+     ["ipe-ledger-prompt-n-name", LPN], ["iped-ledger-prompt-n-name", LPN],
      ["ipe-ledger-note-name", LN],   ["iped-ledger-note-name", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("input", function(){
@@ -6222,6 +6087,7 @@ function bindAll() {
         });
     });
     [["ipe-ledger-prompt-slot", LP], ["iped-ledger-prompt-slot", LP],
+     ["ipe-ledger-prompt-n-slot", LPN], ["iped-ledger-prompt-n-slot", LPN],
      ["ipe-ledger-note-slot", LN],   ["iped-ledger-note-slot", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("change", function(){
@@ -6230,6 +6096,7 @@ function bindAll() {
         });
     });
     [["ipe-ledger-prompt-add", LP, "lp"], ["iped-ledger-prompt-add", LP, "lp"],
+     ["ipe-ledger-prompt-n-add", LPN, "lpn"], ["iped-ledger-prompt-n-add", LPN, "lpn"],
      ["ipe-ledger-note-add", LN, "ln"],   ["iped-ledger-note-add", LN, "ln"]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("click", function(){
@@ -6239,6 +6106,7 @@ function bindAll() {
         });
     });
     [["ipe-ledger-prompt-del", LP], ["iped-ledger-prompt-del", LP],
+     ["ipe-ledger-prompt-n-del", LPN], ["iped-ledger-prompt-n-del", LPN],
      ["ipe-ledger-note-del", LN],   ["iped-ledger-note-del", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("click", function(){

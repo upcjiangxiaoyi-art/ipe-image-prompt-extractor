@@ -578,7 +578,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.2") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.3") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -785,128 +785,79 @@ await (async () => {
     ok(st.style.width.indexOf("280px") >= 0, "桌面栈宽 280", st.style.width);
 })();
 
-console.log("\n【35】 场景模式路由：与枢轨共用楼尾标记、前瞻语义、一次性模式采用后才回普通");
+console.log("\n【35】 两个槽：Normal 槽 / NSFW 槽各自的库，楼尾标记二选一；没标记沿用；锁定优先；关着不动；标记不喂副 AI");
 await (async () => {
     const { w, tavern, F } = boot(12);
     const st = withApi(tavern, F, "gpt-4.1");
-    st.ledgerPromptPresetsJson = JSON.stringify([
-        { id: "lp_1", name: "普通", value: "RULE-NORMAL 记日常" },
-        { id: "lp_2", name: "亲密", value: "RULE-A 记身体状态" },
-        { id: "lp_3", name: "事后", value: "RULE-B 承接一轮" }]);
+    st.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp_1", name: "日常烟火", value: "RULE-DAILY" }, { id: "lp_2", name: "大剧情", value: "RULE-EPIC" }]);
     st.activeLedgerPrompt = "lp_1";
-    st.ledgerModesJson = JSON.stringify([{ name: "hot", preset: "lp_2", oneShot: false }, { name: "after", preset: "lp_3", oneShot: true }]);
+    st.ledgerPromptNsfwPresetsJson = JSON.stringify([{ id: "lpn_1", name: "现代NSFW", value: "RULE-MODERN-N" }, { id: "lpn_2", name: "古代NSFW", value: "RULE-ANCIENT-N" }]);
+    st.activeLedgerPromptNsfw = "lpn_2";
     const P = F("ipeLedgerReadModeMarker"), S = F("ipeLedgerStripModeTag");
-    eq(P("正文……\n<route>hot</route>"), "hot", "默认读取与枢轨相同的 route 标记");
-    eq(P("正文……\n<IPE_MODE> HOT </IPE_MODE>"), "hot", "兼容旧 ipe_mode，大小写不敏感");
-    eq(P("正文引用 <route>hot</route> 作为例子，后面还有正文。"), "", "正文中引用标签不误切，只认楼尾");
-    eq(P("正文\n<route>hot</ipe_mode>"), "", "开闭标签不一致不认");
-    eq(P("正文\n<ipe_mode>hot</ipe_mode>\n<route>after</route>"), "after", "楼尾多个标记取最后一个");
-    eq(P("没有标记"), "", "没标记返回空");
-    eq(S("正文。\n<route>hot</route>"), "正文。", "剥掉楼尾标记");
-    eq(S("正文引用 <route>hot</route> 作为例子。"), "正文引用 <route>hot</route> 作为例子。", "正文引用不从副 AI 输入里误删");
-    // 关着：永远普通
+    eq(P("正文……\n<route>nsfw</route>"), "nsfw", "默认读取与枢轨相同的 route 标记");
+    eq(P("正文……\n<IPE_MODE> NSFW </IPE_MODE>"), "nsfw", "兼容旧 ipe_mode，大小写不敏感");
+    eq(P("正文引用 <route>nsfw</route> 作为例子，后面还有正文。"), "", "正文中引用标签不误切，只认楼尾");
+    eq(S("正文。\n<route>nsfw</route>"), "正文。", "剥掉楼尾标记");
     let cap = {};
     const okStream = () => ({ ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>账本内容够长够长够长够长够长够长够长。</ledger>"}}]}\n']) });
     w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return okStream(); };
-    tavern.chat[9].mes = "第10层正文。\n<route>hot</route>";
+    tavern.chat[9].mes = "第10层正文。\n<route>nsfw</route>";
     await F("ipeLedgerRun")(9, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "场景模式关着：用当前选中的普通规则");
-    // 开：读标记切 hot
+    ok(cap.body.messages[0].content.indexOf("RULE-DAILY") === 0, "场景模式关着：一直用 Normal 槽");
     st.ledgerModeEnabled = true;
     await F("ipeLedgerRun")(9, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "读到 hot → 用亲密规则", cap.body.messages[0].content.slice(0, 30));
+    ok(cap.body.messages[0].content.indexOf("RULE-ANCIENT-N") === 0, "读到 nsfw → 用 NSFW 槽选中的古代NSFW", cap.body.messages[0].content.slice(0, 30));
     ok(cap.body.messages[1].content.indexOf("<route>") < 0, "标记不喂给副 AI");
-    eq(F("ipeLedgerModeState")().mode, "hot", "状态记在本聊天");
-    // 下一楼没标记：沿用
+    eq(F("ipeLedgerModeState")().mode, "nsfw", "状态记在本聊天");
+    st.activeLedgerPromptNsfw = "lpn_1";
     tavern.chat[11].mes = "第12层正文，没写标记，够长够长够长。";
     await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "没标记 → 沿用 hot，不掉回普通");
-    // 一次性模式
-    tavern.chat[11].mes = "第12层结束了。\n<route>after</route>";
+    ok(cap.body.messages[0].content.indexOf("RULE-MODERN-N") === 0, "没标记沿用 nsfw；NSFW 槽换选现代NSFW就用现代");
+    tavern.chat[11].mes = "第12层结束。\n<route>normal</route>";
     await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-B") === 0, "读到 after → 用事后规则");
-    eq(F("ipeLedgerModeState")().mode, "normal", "一次性模式用完一轮自动回 normal");
-    tavern.chat[11].mes = "第12层又一楼，没标记。够长够长够长够长。";
+    ok(cap.body.messages[0].content.indexOf("RULE-DAILY") === 0, "normal → 回 Normal 槽");
+    st.activeLedgerPrompt = "lp_2";
     await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "回普通后没标记就是普通");
-    // 未配置的名字不认
+    ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "Normal 槽换选大剧情就用大剧情");
     tavern.chat[11].mes = "第12层。\n<route>whatever</route>";
     await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-NORMAL") === 0, "没配过的模式名不认，状态不变");
-    // 手动优先
-    st.ledgerModeManual = "hot";
+    ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "不认识的模式名不认，状态不变");
+    st.ledgerModeManual = "nsfw";
     tavern.chat[11].mes = "第12层。\n<route>normal</route>";
     await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-A") === 0, "手动指定 hot 时，标记写 normal 也不听");
+    ok(cap.body.messages[0].content.indexOf("RULE-MODERN-N") === 0, "锁定 nsfw 时，标记写 normal 也不听");
     st.ledgerModeManual = "";
-    // 标签名可改
-    st.ledgerModeTag = "scene";
-    eq(P("<scene>hot</scene>"), "hot", "标签名改成 scene 也认"); eq(P("<ipe_mode>hot</ipe_mode>"), "", "改了标签名后旧标签不认");
-    ok(F("ipeLedgerModeSnippet")().indexOf("<scene>hot</scene>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("<scene>after</scene>") >= 0, "给主 AI 的那几句按配置生成");
-    ok(F("ipeLedgerModeSnippet")().indexOf("预测下一轮") >= 0 && F("ipeLedgerModeSnippet")().indexOf("提前一轮") >= 0, "提示词与枢轨一致：预测下一轮、提前切换");
-    // 一次性模式不能在 API 仅仅返回时就消耗；账本真正落地后才回普通
-    st.ledgerModeTag = "route, ipe_mode";
-    await F("ipeLedgerCallAPI")("预览正文。\n<route>after</route>", "", 12);
-    eq(F("ipeLedgerModeState")().mode, "after", "API 返回但结果尚未采用：一次性模式保留");
-    tavern.chat[11].mes = "第12层采用正文。\n<route>after</route>";
+    // NSFW 槽选了个空预设 → 回落到 Normal，状态行提示
+    st.ledgerPromptNsfwPresetsJson = JSON.stringify([{ id: "lpn_1", name: "空的", value: "" }]); st.activeLedgerPromptNsfw = "lpn_1";
+    tavern.chat[11].mes = "第12层。\n<route>nsfw</route>";
     await F("ipeLedgerRun")(11, true);
-    eq(F("ipeLedgerModeState")().mode, "normal", "账本真正采用后：一次性模式才回 normal");
-    // UI：面板里有开关和行
-    const d = w.document;
-    ok(!!d.querySelector("#ipe-ledger-mode-on") && !!d.querySelector("#ipe-ledger-mode-rows"), "面板有场景模式区");
+    ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "NSFW 槽内容为空 → 回落 Normal 槽");
+    ok(w.document.querySelector("#ipe-ledger-status").textContent.indexOf("内容为空") >= 0, "状态行说明回落", w.document.querySelector("#ipe-ledger-status").textContent);
+    ok(F("ipeLedgerModeSnippet")().indexOf("<route>normal</route>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("<route>nsfw</route>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("aftercare") < 0, "给主 AI 的话只有 normal / nsfw");
 })();
 
-console.log("\n【36】 卡槽按角色卡记忆：每张卡各有 Normal / nsfw 槽，没设的跟随全局，换卡自动各用各的");
+console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");
 await (async () => {
-    const { w, tavern, F } = boot(12);
-    const st = withApi(tavern, F, "gpt-4.1");
-    st.ledgerPromptPresetsJson = JSON.stringify([
-        { id: "lp_1", name: "日常烟火", value: "RULE-DAILY" }, { id: "lp_2", name: "大剧情", value: "RULE-EPIC" },
-        { id: "lp_3", name: "现代NSFW", value: "RULE-MODERN-N" }, { id: "lp_4", name: "古代NSFW", value: "RULE-ANCIENT-N" }]);
-    st.activeLedgerPrompt = "lp_1";
-    st.ledgerModesJson = JSON.stringify([{ name: "nsfw", preset: "lp_3", oneShot: false }]);
-    st.ledgerModeEnabled = true;
-    eq(F("ipeLedgerCardKey")(), "char:yuan.png", "卡键按头像文件名");
-    const PV = F("ipeLedgerPromptValueForMode");
-    eq(PV("normal"), "RULE-DAILY", "没单独设：Normal 跟随下拉");
-    eq(PV("nsfw"), "RULE-MODERN-N", "没单独设：nsfw 跟随模式行");
-    // 苑无忧这张卡：Normal 用大剧情，nsfw 用古代
-    F("ipeLedgerCardSlotSet")("normal", "lp_2"); F("ipeLedgerCardSlotSet")("nsfw", "lp_4");
-    eq(PV("normal"), "RULE-EPIC", "本卡 Normal 槽 → 大剧情"); eq(PV("nsfw"), "RULE-ANCIENT-N", "本卡 nsfw 槽 → 古代NSFW");
-    eq(st.activeLedgerPrompt, "lp_1", "下拉本身没被动");
-    // 走一遍真请求：标记 nsfw → system 用古代
-    let cap = {};
-    w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>账本内容够长够长够长够长够长够长够长。</ledger>"}}]}\n']) }; };
-    tavern.chat[9].mes = "正文。\n<route>nsfw</route>";
-    await F("ipeLedgerRun")(9, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-ANCIENT-N") === 0, "苑无忧的 nsfw 走古代规则");
-    // 换成顾寒：没单独设 → 跟随全局；本聊天模式状态是 nsfw（同一 chatMetadata）→ 用全局 nsfw 现代
-    tavern.characterId = 1;
-    eq(F("ipeLedgerCardKey")(), "char:gu.png", "换卡后卡键变了");
-    eq(PV("normal"), "RULE-DAILY", "顾寒没设 → Normal 跟随下拉"); eq(PV("nsfw"), "RULE-MODERN-N", "顾寒没设 → nsfw 跟随模式行");
-    // 清掉苑无忧的一个槽
-    tavern.characterId = 0;
-    F("ipeLedgerCardSlotSet")("nsfw", "");
-    eq(PV("nsfw"), "RULE-MODERN-N", "清空本卡槽后回到跟随全局");
-    eq(PV("normal"), "RULE-EPIC", "另一个槽不受影响");
-    // 群聊按群记
-    tavern.groupId = "g1";
-    eq(F("ipeLedgerCardKey")(), "group:g1", "群聊按群键");
-    tavern.groupId = null;
-    // 场景模式关着时，本卡 Normal 槽也生效（这张卡就该用这套）
-    st.ledgerModeEnabled = false;
-    tavern.chat[11].mes = "第12层，没标记。";
-    await F("ipeLedgerRun")(11, true);
-    ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "场景模式关着，本卡 Normal 槽照样用大剧情");
-    // UI
-    F("ipeLedgerModeRefresh")();
+    const { w, tavern, F } = boot(10);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
     const d = w.document;
-    const sel = d.querySelector('#ipe-ledger-slots select[data-slot="normal"]');
-    ok(!!sel && sel.value === "lp_2", "面板里 Normal 槽下拉显示本卡选择");
-    ok(!!d.querySelector('#ipe-ledger-slots select[data-slot="nsfw"]'), "nsfw 槽下拉存在");
-    ok(d.querySelector("#ipe-ledger-slots").textContent.indexOf("苑无忧") >= 0, "卡槽区显示卡名");
-    sel.value = ""; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
-    eq(PV("normal"), "RULE-DAILY", "界面上改回跟随全局立即生效");
+    F("ipeLedgerModeRefresh")();
+    const fold = d.querySelector("#ipe-ledger-nsfw-fold");
+    ok(!!fold && fold.style.display === "none", "关着：NSFW 槽面板藏起来");
+    st.ledgerModeEnabled = true; F("ipeLedgerModeRefresh")();
+    ok(fold.style.display !== "none", "开了：NSFW 槽面板出现");
+    ok(!!d.querySelector("#ipe-ledger-prompt-n-slot") && !!d.querySelector("#ipe-ledger-prompt-n-name") && !!d.querySelector("#ipe-ledger-prompt-n-add") && !!d.querySelector("#ipe-ledger-prompt-n-del") && !!d.querySelector("#ipe-ledger-prompt-n"), "版面和 Normal 槽一样：下拉 / 名称 / 新增 / 删除 / 文本框");
+    ok(!d.querySelector("#ipe-ledger-mode-rows") && !d.querySelector("#ipe-ledger-slots") && !d.querySelector("#ipe-ledger-mode-add"), "旧的模式行 / 卡槽区 / 新增模式都没了");
+    const ta = d.querySelector("#ipe-ledger-prompt-n");
+    ta.value = "NSFW 规则文字"; ta.dispatchEvent(new w.Event("input", { bubbles: true }));
+    const nl = JSON.parse(st.ledgerPromptNsfwPresetsJson); const npv = JSON.parse(st.ledgerPromptPresetsJson || "[]");
+    ok(nl.length === 1 && nl[0].value === "NSFW 规则文字", "文字写进 NSFW 库");
+    ok(!npv.some(x => x.value === "NSFW 规则文字"), "Normal 库没被动");
+    d.querySelector("#ipe-ledger-prompt-n-add").click();
+    eq(JSON.parse(st.ledgerPromptNsfwPresetsJson).length, 2, "NSFW 槽「新增」多一套，只在 NSFW 库里");
+    const man = d.querySelector("#ipe-ledger-mode-manual");
+    ok(man && man.options.length === 3, "手动锁定只有 自动 / normal / nsfw 三档");
+    ok(d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("Normal 槽 →") >= 0 && d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("NSFW 槽 →") >= 0, "状态行同时报两个槽各选了什么");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
