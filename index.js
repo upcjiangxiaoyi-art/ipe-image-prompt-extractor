@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.14.2";
+var IPE_VERSION = "2.14.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2666,13 +2666,13 @@ function ipeRefreshApiProfileEditors() {
     ipeFillSelect("iped-api-profile", list, active);
 
     ["ipe-api-profile-name","iped-api-profile-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
     });
     ["ipe-api-endpoint","iped-api-endpoint"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.endpoint || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.endpoint || "";
     });
     ["ipe-api-key","iped-api-key"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.key || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.key || "";
     });
 
     ipeEnsureModelOption("ipe-model", item.model || "");
@@ -2972,7 +2972,7 @@ function ipeRefreshSystemPromptEditors() {
     ipeFillSelect("iped-system-slot", list, active);
 
     ["ipe-system-prompt","iped-system-prompt"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
 }
 
@@ -3097,10 +3097,10 @@ function ipeRefreshRuleEditors() {
     ipeFillSelect("iped-rule-slot", list, active);
 
     ["ipe-rule-name","iped-rule-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
     });
     ["ipe-extract-rules","iped-extract-rules"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
 }
 
@@ -3135,6 +3135,11 @@ function ipeFillSelect(id, list, active) {
     }
 }
 
+/* 2.14.3 名字框回写守卫：各刷新函数不再往 document.activeElement（正在打字的那个框）写 value。
+   之前每敲一个字就 存 → 整面刷新 → 把存下来的名字写回正在打字的框：
+   清空的瞬间存的是兜底名「模板33」，被写回去，iOS 输入法再把「你好」接在后面 = 「模板33你好」；
+   写 value 也会打断输入法合成。挂账那边的 ipeLedgerRefreshBotEditors 早有这道守卫，生图这边补齐。
+   兜底名只在 change（离开输入框）时写回。 */
 function ipeRefreshTemplateEditors() {
     var list = ipeGetBaseTemplates();
     var active = ipeGetActiveTemplateId();
@@ -3144,10 +3149,10 @@ function ipeRefreshTemplateEditors() {
     ipeFillSelect("iped-template-slot", list, active);
 
     ["ipe-template-name","iped-template-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
     });
     ["ipe-base-template","iped-base-template"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
 }
 
@@ -3160,13 +3165,13 @@ function ipeRefreshAnchorEditors() {
     ipeFillSelect("iped-anchor-slot", list, active);
 
     ["ipe-anchor-name","iped-anchor-name"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.name || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
     });
     ["ipe-char-anchors","iped-char-anchors"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = item.value || "";
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
     ["ipe-anchor-guide-editor","iped-anchor-guide-editor"].forEach(function(id){
-        var el = q("#" + id); if (el) el.value = ipeGetAnchorUsageGuide();
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = ipeGetAnchorUsageGuide();
     });
 }
 
@@ -5481,6 +5486,8 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetApiProfileName(el.value);
             ipeSaveNow();
+            var nm = ipeGetActiveApiProfileItem().name || "";
+            if (el.value !== nm) el.value = nm;
             ipeRefreshApiProfileEditors();
         });
     });
@@ -5554,6 +5561,9 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetTemplateName(el.value);
             ipeSaveNow();
+            var nm = ipeGetActiveTemplateItem().name || "";
+            if (el.value !== nm) el.value = nm;   // 清空后离开：这时才把兜底名写回来
+            ipeRefreshTemplateEditors();
         });
     });
 
@@ -5597,6 +5607,9 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetAnchorName(el.value);
             ipeSaveNow();
+            var nm = ipeGetActiveAnchorItem().name || "";
+            if (el.value !== nm) el.value = nm;
+            ipeRefreshAnchorEditors();
         });
     });
 
@@ -5663,6 +5676,9 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetRuleName(el.value);
             ipeSaveNow();
+            var nm = ipeGetActiveRuleItem().name || "";
+            if (el.value !== nm) el.value = nm;
+            ipeRefreshRuleEditors();
         });
     });
 

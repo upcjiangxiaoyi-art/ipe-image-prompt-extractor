@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.2") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.3") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -902,6 +902,36 @@ await (async () => {
     ok(cap.body.messages[0].content.indexOf("RULE-EPIC") === 0, "NSFW 槽内容为空 → 回落 Normal 槽");
     ok(w.document.querySelector("#ipe-ledger-status").textContent.indexOf("内容为空") >= 0, "状态行说明回落", w.document.querySelector("#ipe-ledger-status").textContent);
     ok(F("ipeLedgerModeSnippet")().indexOf("<route>normal</route>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("<route>nsfw</route>") >= 0 && F("ipeLedgerModeSnippet")().indexOf("aftercare") < 0, "给主 AI 的话只有 normal / nsfw");
+})();
+
+console.log("\n【35b】 名字框改名（2.14.3）：正在打字的框不被回写，清空不弹兜底名，输入法合成不被打断；离开框才补兜底名");
+await (async () => {
+    const { w, tavern, F } = boot(4);
+    const d = w.document;
+    const type = (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input", { bubbles: true })); };
+    const cases = [
+        ["ipe-template-name", "ipe-template-slot", () => F("ipeGetBaseTemplates")()],
+        ["ipe-anchor-name",   "ipe-anchor-slot",   () => F("ipeGetAnchorPresets")()],
+        ["ipe-rule-name",     "ipe-rule-slot",     () => F("ipeGetRulePresets")()],
+    ];
+    for (const [nameId, slotId, list] of cases) {
+        const el = d.querySelector("#" + nameId); ok(!!el, nameId + " 存在"); if (!el) continue;
+        el.focus(); eq(d.activeElement, el, nameId + " 拿到焦点");
+        type(el, "");
+        eq(el.value, "", nameId + "：清空的瞬间不被写回兜底名");
+        type(el, "ni h");                       // 输入法合成中的拼音
+        eq(el.value, "ni h", nameId + "：合成中的拼音原样留在框里");
+        type(el, "你好");                        // 选中候选词
+        eq(el.value, "你好", nameId + "：选词后就是「你好」，不是「模板N你好」");
+        el.dispatchEvent(new w.Event("change", { bubbles: true }));
+        eq(el.value, "你好", nameId + "：离开框后名字还是「你好」");
+        const sel = d.querySelector("#" + slotId);
+        eq(sel && sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].textContent, "你好", nameId + "：下拉里的名字同步成「你好」");
+        ok(list().some(x => x.name === "你好"), nameId + "：存进预设库的也是「你好」");
+        type(el, ""); el.dispatchEvent(new w.Event("change", { bubbles: true }));
+        ok(el.value !== "", nameId + "：清空后离开框，兜底名才写回来（" + el.value + "）");
+        el.blur();
+    }
 })();
 
 console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");
