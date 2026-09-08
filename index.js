@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.14.0";
+var IPE_VERSION = "2.14.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -21,6 +21,29 @@ function ipeImgTemplatePlaceholders(t) {
 function ipeImgTemplateEnvelope(t) {
     var m = String(t || "").match(/^\s*<([A-Za-z][\w-]*)\s*>[\s\S]*<\/\1\s*>\s*$/);
     return m ? m[1] : "";
+}
+/* 填模板（2.14.1 融合规则）：vals 是 占位符 → 值。
+   多行模板里，某一行的占位符全部填成空，这一整行连同 "Setting:" 这种标签一起不输出。
+   于是一张模板同时服务两条路：分层成功时五行各就各位、{Description} 那行消失；
+   没分层时五行连标签一起消失、整段落在 {Description} 那行。单行模板不收行。
+   用回调替换，desc 里带 $& 之类也不会被 replace 当模式解释。 */
+function ipeImgFillTemplate(tpl, vals) {
+    var lines = String(tpl == null ? "" : tpl).split("\n");
+    var multi = lines.length > 1;
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+        var hadPh = false, allEmpty = true;
+        var filled = lines[i].replace(IPE_IMG_TPL_PH_RE, function(m){
+            if (!Object.prototype.hasOwnProperty.call(vals, m)) return m;
+            hadPh = true;
+            var v = String(vals[m] == null ? "" : vals[m]);
+            if (v.trim()) allEmpty = false;
+            return v;
+        });
+        if (multi && hadPh && allEmpty) continue;
+        out.push(filled);
+    }
+    return out.join("\n");
 }
 const DEFAULTS = {
     enabled: true,
@@ -842,6 +865,13 @@ function ipeLedgerStripImageTag(text) {
             continue;
         }
         var pre = t.slice(0, phs[0].i), suf = t.slice(phs[phs.length - 1].e);
+        if (t.indexOf("\n") >= 0) {
+            // 多行模板：占位符全空的行会被 ipeImgFillTemplate 整行收掉，"Setting: " 这种半行前缀可能不在正文里。
+            // 前缀退到第一个占位符所在行之前、后缀退到最后一个占位符所在行之后，收不收行都对得上。
+            var nl0 = pre.lastIndexOf("\n"), nl1 = suf.indexOf("\n");
+            pre = nl0 >= 0 ? pre.slice(0, nl0 + 1) : "";
+            suf = nl1 >= 0 ? suf.slice(nl1) : "";
+        }
         if (!pre && !suf) continue;
         if (pre && suf) {
             try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
@@ -4618,7 +4648,7 @@ function createPanel() {
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-base-template" rows="6" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>'+
-        '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净</div>'+
+        '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净。两种都写也行：哪一行的占位符全空，那一整行连标签一起不输出，分层与整段共用一张模板</div>'+
         '<div class="ipe-preview-actions" style="margin-top:8px">'+
             '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
             '<button id="ipe-pack-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
@@ -4864,7 +4894,7 @@ function createDrawer() {
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>';
-    h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住</small>';
+    h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住。两种都写也行：占位符全空的行整行不输出</small>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
     h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
     h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。</small>';
@@ -6290,20 +6320,26 @@ function bindAll() {
 function buildInjectTag(desc, layers) {
     var tpl = ipeGetTemplateValue() || cfg().baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;
     desc = String(desc == null ? "" : desc);
-    if (layers) {
-        var used = {}, any = false;
-        IPE_IMG_LAYERS.forEach(function(l){
-            var ph = IPE_IMG_LAYER_PH[l];
-            if (tpl.indexOf(ph) >= 0) { tpl = tpl.split(ph).join(String(layers[l] || "").trim()); used[l] = true; any = true; }
-        });
-        if (any) desc = ipeImgJoinLayers(layers, used);   // {Description} 只拿没被单独放置的层
+    var vals = {}, any = false;
+    var hasDesc = tpl.indexOf("{Description}") >= 0;
+    IPE_IMG_LAYERS.forEach(function(l){
+        var ph = IPE_IMG_LAYER_PH[l];
+        if (tpl.indexOf(ph) < 0) return;
+        any = true;
+        // 有分层结果就各填各的；没分层结果时层占位符填空，由 ipeImgFillTemplate 把那几行连标签一起收掉
+        vals[ph] = layers ? String(layers[l] || "").trim() : "";
+    });
+    if (layers && any) {
+        var used = {};
+        IPE_IMG_LAYERS.forEach(function(l){ if (tpl.indexOf(IPE_IMG_LAYER_PH[l]) >= 0) used[l] = true; });
+        desc = ipeImgJoinLayers(layers, used);   // {Description} 只拿没被单独放置的层
     }
-    if (tpl.indexOf("{Description}") >= 0) return tpl.replace("{Description}", desc);
+    if (hasDesc) { vals["{Description}"] = desc; return ipeImgFillTemplate(tpl, vals); }
+    if (layers || !any) return ipeImgFillTemplate(tpl, vals) + desc;   // 没有 {Description}：剩下的层（或整段）追加在尾巴
     /* 只为分层写的模板（只有 {Camera}…{Pose}、没有 {Description}），这次却没有分层结果
        （分层关着 / 副 AI 没分层）：整段填进占位符所在的那一片，不让 {Camera} 这种字面量漏进正文。 */
     var phs = ipeImgTemplatePlaceholders(tpl);
-    if (phs.length) return tpl.slice(0, phs[0].i) + desc + tpl.slice(phs[phs.length - 1].e);
-    return tpl + desc;
+    return tpl.slice(0, phs[0].i) + desc + tpl.slice(phs[phs.length - 1].e);
 }
 
 function injectDescToMessage(desc, targetIdx) {

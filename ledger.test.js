@@ -541,6 +541,30 @@ console.log("\n【26】 模板占位符：{Env} {Pose} 单放，{Description} �
     eq(added[added.length - 1].value, "<draw>{Description}</draw>", "「新增模板」初值是 <draw>{Description}</draw>");
 }
 
+console.log("\n【26b】 模板融合（2.14.1）：分层与整段共用一张模板，占位符全空的行整行收掉");
+{
+    const { tavern, F } = boot(4);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    const strip = F("ipeLedgerStripImageTag");
+    const BOTH = "<draw> style text.\nComposition: {Camera}\nSetting: {Env}\nMood and light: {Mood}\nCharacters: {Chars}\nAction: {Pose}\n{Description}\n </draw>";
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "融合", value: BOTH }]);
+    st.activeBaseTemplate = "tpl_1";
+    const five = { camera: "C.", env: "E.", mood: "M.", chars: "CH.", pose: "P." };
+    eq(F("buildInjectTag")("ignored", five), "<draw> style text.\nComposition: C.\nSetting: E.\nMood and light: M.\nCharacters: CH.\nAction: P.\n </draw>", "分层成功：五行各就各位，{Description} 那行消失，没有空行");
+    eq(F("buildInjectTag")("one flat english description.", null), "<draw> style text.\none flat english description.\n </draw>", "没分层：五行连 Setting: 这些标签一起消失，整段落在 {Description} 那行");
+    eq(F("buildInjectTag")("ignored", { camera: "C.", env: "", mood: "", chars: "CH.", pose: "P." }), "<draw> style text.\nComposition: C.\nCharacters: CH.\nAction: P.\n </draw>", "某一层空了：只收那一行");
+    eq(F("buildInjectTag")("ignored", { camera: "C.", chars: "CH.", pose: "P." }), "<draw> style text.\nComposition: C.\nCharacters: CH.\nAction: P.\n </draw>", "层对象里干脆没这层：同样只收那一行");
+    eq(F("buildInjectTag")("price $& and $1", null), "<draw> style text.\nprice $& and $1\n </draw>", "desc 里的 $& 不被 replace 当模式吃掉");
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "单行", value: "{Camera} | {Env} | {Description}" }]);
+    eq(F("buildInjectTag")("flat", null), " |  | flat", "单行模板不收行（没有行可收），层占位符填空");
+    eq(F("buildInjectTag")("x", { camera: "C", env: "E" }), "C | E | ", "单行分层：各填各的");
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "非包裹多行", value: "IMG START\nComposition: {Camera}\nDesc: {Description}\nIMG END" }]);
+    const flatTag = F("buildInjectTag")("flat", null);
+    eq(flatTag, "IMG START\nDesc: flat\nIMG END", "非包裹多行：Composition 行收掉");
+    eq(strip("正文。\n\n" + flatTag), "正文。", "收了行之后挂账照样剥得掉（前缀退到占位符所在行之前）");
+    eq(strip("正文。\n\n" + F("buildInjectTag")("x", { camera: "C" })), "正文。", "分层注入的同样剥得掉");
+}
+
 console.log("\n【27】 副 AI 没分层：整段兜底，层框不动，状态行明示；分层关着时合同不发");
 await (async () => {
     const { w, tavern, F } = boot(10);
@@ -599,7 +623,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.1") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
