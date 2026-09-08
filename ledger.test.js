@@ -200,12 +200,25 @@ console.log("\n\u30109\u3011 \u8D34\u8033\u81EA\u68C0\u7EDD\u4E0D\u80FD\u6C61\u6
 }
 
 
-console.log("\n\u301010\u3011 生图 tag 剥离（2.9.2）");
+console.log("\n\u301010\u3011 生图 tag 剥离（2.9.2 / 2.14.0 内置改 <draw>）");
 {
     const { tavern, F } = boot(10);
     const strip = F("ipeLedgerStripImageTag");
-    eq(strip("正文。\n\nimage###a girl###"), "正文。", "默认模板 前后缀都有：整段剥掉");
+    eq(strip("正文。\n\n<draw>a girl by the window</draw>"), "正文。", "内置默认 <draw>…</draw>：整段剥掉");
+    eq(strip("正文。\n\n<draw>\nline one\nline two\n</draw>"), "正文。", "跨行的 <draw> 块也剥");
+    eq(strip("正文。\n\nimage###a girl###"), "正文。", "老聊天里的 image###…### 仍认得（legacy 兜底）");
     eq(strip("正文里提到 image###x### 这种写法。\n\nimage###real###"), "正文里提到 这种写法。", "前后缀齐全时按对剥（与旧行为一致）");
+    // 样板那种：整段 <draw> 包着、只放五个分层占位符、没有 {Description}
+    const STYLE = "<draw> Artistic Illustrations. Medium and style (hard rules): a refined 2.5D illustration.\n\nComposition: {Camera}\nSetting: {Env}\nMood and light: {Mood}\nCharacters: {Chars}\nAction: {Pose}\n </draw>";
+    const st10 = tavern.extensionSettings[F("EXT_NAME")];
+    st10.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水光", value: STYLE }]);
+    st10.activeBaseTemplate = "tpl_1";
+    const tag10 = F("buildInjectTag")("ignored", { camera: "wide shot.", env: "a sunlit room.", mood: "caustic light.", chars: "a boy.", pose: "he sits." });
+    ok(tag10.indexOf("Composition: wide shot.") >= 0 && tag10.indexOf("Action: he sits.") >= 0 && tag10.indexOf("{") < 0, "样板模板：五层各就各位，没有占位符残留");
+    eq(strip("正文。\n\n" + tag10), "正文。", "样板模板注入的整块 <draw> 剥干净（之前没有 {Description} 的模板整段找不到，几千字风格正文会喂进挂账）");
+    eq(strip("正文。\n\n<draw> old style text. Composition: X\n </draw>"), "正文。", "模板正文后来改过：旧楼按 <draw> 标签对照样剥");
+    st10.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "非包裹分层", value: "IMG[ {Camera} | {Pose} ]END" }]);
+    eq(strip("正文。\n\nIMG[ a | b ]END"), "正文。", "不是标签包裹的分层模板：前缀取第一个占位符前、后缀取最后一个占位符后");
     tavern.extensionSettings["image-prompt-extractor"].baseTemplatesJson = JSON.stringify([
         { id: "tpl_1", name: "前缀", value: "IMG: {Description}" },
         { id: "tpl_2", name: "无占位", value: "[pic]" }]);
@@ -505,11 +518,13 @@ await (async () => {
     ok(c.indexOf("<camera>A.</camera>") >= 0 && c.indexOf("<pose>") >= 0 && c.indexOf("<pose>D.</pose>") < 0, "请求里锁了三层，没锁动作层");
 })();
 
-console.log("\n【26】 模板占位符：{Env} {Pose} 单放，{Description} 拿剩下的；老模板照旧");
+console.log("\n【26】 模板占位符：{Env} {Pose} 单放，{Description} 拿剩下的；老模板照旧；内置默认 <draw>");
 {
-    const { tavern, F } = boot(4);
+    const { w, tavern, F } = boot(4);
     const st = tavern.extensionSettings[F("EXT_NAME")];
     const layers = { camera: "CAM", env: "ENV", chars: "CHR", pose: "POS" };
+    eq(F("buildInjectTag")("plain", null), "<draw>plain</draw>", "模板留空：内置默认 <draw>{Description}</draw>");
+    eq(F("buildInjectTag")("CAM ENV CHR POS", layers), "<draw>CAM ENV CHR POS</draw>", "内置默认 + 分层：整段进 {Description}");
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "分层", value: "scene: {Env} | action: {Pose} | rest: {Description}" }]);
     st.activeBaseTemplate = "tpl_1";
     eq(F("buildInjectTag")("ignored", layers), "scene: ENV | action: POS | rest: CAM CHR", "层占位符各就各位，{Description} 只拿没放的层");
@@ -518,6 +533,12 @@ console.log("\n【26】 模板占位符：{Env} {Pose} 单放，{Description} �
     eq(F("buildInjectTag")("plain", null), "image###plain###", "非分层模式完全不受影响");
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "全层", value: "{Camera}/{Env}/{Chars}/{Pose}" }]);
     eq(F("buildInjectTag")("whatever", layers), "CAM/ENV/CHR/POS", "四层全单放、没有 {Description} 也不多拼");
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "只为分层", value: "<draw>S. Composition: {Camera}\nAction: {Pose}\n</draw>" }]);
+    eq(F("buildInjectTag")("flat desc", null), "<draw>S. Composition: flat desc\n</draw>", "只放层占位符的模板碰上没分层：整段填进占位符那一片，{Camera} 不漏进正文");
+    const d26 = w.document;
+    d26.querySelector("#ipe-template-add").click();
+    const added = F("ipeGetBaseTemplates")();
+    eq(added[added.length - 1].value, "<draw>{Description}</draw>", "「新增模板」初值是 <draw>{Description}</draw>");
 }
 
 console.log("\n【27】 副 AI 没分层：整段兜底，层框不动，状态行明示；分层关着时合同不发");
@@ -578,7 +599,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.13.4") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";

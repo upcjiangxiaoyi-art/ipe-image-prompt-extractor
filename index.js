@@ -4,7 +4,24 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.13.4";
+var IPE_VERSION = "2.14.0";
+/* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
+   之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
+var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
+var IPE_LEGACY_IMAGE_TEMPLATE  = "image###{Description}###";
+/* 模板里认得的占位符：{Description} 拿整段 / 没单放的层，其余五个是分层占位符 */
+var IPE_IMG_TPL_PH_RE = /\{(?:Description|Camera|Env|Mood|Chars|Pose)\}/g;
+function ipeImgTemplatePlaceholders(t) {
+    var out = [], m;
+    IPE_IMG_TPL_PH_RE.lastIndex = 0;
+    while ((m = IPE_IMG_TPL_PH_RE.exec(String(t || "")))) out.push({ i: m.index, e: m.index + m[0].length });
+    return out;
+}
+/* 模板整体是一对 <xxx>…</xxx> 包着的（默认 <draw>）就返回标签名，否则空串 */
+function ipeImgTemplateEnvelope(t) {
+    var m = String(t || "").match(/^\s*<([A-Za-z][\w-]*)\s*>[\s\S]*<\/\1\s*>\s*$/);
+    return m ? m[1] : "";
+}
 const DEFAULTS = {
     enabled: true,
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -779,9 +796,13 @@ function ipeLedgerHistoryBlock() {
 }
 
 /* ---- 投喂拼装：段落标题只做定位，不声明优先级 ---- */
-/* 生图会把 image###…### 追加进 msg.mes。有 <content> 标签的楼不受影响
+/* 生图会把 <draw>…</draw>（2.14.0 前是 image###…###）追加进 msg.mes。有 <content> 标签的楼不受影响
    （只取标签内），没有标签的楼会兜底返回整条，那串英文 tag 就混进挂账正文了。
-   这里按用户当前所有生图模板的字面前后缀剥掉，模板改了也跟着变。 */
+   这里按用户当前所有生图模板的字面前后缀剥掉，模板改了也跟着变。
+   占位符不只 {Description}：只放 {Camera} {Env} {Mood} {Chars} {Pose} 的分层模板，
+   前缀 = 第一个占位符之前，后缀 = 最后一个占位符之后（以前这种模板整段当字面量找，永远找不到，
+   几千字的风格正文就原样喂进了挂账）。
+   模板整体是 <xxx>…</xxx> 一对标签包着的，直接按标签对剥：模板正文后来改过、旧楼是老版模板注入的，一样认得。 */
 function ipeLedgerStripImageTag(text) {
     var out = String(text || "");
     var tpls = [];
@@ -790,7 +811,8 @@ function ipeLedgerStripImageTag(text) {
         if (Array.isArray(list)) list.forEach(function(x){ if (x && x.value) tpls.push(String(x.value)); });
     } catch(e) {}
     try { if (cfg().baseTemplate) tpls.push(String(cfg().baseTemplate)); } catch(e) {}
-    tpls.push("image###{Description}###");
+    tpls.push(IPE_DEFAULT_IMAGE_TEMPLATE);
+    tpls.push(IPE_LEGACY_IMAGE_TEMPLATE);
 
     var esc = function(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
     /* 注入永远追加在楼尾（injectDescToMessage 只做 trimEnd + "\n\n" + tag）。
@@ -807,13 +829,19 @@ function ipeLedgerStripImageTag(text) {
         var t = tpls[i];
         if (!t || seen[t]) continue;
         seen[t] = true;
-        var k = t.indexOf("{Description}");
-        if (k < 0) {
+        var phs = ipeImgTemplatePlaceholders(t);
+        if (!phs.length) {
             // buildInjectTag 对无占位符模板是 tpl + desc 直接拼接：整个模板字面量就是前缀
             if (t.trim()) out = stripTail(out, t);
             continue;
         }
-        var pre = t.slice(0, k), suf = t.slice(k + "{Description}".length);
+        var envTag = ipeImgTemplateEnvelope(t);
+        if (envTag) {
+            // <draw>…</draw> 这类整体包裹：按标签对剥，不依赖中间那几千字风格正文一字不差
+            try { out = out.replace(new RegExp("\\s*<" + esc(envTag) + "\\s*>[\\s\\S]*?<\\/" + esc(envTag) + "\\s*>", "g"), ""); } catch(e) {}
+            continue;
+        }
+        var pre = t.slice(0, phs[0].i), suf = t.slice(phs[phs.length - 1].e);
         if (!pre && !suf) continue;
         if (pre && suf) {
             try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
@@ -1926,7 +1954,7 @@ function ipeLedgerPromptHasTag(v) {
 }
 
 // 只包裹，零语义：不说记什么、不说分几层、不说什么格式。
-// 跟生图的 image###...### 同一个性质，只保证输出能被找到。
+// 跟生图的 <draw>…</draw> 同一个性质，只保证输出能被找到。
 // 预设里已经自己写了 <ledger> 就跳过，不重复叮嘱。
 function ipeLedgerWrapHint() {
     var lines = [
@@ -2704,7 +2732,7 @@ function ipeSetTemplateName(val) {
 function ipeAddTemplatePreset() {
     var list = ipeGetBaseTemplates();
     var id = ipeMakeId("tpl");
-    list.push({ id: id, name: "新模板" + (list.length + 1), value: "image###{Description}###" });
+    list.push({ id: id, name: "新模板" + (list.length + 1), value: IPE_DEFAULT_IMAGE_TEMPLATE });
     ipeSaveBaseTemplates(list);
     saveCritical("activeBaseTemplate", id);
     ipeRefreshSystemPromptEditors();
@@ -4589,8 +4617,8 @@ function createPanel() {
             '<button id="ipe-template-add" class="ipe-btn" type="button">新增模板</button>'+
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
-        '<textarea id="ipe-base-template" rows="6" placeholder="image###...{Description}...###"></textarea>'+
-        '<div class="ipe-hint">可无限新增模板。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}</div>'+
+        '<textarea id="ipe-base-template" rows="6" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>'+
+        '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净</div>'+
         '<div class="ipe-preview-actions" style="margin-top:8px">'+
             '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
             '<button id="ipe-pack-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
@@ -4835,8 +4863,8 @@ function createDrawer() {
     h += '<label>模板预设</label><select id="iped-template-slot" class="text_pole"></select>';
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
-    h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="image###...{Description}...###"></textarea>';
-    h += '<small style="color:#888">可无限新增模板。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}</small>';
+    h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>';
+    h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住</small>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
     h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
     h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。</small>';
@@ -6260,7 +6288,7 @@ function bindAll() {
 }
 
 function buildInjectTag(desc, layers) {
-    var tpl = ipeGetTemplateValue() || cfg().baseTemplate || "image###{Description}###";
+    var tpl = ipeGetTemplateValue() || cfg().baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;
     desc = String(desc == null ? "" : desc);
     if (layers) {
         var used = {}, any = false;
@@ -6270,7 +6298,12 @@ function buildInjectTag(desc, layers) {
         });
         if (any) desc = ipeImgJoinLayers(layers, used);   // {Description} 只拿没被单独放置的层
     }
-    return tpl.indexOf("{Description}") >= 0 ? tpl.replace("{Description}", desc) : tpl + desc;
+    if (tpl.indexOf("{Description}") >= 0) return tpl.replace("{Description}", desc);
+    /* 只为分层写的模板（只有 {Camera}…{Pose}、没有 {Description}），这次却没有分层结果
+       （分层关着 / 副 AI 没分层）：整段填进占位符所在的那一片，不让 {Camera} 这种字面量漏进正文。 */
+    var phs = ipeImgTemplatePlaceholders(tpl);
+    if (phs.length) return tpl.slice(0, phs[0].i) + desc + tpl.slice(phs[phs.length - 1].e);
+    return tpl + desc;
 }
 
 function injectDescToMessage(desc, targetIdx) {
