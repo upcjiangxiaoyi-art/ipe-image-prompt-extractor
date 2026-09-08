@@ -518,6 +518,29 @@ await (async () => {
     ok(c.indexOf("<camera>A.</camera>") >= 0 && c.indexOf("<pose>") >= 0 && c.indexOf("<pose>D.</pose>") < 0, "请求里锁了三层，没锁动作层");
 })();
 
+console.log("\n【23b】 NO_CHANGE 带句号 / 引号 / 空格也算哨兵；老存档里的 NO_CHANGE. 不再往下传（2.14.2）");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const cap = {};
+    const st = imgApi(w, tavern, F, () => L4("wide.", "a rooftop at dusk.", "a girl.", "she leans.", "warm light."), cap);
+    st.imgLayered = true;
+    await F("runExtract")(tavern.chat[9].mes, "", false, 9);
+    imgApi(w, tavern, F, () => L4("close-up.", "NO_CHANGE.", "the girl.", "she turns.", "`No change`"), cap);
+    await F("runExtract")(tavern.chat[9].mes, "", false, 9);
+    eq(box(w, "ipe-layer-env"), "a rooftop at dusk.", "NO_CHANGE. 带句号 → 沿用上一楼环境，不落哨兵字面量");
+    eq(box(w, "ipe-layer-mood"), "warm light.", "`No change` 反引号 + 空格 → 沿用上一楼氛围");
+    ok(box(w, "ipe-preview-text").indexOf("NO_CHANGE") < 0, "拼好的整段里没有 NO_CHANGE");
+    ok(imgStatus(w).indexOf("环境沿用第 10 楼") >= 0 && imgStatus(w).indexOf("氛围沿用第 10 楼") >= 0, "状态行报沿用而不是「五层齐全」", imgStatus(w));
+    // 老版本存进 chat_metadata 的哨兵字面量：不喂给副 AI，也不当作上一楼内容沿用
+    const saved = F("ipeImgLayersRead")();
+    ok(!!saved, "存档读得到"); saved.env = "NO_CHANGE.";
+    imgApi(w, tavern, F, () => L4("close-up.", "NO_CHANGE", "the girl.", "she turns.", "NO_CHANGE"), cap);
+    await F("runExtract")(tavern.chat[9].mes, "", false, 9);
+    ok(cap.body.messages[1].content.indexOf("上一楼的环境层】\nNO_CHANGE") < 0, "存档里的 NO_CHANGE. 没被当成上一楼环境喂给副 AI");
+    eq(box(w, "ipe-layer-env"), "", "没有真环境可沿用时环境框为空，而不是 NO_CHANGE.");
+    ok(imgStatus(w).indexOf("环境层为空") >= 0, "状态行如实报环境层为空", imgStatus(w));
+})();
+
 console.log("\n【26】 模板占位符：{Env} {Pose} 单放，{Description} 拿剩下的；老模板照旧；内置默认 <draw>");
 {
     const { w, tavern, F } = boot(4);
@@ -623,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.1") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.2") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";

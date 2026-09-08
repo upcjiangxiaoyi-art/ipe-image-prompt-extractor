@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.14.1";
+var IPE_VERSION = "2.14.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -3565,7 +3565,10 @@ function ipeImgPrevLayers(locks) {
     var out = { floor: st ? Number(st.floor) || 0 : 0, envFloor: st ? Number(st.envFloor || st.floor) || 0 : 0, moodFloor: st ? Number(st.moodFloor || st.floor) || 0 : 0 };
     IPE_IMG_LAYERS.forEach(function(l){
         var stored = st ? String(st[l] || "").trim() : "";
-        out[l] = (locks && locks[l] && box[l]) ? box[l] : stored;
+        if (ipeImgIsNoChange(stored)) stored = "";              // 存档里是哨兵字面量：当没有，不喂给副 AI
+        var boxV = String(box[l] || "").trim();
+        if (ipeImgIsNoChange(boxV)) boxV = "";
+        out[l] = (locks && locks[l] && boxV) ? boxV : stored;
     });
     return out;
 }
@@ -3617,7 +3620,12 @@ function ipeImgParseLayers(txt) {
     return out;
 }
 
-function ipeImgIsNoChange(v) { return String(v || "").replace(/\s+/g, "").toUpperCase() === IPE_IMG_NOCHANGE; }
+/* 副 AI 写 NO_CHANGE 时常带句号、引号、反引号或把下划线写成空格（"NO_CHANGE." / "`NO_CHANGE`" / "No change"）。
+   2.14.2 前只认一字不差的 NO_CHANGE，"NO_CHANGE." 就当成真环境描述落框、拼进提示词，
+   还会存进上一楼记忆、下一楼继续沿用——截图里 NO_CHANGE. NO_CHANGE. 就是这么来的。 */
+function ipeImgIsNoChange(v) {
+    return String(v || "").replace(/[\s"'`*_\-.。!！,，;；:：()（）\[\]]/g, "").toUpperCase() === "NOCHANGE";
+}
 
 /* 合账：锁定层用旧值；NO_CHANGE 或空 → 有旧值就沿用；否则收新值 */
 function ipeImgMergeLayers(parsed, prev, locks, floor) {
@@ -3625,6 +3633,7 @@ function ipeImgMergeLayers(parsed, prev, locks, floor) {
     IPE_IMG_LAYERS.forEach(function(l){
         var v = String((parsed && parsed[l]) || "").trim();
         var prevV = prev ? String(prev[l] || "").trim() : "";
+        if (ipeImgIsNoChange(prevV)) prevV = "";                // 老版本存下来的 "NO_CHANGE." 不算上一楼内容，不再往下传
         var label = IPE_IMG_LAYER_LABEL[l] || l;
         var fk = l + "Floor";                                   // envFloor / moodFloor：这层内容来自哪一楼
         var prevFloor = prev ? (Number(prev[fk]) || Number(prev.floor) || 0) : 0;
