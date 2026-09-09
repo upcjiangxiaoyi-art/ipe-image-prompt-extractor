@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.16.1";
+var IPE_VERSION = "2.16.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6395,7 +6395,11 @@ function buildInjectTag(desc, layers) {
 function ipeRememberInjectTag(msg, tag, desc, layers) {
     try {
         if (!msg.extra || typeof msg.extra !== "object") msg.extra = {};
-        msg.extra.ipe_inject_tag = String(tag || "");
+        /* 2.16.2 省地方：那块是 <xxx>…</xxx> 整体包着的（默认 <draw>）就只记标签名，剥的时候按标签对剥，
+           不再存一份几 KB 的原文副本（楼里本来就有一份）；不是包裹型的才存原文。 */
+        var envName = ipeImgTemplateEnvelope(tag);
+        msg.extra.ipe_inject_env = envName || "";
+        if (envName) delete msg.extra.ipe_inject_tag; else msg.extra.ipe_inject_tag = String(tag || "");
         // 2.16.0 连描述和五层一起记：翻到哪楼都能按新模板重拼，刷新页面也不丢
         msg.extra.ipe_inject_desc = String(desc || "");
         var ly = null;
@@ -6504,10 +6508,12 @@ function reinjectDescToMessage(targetIdx, opts) {
 
     var before = String(msg.mes || "");
     // 先按这楼记录的「上次注入的那块」原样剥（模板后来改了、删了都认），再按模板规则兜底剥一遍
-    var stripped = before, prevTag = "";
+    var stripped = before, prevTag = "", prevEnv = "";
     try {
         prevTag = String((msg.extra && msg.extra.ipe_inject_tag) || "");
+        prevEnv = String((msg.extra && msg.extra.ipe_inject_env) || "");
         if (prevTag) { var kp = stripped.lastIndexOf(prevTag); if (kp >= 0) stripped = stripped.slice(0, kp) + stripped.slice(kp + prevTag.length); }
+        if (prevEnv) stripped = ipeStripEnvelope(stripped, prevEnv);   // 记的是标签名：按标签对剥，模板改了删了都认
     } catch(ePT) {}
     stripped = ipeLedgerStripImageTag(stripped);
     var tag = buildInjectTag(p.desc, p.layers);
@@ -6522,23 +6528,30 @@ function reinjectDescToMessage(targetIdx, opts) {
         }
     } catch(eSw) {}
     if (typeof c.saveChat === "function") c.saveChat();
-    ipeSwapInjectedParagraph(idx, tag, prevTag);
+    ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv);
     try { ipeInstallMesButtons(); } catch(eB) {}
     return { injected: true, tag: tag, idx: idx, replaced: stripped !== before };
+}
+
+/* 把文本里所有 <name>…</name> 对剥掉（name 是记录的包裹标签名） */
+function ipeStripEnvelope(text, name) {
+    var esc2 = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!esc2) return String(text || "");
+    try { return String(text || "").replace(new RegExp("\\s*<" + esc2 + "\\s*>[\\s\\S]*?<\\/" + esc2 + "\\s*>", "g"), ""); } catch(e) { return String(text || ""); }
 }
 
 /* 楼里的 DOM 只换我们自己那一段，绝不整楼重排（2.15.1）。
    2.15.0 走了酒馆 updateMessageBlock 整楼重画：楼里把 html 代码块渲染成前端卡的扩展只在自己的事件里干活，
    重画之后它们不再跑一遍，整楼就成了一屏源码。照老注入的做法：
    把上次注入追加的那个 <p>（文字等于记录的原文，或剥掉 tag 后什么都不剩）摘掉，再追加新的 <p>，其余节点一概不碰。 */
-function ipeSwapInjectedParagraph(idx, tag, prevTag) {
+function ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv) {
     var el = q('#chat .mes[mesid="' + idx + '"] .mes_text'); if (!el) return;
-    var prev = String(prevTag || "").trim();
+    var prev = String(prevTag || "").trim(), env = String(prevEnv || "");
     try {
         Array.prototype.slice.call(el.children).forEach(function(ch){
             var t = String(ch.textContent || "").trim();
             if (!t) return;
-            if ((prev && t === prev) || !ipeLedgerStripImageTag(t).trim()) ch.remove();
+            if ((prev && t === prev) || (env && !ipeStripEnvelope(t, env).trim()) || !ipeLedgerStripImageTag(t).trim()) ch.remove();
         });
     } catch(e) {}
     if (el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>" + esc(tag) + "</p>");

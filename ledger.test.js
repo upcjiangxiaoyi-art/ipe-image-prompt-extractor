@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.16.1") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.16.2") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -990,7 +990,8 @@ await (async () => {
     tavern.chat[9].mes = "正文。\n\nANIME[ new desc ]END";
     F("reinjectDescToMessage")(9);
     eq(tavern.chat[9].mes, "正文。\n\n<draw>C=cam.\nP=pose.\n</draw>", "预览空但层框是这楼的：按层框重拼，{Description} 行收掉；动漫模板已被删也照样剥掉旧块（靠 extra 里的记录）");
-    eq(tavern.chat[9].extra && tavern.chat[9].extra.ipe_inject_tag, "<draw>C=cam.\nP=pose.\n</draw>", "这楼 extra 里记着本次注入的那块");
+    eq(tavern.chat[9].extra && tavern.chat[9].extra.ipe_inject_env, "draw", "这楼 extra 里记的是包裹标签名 draw（2.16.2 不再存原文副本）");
+    ok(!("ipe_inject_tag" in tavern.chat[9].extra), "包裹型模板：没有几 KB 的原文副本");
     // 什么都没有 → 直说
     tavern.chatMetadata.ipe_img_layers_v1.floor = 3;
     delete tavern.chat[9].extra.ipe_inject_desc;   // 这楼的记录也抹掉，才是真的什么都没有
@@ -1037,7 +1038,7 @@ await (async () => {
     ok(r.injected && r.replaced, "旧块替换");
     r = F("reinjectDescToMessage")(9, { preferRecord: true });
     eq(tavern.chat[9].mes, "十楼正文。\n\n<draw>ANIME: wide. / sits.</draw>", "第 10 楼按记录的五层重拼：{Camera} 填镜头，{Description} 拿剩下的层");
-    eq(tavern.chat[9].extra.ipe_inject_tag, "<draw>ANIME: wide. / sits.</draw>", "重注入后记录的原文跟着更新");
+    eq(tavern.chat[9].extra.ipe_inject_env, "draw", "重注入后记录跟着更新（包裹标签名）");
     eq(tavern.chat[9].extra.ipe_inject_desc, "ten", "描述和五层原样保留（拼装规则和当初注入时一致）");
     // 面板按钮、不是刚提取那楼：也走记录，不拿预览框（先在第 10 楼提取一次，让 currentIdx 落在第 10 楼）
     st.imgLayered = false; imgApi(w, tavern, F, () => "flat ten.", {});
@@ -1049,6 +1050,31 @@ await (async () => {
     // 没记录的楼
     let threw = ""; try { F("reinjectDescToMessage")(5, { preferRecord: true }); } catch(e) { threw = e.message; }
     ok(threw.indexOf("没有提取记录") >= 0, "没记录的楼报「没有提取记录」", threw);
+})();
+
+console.log("\n【38b】 记录瘦身（2.16.2）：包裹型只记标签名，非包裹型才存原文；记的标签名连被删的模板也认得");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    tavern.saveChat = () => {};
+    st.baseTemplatesJson = JSON.stringify([
+        { id: "tpl_p", name: "pic包裹", value: "<pic>\nstyle words\n{Description}\n</pic>" },
+        { id: "tpl_n", name: "非包裹", value: "IMG[ {Description} ]END" }]);
+    st.activeBaseTemplate = "tpl_p";
+    tavern.chat[9].mes = "正文。";
+    F("injectDescToMessage")("one", 9);
+    eq(tavern.chat[9].extra.ipe_inject_env, "pic", "<pic> 包裹：记标签名 pic");
+    ok(!("ipe_inject_tag" in tavern.chat[9].extra), "不存原文副本");
+    // 把 pic 模板删掉、换成非包裹模板再重注入：靠记的标签名剥掉旧块
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_n", name: "非包裹", value: "IMG[ {Description} ]END" }]);
+    st.activeBaseTemplate = "tpl_n";
+    F("reinjectDescToMessage")(9, { preferRecord: true });
+    eq(tavern.chat[9].mes, "正文。\n\nIMG[ one ]END", "pic 模板已删：按记录的标签名剥掉旧块，只剩新块");
+    eq(tavern.chat[9].extra.ipe_inject_tag, "IMG[ one ]END", "非包裹型：存原文副本");
+    eq(tavern.chat[9].extra.ipe_inject_env, "", "非包裹型：标签名为空");
+    F("reinjectDescToMessage")(9, { preferRecord: true });
+    eq(tavern.chat[9].mes, "正文。\n\nIMG[ one ]END", "再来一次不重复");
 })();
 
 console.log("\n【39】 补充指令常用短语（2.16.0）：存 / 选填 / 追加 / 删，存进设置");
