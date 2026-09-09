@@ -62,7 +62,7 @@ function boot(floors) {
         "ipeLedgerIsAbort", "ipeLedgerExport", "ipeLedgerImportText", "ipeLedgerInspectEP",
         "EXT_NAME", "DEFAULTS", "IPE_LEDGER_EP_KEY", "init", "ipeLedgerStripImageTag", "ipeLedgerBuildUser", "ipeLedgerReportBlock", "ipeLedgerPruneMirror",
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
-        "runExtract", "ipeImgParseLayers", "buildInjectTag", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
+        "runExtract", "ipeImgParseLayers", "buildInjectTag", "reinjectDescToMessage", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.14.3") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.15.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -932,6 +932,59 @@ await (async () => {
         ok(el.value !== "", nameId + "：清空后离开框，兜底名才写回来（" + el.value + "）");
         el.blur();
     }
+})();
+
+console.log("\n【37】 换画风重注入（2.15.0）：不重提，剥掉楼尾旧块按当前模板重拼；面板 / 抽屉按钮；快捷下拉与模板预设同步");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.baseTemplatesJson = JSON.stringify([
+        { id: "tpl_a", name: "水墨", value: "<draw>INK: {Description}</draw>" },
+        { id: "tpl_b", name: "动漫", value: "ANIME[ {Description} ]END" }]);
+    st.activeBaseTemplate = "tpl_a";
+    F("ipeGetBaseTemplates")();
+    d.querySelector("#ipe-template-slot").dispatchEvent(new w.Event("change", { bubbles: true }));   // 触发一次刷新，把下拉填好
+    tavern.chat[9].mes = "正文。\n\n<draw>old desc</draw>";
+    d.querySelector("#ipe-preview-text").value = "new desc";
+    let saved = 0; tavern.saveChat = () => { saved++; };
+    let r = F("reinjectDescToMessage")(9);
+    eq(tavern.chat[9].mes, "正文。\n\n<draw>INK: new desc</draw>", "旧 <draw> 块剥掉，按水墨模板重拼");
+    ok(r.injected && r.replaced, "报告：已注入且替换了旧块"); eq(saved, 1, "存了聊天");
+    // 换画风：快捷下拉选动漫 → 模板预设同步 → 点按钮
+    const quick = d.querySelector("#ipe-reinject-tpl"); ok(!!quick && quick.options.length === 2, "预览区有快捷模板下拉，两个模板都在");
+    quick.value = "tpl_b"; quick.dispatchEvent(new w.Event("change", { bubbles: true }));
+    eq(st.activeBaseTemplate, "tpl_b", "快捷下拉选了就是切换基础模板");
+    eq(d.querySelector("#ipe-template-slot").value, "tpl_b", "基础模板区的下拉同步");
+    d.querySelector("#ipe-btn-reinject").click();
+    eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "按钮：currentIdx 没定位时落到最后一条 AI 楼，旧 <draw> 没了、只有动漫块，不重复");
+    ok(imgStatus(w).indexOf("已按「动漫」重新注入第 10 楼") >= 0, "状态行报模板名和楼号", imgStatus(w));
+    d.querySelector("#ipe-btn-reinject").click();
+    eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "再点一次：内容一样不重复追加");
+    ok(imgStatus(w).indexOf("没变") >= 0, "状态行说没变", imgStatus(w));
+    // 老版本 image### 楼也能换
+    tavern.chat[9].mes = "正文。\n\nimage###legacy###";
+    F("reinjectDescToMessage")(9);
+    eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "老楼里的 image###…### 一样被换掉");
+    // swipes 同步
+    tavern.chat[9].swipes = ["x"]; tavern.chat[9].swipe_id = 0; tavern.chat[9].mes = "正文。";
+    F("reinjectDescToMessage")(9);
+    eq(tavern.chat[9].swipes[0], tavern.chat[9].mes, "swipes[swipe_id] 同步");
+    // 分层：层框是这楼存下来的 → 用层框填层占位符
+    st.imgLayered = true;
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_c", name: "分层", value: "<draw>C={Camera}\nP={Pose}\n{Description}\n</draw>" }]);
+    st.activeBaseTemplate = "tpl_c";
+    d.querySelector("#ipe-preview-text").value = "";
+    tavern.chatMetadata.ipe_img_layers_v1 = { floor: 10, camera: "cam.", env: "", mood: "", chars: "", pose: "pose." };
+    d.querySelector("#ipe-layer-camera").value = "cam."; d.querySelector("#ipe-layer-pose").value = "pose.";
+    tavern.chat[9].mes = "正文。\n\nANIME[ new desc ]END";
+    F("reinjectDescToMessage")(9);
+    eq(tavern.chat[9].mes, "正文。\n\n<draw>C=cam.\nP=pose.\n</draw>", "预览空但层框是这楼的：按层框重拼，{Description} 行收掉；动漫模板已被删也照样剥掉旧块（靠 extra 里的记录）");
+    eq(tavern.chat[9].extra && tavern.chat[9].extra.ipe_inject_tag, "<draw>C=cam.\nP=pose.\n</draw>", "这楼 extra 里记着本次注入的那块");
+    // 什么都没有 → 直说
+    tavern.chatMetadata.ipe_img_layers_v1.floor = 3;
+    let threw = ""; try { F("reinjectDescToMessage")(9); } catch(e) { threw = e.message; }
+    ok(threw.indexOf("先提取一次") >= 0, "预览空、层框不是这楼的：报「先提取一次」", threw);
 })();
 
 console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");
