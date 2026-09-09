@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.16.0";
+var IPE_VERSION = "2.16.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6456,6 +6456,7 @@ function injectDescToMessage(desc, targetIdx) {
 
     var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');
     if(el && el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>"+esc(tag)+"</p>");
+    try { ipeInstallMesButtons(); } catch(eB) {}   // 这楼刚有了记录，🎨 立刻挂上，不等观察器
 
     return { injected: true, tag: tag };
 }
@@ -6522,6 +6523,7 @@ function reinjectDescToMessage(targetIdx, opts) {
     } catch(eSw) {}
     if (typeof c.saveChat === "function") c.saveChat();
     ipeSwapInjectedParagraph(idx, tag, prevTag);
+    try { ipeInstallMesButtons(); } catch(eB) {}
     return { injected: true, tag: tag, idx: idx, replaced: stripped !== before };
 }
 
@@ -6556,11 +6558,16 @@ function ipeInstallMesButtons() {
         var idx = Number(m.getAttribute("mesid"));
         if (!Number.isFinite(idx)) return;
         var msg = chat[idx];
-        var bar = m.querySelector(".extraMesButtons");
-        var has = bar && bar.querySelector("." + IPE_MES_BTN_CLASS);
+        var has = m.querySelector("." + IPE_MES_BTN_CLASS);
         var want = !!(msg && !msg.is_user && ipeInjectRecord(msg));
-        if (want && bar && !has) {
-            bar.insertAdjacentHTML("afterbegin", '<div title="🐚 换画风：按当前模板重新注入这楼" class="mes_button ' + IPE_MES_BTN_CLASS + ' fa-solid fa-palette interactable" tabindex="0"></div>');
+        if (want && !has) {
+            /* 2.16.1 放在「…」旁边常驻可见：手机上 .extraMesButtons 默认折叠，塞进去就得先点「…」才看得到 */
+            var html = '<div title="🐚 换画风：按当前模板重新注入这楼" class="mes_button ' + IPE_MES_BTN_CLASS + ' fa-solid fa-palette interactable" tabindex="0"></div>';
+            var hint = m.querySelector(".mes_buttons .extraMesButtonsHint");
+            var bar = m.querySelector(".mes_buttons") || m.querySelector(".extraMesButtons");
+            if (hint) hint.insertAdjacentHTML("beforebegin", html);
+            else if (bar) bar.insertAdjacentHTML("afterbegin", html);
+            else return;
             n++;
         } else if (!want && has) {
             try { has.remove(); } catch(e) {}

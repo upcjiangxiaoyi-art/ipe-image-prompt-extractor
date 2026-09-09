@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.16.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.16.1") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -1018,10 +1018,14 @@ await (async () => {
     tavern.chat[9].extra = { ipe_inject_tag: "<draw>INK: ten</draw>", ipe_inject_desc: "ten", ipe_inject_layers: { camera: "wide.", env: "", mood: "", chars: "", pose: "sits." } };
     tavern.chat[9].mes = "十楼正文。\n\n<draw>INK: ten</draw>";
     // 楼层按钮：只挂在有记录的 AI 楼
-    d.body.insertAdjacentHTML("beforeend", '<div id="chat">' + [5, 6, 7, 8, 9].map(i => '<div class="mes" mesid="' + i + '" is_user="' + (tavern.chat[i].is_user ? "true" : "false") + '"><div class="extraMesButtons"><div class="mes_button other"></div></div><div class="mes_text"><p>x</p></div></div>').join("") + '</div>');
+    // 第 10 楼是酒馆标准结构（mes_buttons 里有折叠的 extraMesButtons 和「…」提示），第 8 楼只有 extraMesButtons
+    d.body.insertAdjacentHTML("beforeend", '<div id="chat">' + [5, 6, 7, 8].map(i => '<div class="mes" mesid="' + i + '" is_user="' + (tavern.chat[i].is_user ? "true" : "false") + '"><div class="extraMesButtons"><div class="mes_button other"></div></div><div class="mes_text"><p>x</p></div></div>').join("")
+        + '<div class="mes" mesid="9" is_user="false"><div class="mes_buttons"><div class="extraMesButtons" style="display:none"><div class="mes_button other"></div></div><div class="extraMesButtonsHint fa-solid fa-ellipsis"></div><div class="mes_edit fa-solid fa-pencil"></div></div><div class="mes_text"><p>x</p></div></div></div>');
     F("ipeInstallMesButtons")();
     const btn = i => d.querySelector('#chat .mes[mesid="' + i + '"] .ipe-mes-reinject');
     ok(!!btn(7) && !!btn(9), "第 8、10 楼（有记录）有 🎨 按钮");
+    ok(btn(9).parentElement.classList.contains("mes_buttons") && btn(9).nextElementSibling && btn(9).nextElementSibling.classList.contains("extraMesButtonsHint"), "标准结构：🎨 放在「…」左边常驻可见，不塞进折叠的 extraMesButtons");
+    ok(!d.querySelector('#chat .mes[mesid="9"] .extraMesButtons .ipe-mes-reinject'), "第 10 楼的折叠区里没有重复的");
     ok(!btn(5) && !btn(6) && !btn(8), "没记录的 AI 楼、user 楼都没有按钮");
     F("ipeInstallMesButtons")();
     eq(d.querySelectorAll('#chat .mes[mesid="9"] .ipe-mes-reinject').length, 1, "重复安装不重复加");
