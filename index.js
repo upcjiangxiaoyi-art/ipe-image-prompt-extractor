@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.15.0";
+var IPE_VERSION = "2.15.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6463,9 +6463,9 @@ function reinjectDescToMessage(targetIdx) {
 
     var before = String(msg.mes || "");
     // 先按这楼记录的「上次注入的那块」原样剥（模板后来改了、删了都认），再按模板规则兜底剥一遍
-    var stripped = before;
+    var stripped = before, prevTag = "";
     try {
-        var prevTag = String((msg.extra && msg.extra.ipe_inject_tag) || "");
+        prevTag = String((msg.extra && msg.extra.ipe_inject_tag) || "");
         if (prevTag) { var kp = stripped.lastIndexOf(prevTag); if (kp >= 0) stripped = stripped.slice(0, kp) + stripped.slice(kp + prevTag.length); }
     } catch(ePT) {}
     stripped = ipeLedgerStripImageTag(stripped);
@@ -6481,26 +6481,25 @@ function reinjectDescToMessage(targetIdx) {
         }
     } catch(eSw) {}
     if (typeof c.saveChat === "function") c.saveChat();
-    ipeRerenderMessage(idx, msg, tag);
+    ipeSwapInjectedParagraph(idx, tag, prevTag);
     return { injected: true, tag: tag, idx: idx, replaced: stripped !== before };
 }
 
-/* 重画这一楼：酒馆有 updateMessageBlock 就交给它；没有就用 messageFormatting 重排；
-   都没有就把之前注入时追加的那些 <p>（内容剥掉 tag 后什么都不剩的）摘掉，再追加新的。 */
-function ipeRerenderMessage(idx, msg, tag) {
-    var c = ctx();
-    try { if (typeof c.updateMessageBlock === "function") { c.updateMessageBlock(idx, msg); return; } } catch(e) {}
+/* 楼里的 DOM 只换我们自己那一段，绝不整楼重排（2.15.1）。
+   2.15.0 走了酒馆 updateMessageBlock 整楼重画：楼里把 html 代码块渲染成前端卡的扩展只在自己的事件里干活，
+   重画之后它们不再跑一遍，整楼就成了一屏源码。照老注入的做法：
+   把上次注入追加的那个 <p>（文字等于记录的原文，或剥掉 tag 后什么都不剩）摘掉，再追加新的 <p>，其余节点一概不碰。 */
+function ipeSwapInjectedParagraph(idx, tag, prevTag) {
     var el = q('#chat .mes[mesid="' + idx + '"] .mes_text'); if (!el) return;
-    try {
-        if (typeof c.messageFormatting === "function") { el.innerHTML = c.messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user, idx); return; }
-    } catch(e) {}
+    var prev = String(prevTag || "").trim();
     try {
         Array.prototype.slice.call(el.children).forEach(function(ch){
             var t = String(ch.textContent || "").trim();
-            if (t && !ipeLedgerStripImageTag(t).trim()) ch.remove();
+            if (!t) return;
+            if ((prev && t === prev) || !ipeLedgerStripImageTag(t).trim()) ch.remove();
         });
     } catch(e) {}
-    el.insertAdjacentHTML("beforeend", "<p>" + esc(tag) + "</p>");
+    if (el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>" + esc(tag) + "</p>");
 }
 
 function onReinject() {

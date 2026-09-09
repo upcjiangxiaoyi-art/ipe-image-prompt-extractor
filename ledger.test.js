@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.15.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.15.1") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -948,7 +948,15 @@ await (async () => {
     tavern.chat[9].mes = "正文。\n\n<draw>old desc</draw>";
     d.querySelector("#ipe-preview-text").value = "new desc";
     let saved = 0; tavern.saveChat = () => { saved++; };
+    let rerendered = 0; tavern.updateMessageBlock = () => { rerendered++; }; tavern.messageFormatting = () => { rerendered++; return ""; };
+    // 楼里的 DOM：一张别的扩展渲染出来的前端卡 + 上次注入追加的 <p>
+    d.body.insertAdjacentHTML("beforeend", '<div id="chat"><div class="mes" mesid="9"><div class="mes_text"><div class="card"><iframe></iframe>状态栏</div><p>&lt;draw&gt;old desc&lt;/draw&gt;</p></div></div></div>');
+    const mesText = d.querySelector('#chat .mes[mesid="9"] .mes_text');
     let r = F("reinjectDescToMessage")(9);
+    eq(rerendered, 0, "不走 updateMessageBlock / messageFormatting 整楼重排（2.15.1：重排会让前端卡变成一屏源码）");
+    ok(!!mesText.querySelector(".card iframe"), "别的扩展渲染的前端卡原样留着");
+    eq(mesText.querySelectorAll("p").length, 1, "旧的注入 <p> 摘掉，只剩新的一段");
+    eq(mesText.querySelector("p").textContent, "<draw>INK: new desc</draw>", "新 <p> 是水墨模板拼的那块");
     eq(tavern.chat[9].mes, "正文。\n\n<draw>INK: new desc</draw>", "旧 <draw> 块剥掉，按水墨模板重拼");
     ok(r.injected && r.replaced, "报告：已注入且替换了旧块"); eq(saved, 1, "存了聊天");
     // 换画风：快捷下拉选动漫 → 模板预设同步 → 点按钮
@@ -958,6 +966,8 @@ await (async () => {
     eq(d.querySelector("#ipe-template-slot").value, "tpl_b", "基础模板区的下拉同步");
     d.querySelector("#ipe-btn-reinject").click();
     eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "按钮：currentIdx 没定位时落到最后一条 AI 楼，旧 <draw> 没了、只有动漫块，不重复");
+    eq(mesText.querySelectorAll("p").length, 1, "DOM 里也只有一段"); eq(mesText.querySelector("p").textContent, "ANIME[ new desc ]END", "DOM 里那段换成了动漫块（按 extra 记录的原文认旧段）");
+    ok(!!mesText.querySelector(".card iframe") && rerendered === 0, "前端卡还在，仍没整楼重排");
     ok(imgStatus(w).indexOf("已按「动漫」重新注入第 10 楼") >= 0, "状态行报模板名和楼号", imgStatus(w));
     d.querySelector("#ipe-btn-reinject").click();
     eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "再点一次：内容一样不重复追加");
