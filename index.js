@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.17.0";
+var IPE_VERSION = "2.18.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -77,6 +77,10 @@ const DEFAULTS = {
     activeTab: "image",
     ledgerEpEnabled: true,
     ledgerEpDepth: 2,
+    ledgerWaitBeforeSend: true,   // 2.18.0 发消息前等挂账跑完（generate_interceptor）
+    ledgerWaitMaxSec: 60,
+    ledgerRetryOnce: true,        // 2.18.0 网络错 / 5xx / 超时 自动重试一次
+    ledgerRetryDelayMs: 3000,
     ledgerApiProfile: "",
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
@@ -403,6 +407,9 @@ function ipeChatKey() {
         return String(c.characterId || "char") + "::" + String(c.name1 || "chat");
     } catch(e) { return "unknown-chat"; }
 }
+function ipeCharName() {
+    try { var c = ctx(); return String(c.name2 || (c.characters && c.characters[c.characterId] && c.characters[c.characterId].name) || ""); } catch(e) { return ""; }
+}
 function ipeChatKeyReady() {
     var k = ipeChatKey();
     return !!k && k !== "unknown-chat";
@@ -562,7 +569,7 @@ function ipeLedgerSave(state) {
     if (ipeChatKeyReady()) {
         try {
             var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
-            all[ipeChatKey()] = clean;
+            all[ipeChatKey()] = Object.assign({}, clean, { who: ipeCharName(), floors: ipeFloorNo() });   // 镜像多记角色名，「继承账本」列表用
             all = ipeLedgerPruneMirror(all, IPE_LEDGER_MIRROR_MAX_CHATS);
             lsOk = ipeWriteJsonLS(IPE_LEDGER_LS_KEY, all) !== false;
         } catch(eL) { lsOk = false; }
@@ -1372,8 +1379,20 @@ function ipeLedgerShowForce(on) {
     });
 }
 
-async function ipeLedgerRun(targetIdx, silent) {
-    if (ipeLedgerBusy) { if (!silent) ipeLedgerStatus("上一次挂账还没跑完", "#c9a227"); return; }
+var ipeLedgerQueued = false;          // 2.18.0 补挂队列：跑着的时候又来了一楼，跑完自动补最新一楼
+/* 可重试：5xx / 429 / 408 / 网络错 / 中转回了非 JSON。看门狗超时不重试——默认 300 秒一次，再等一轮太久，按老规矩计失败。 */
+var IPE_LEDGER_RETRYABLE_RE = /^API (5\d\d|429|408)|Failed to fetch|NetworkError|Load failed|network|ECONN|socket|返回不是 JSON/i;
+function ipeLedgerRetryable(e) {
+    if (!e || ipeLedgerIsAbort(e)) return false;
+    return IPE_LEDGER_RETRYABLE_RE.test(String(e.message || e));
+}
+async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
+    retryAttempt = Number(retryAttempt || 0);
+    if (ipeLedgerBusy) {
+        if (silent) { ipeLedgerQueued = true; ipeLedgerStatus("挂账还在跑，这楼记下了，跑完自动补挂最新一楼", "#c9a227"); }
+        else ipeLedgerStatus("上一次挂账还没跑完", "#c9a227");
+        return;
+    }
 
     var msg = null, msgFloor = 0;
     try {
@@ -1447,11 +1466,23 @@ async function ipeLedgerRun(targetIdx, silent) {
         ipeLedgerSync();
     } catch(e) {
         if (ipeLedgerIsAbort(e)) {
+            ipeLedgerQueued = false;                       // 人掐的：排着的也别跑了
             ipeLedgerStatus("已中断挂账。账本没动，还是上一份。", "#c9a227");
             return;
         }
-        ipeLedgerFailStreak++;
         var d = (e && e.message) ? e.message : String(e);
+        /* 2.18.0 自动重试一次：网络错 / 5xx / 429 / 超时 这类中转抽风，等几秒再撞一次，
+           这次不计失败、不弹卡；重试还失败才按老规矩来。拒答、空回复、4xx 不重试。
+           已经有更新的楼排队了就不重试，补挂那楼时一并覆盖。 */
+        if (retryAttempt < 1 && cfg().ledgerRetryOnce !== false && !ipeLedgerQueued && ipeLedgerRetryable(e)) {
+            var delay = Number(cfg().ledgerRetryDelayMs); if (!(delay >= 0)) delay = 3000;
+            var rIdx = (typeof targetIdx === "number") ? targetIdx : (msgFloor - 1);
+            ipeLedgerStatus("挂账失败（" + d.slice(0, 80) + "），" + Math.round(delay / 1000) + " 秒后自动重试一次…", "#c9a227");
+            try { console.log("[IPE] 挂账重试", { floor: msgFloor, err: d.slice(0, 120) }); } catch(eL) {}
+            setTimeout(function(){ ipeLedgerRun(rIdx, silent, 1); }, delay);
+            return;
+        }
+        ipeLedgerFailStreak++;
         /* 连撞两次就别再撞了——每层自动跑一次，坏预设能烧一晚上额度。
            跟缩水拦截一个道理：事故现场停车，等人来看。 */
         var offNote = "";
@@ -1463,7 +1494,105 @@ async function ipeLedgerRun(targetIdx, silent) {
         ipeLedgerFailNotice(d + (offNote ? "\n" + offNote : ""));
     } finally {
         ipeLedgerSetBusy(false);
+        if (ipeLedgerQueued) {
+            ipeLedgerQueued = false;
+            if (cfg().ledgerAutoRun === true) setTimeout(function(){ ipeLedgerRun(null, true); }, 80);   // 补挂最新一楼
+        }
     }
+}
+
+/* ============================================================
+   ⏳ 发消息前等挂账跑完（2.18.0）· generate_interceptor
+   manifest 里声明了 ipeGenerateInterceptor，酒馆组 prompt 之前会先 await 它。
+   副 AI 还在挂账时就在这里等它落账、贴耳换新再放行；最多等 ledgerWaitMaxSec 秒，超时照发并提醒。
+   swipe / regenerate 不等：正在挂的是马上要被换掉的那楼，等它没意义，直接掐掉。continue 照等。
+   这是「贴耳落后一楼」的根治——以前只能喊一句提醒。
+   ============================================================ */
+var ipeLedgerWaitedMs = 0;
+async function ipeGenerateInterceptor(chat, contextSize, abort, type) {
+    try {
+        if (!ipeLedgerBusy) return;
+        var t = String(type || "").toLowerCase();
+        if (t === "swipe" || t === "regenerate") {
+            if (ipeLedgerPreviewFloor >= ipeFloorNo()) { try { ipeLedgerStop(); } catch(e) {} }
+            return;
+        }
+        if (t === "quiet") return;
+        if (cfg().ledgerWaitBeforeSend === false) return;
+        var sec = Number(cfg().ledgerWaitMaxSec); if (!(sec > 0)) sec = 60;
+        var maxMs = sec * 1000, t0 = Date.now();
+        ipeLedgerStatus("⏳ 你发了下一条，正在等副 AI 把这楼的账挂完再送出去…", "#c9a227");
+        while (ipeLedgerBusy && Date.now() - t0 < maxMs) await new Promise(function(r){ setTimeout(r, 120); });
+        ipeLedgerWaitedMs = Date.now() - t0;
+        if (ipeLedgerBusy) {
+            ipeLedgerStatus("等了 " + Math.round(sec) + " 秒账本还没挂完，这一发先送出去了，读到的是上一楼的账", "#c9a227");
+        } else {
+            try { ipeLedgerApplyEP(); } catch(e) {}
+            ipeLedgerStatus("账本挂完了（等了 " + (ipeLedgerWaitedMs / 1000).toFixed(1) + " 秒），这一发读到的是新账", "#6ec577");
+        }
+    } catch(e) {}
+}
+try { window.ipeGenerateInterceptor = ipeGenerateInterceptor; } catch(e) {}
+
+/* ============================================================
+   🧬 从别的聊天继承账本（2.18.0）
+   镜像里存着最近 30 个聊天的账本。同一张卡开新聊天时挑一份复制过来当起手：
+   盖本聊天当前楼号的戳（盖原楼号会被下一次对账当幽灵账碎掉），本聊天原有的账先进历史。
+   ============================================================ */
+function ipeLedgerInheritList() {
+    var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY), cur = ipeChatKey(), me = ipeCharName();
+    var out = [];
+    Object.keys(all).forEach(function(k){
+        var v = all[k];
+        if (!v || k === cur || !String(v.current || "").trim()) return;
+        var who = String(v.who || "");
+        out.push({ key: k, who: who, floor: Number(v.lastFloor) || 0, updatedAt: Number(v.updatedAt) || 0,
+                   len: String(v.current).length, sameChar: !!(me && who === me) });
+    });
+    out.sort(function(a, b){ return (Number(b.sameChar) - Number(a.sameChar)) || (b.updatedAt - a.updatedAt); });
+    return out;
+}
+function ipeLedgerRefreshInherit() {
+    var list = ipeLedgerInheritList();
+    ["ipe-ledger-inherit-sel", "iped-ledger-inherit-sel"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var cur = el.value;
+        var html = '<option value="">从别的聊天继承账本…' + (list.length ? "（" + list.length + " 份）" : "（镜像里没有别的聊天）") + '</option>';
+        list.forEach(function(it){
+            var k = it.key.length > 28 ? it.key.slice(0, 28) + "…" : it.key;
+            var d = it.updatedAt ? new Date(it.updatedAt).toLocaleDateString() : "";
+            html += '<option value="' + esc(it.key) + '">' + (it.sameChar ? "★ " : "") + esc(it.who ? it.who + " · " : "") + esc(k) + " · 第 " + it.floor + " 楼 · " + it.len + " 字" + (d ? " · " + d : "") + '</option>';
+        });
+        el.innerHTML = html;
+        el.value = list.some(function(x){ return x.key === cur; }) ? cur : "";
+    });
+}
+function ipeLedgerInherit(key) {
+    var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
+    var src = all[String(key || "")];
+    if (!src || !String(src.current || "").trim()) { ipeLedgerStatus("那份账本读不到了（镜像里没有）", "#d4726a"); return false; }
+    var cur = ipeLedgerRead();
+    var hadCur = !!String(cur.current || "").trim();
+    var st = ipeLedgerNormalize({ current: String(src.current), order: String(cur.order || src.order || ""), lastFloor: ipeFloorNo(), versions: [] });
+    if (hadCur) st.versions.unshift({ floor: cur.lastFloor, ts: Date.now(), text: String(cur.current) });
+    ipeLedgerSave(st);
+    ipeLedgerSync();
+    ipeLedgerStatus("已从「" + (src.who ? src.who + " · " : "") + key + "」继承账本（" + String(src.current).length + " 字），盖第 " + ipeFloorNo() + " 楼的戳。"
+        + (hadCur ? "原本的账本已进历史可回滚。" : ""), "#6ec577");
+    try { console.log("[IPE] 继承账本", { from: key, floor: ipeFloorNo() }); } catch(eL) {}
+    return true;
+}
+function ipeLedgerInheritClick(selId) {
+    var sel = q("#" + selId); if (!sel) return;
+    var key = sel.value;
+    if (!key) { ipeLedgerStatus("先在下拉里选一份要继承的账本", "#c9a227"); return; }
+    var cur = ipeLedgerRead();
+    if (String(cur.current || "").trim()) {
+        var okc = true;
+        try { var rw = ipeRootWindow(); if (rw && typeof rw.confirm === "function") okc = rw.confirm("本聊天已经有账本了。继承会先把它存进历史，再用选中的那份覆盖现任。\n\n继续？"); } catch(e) {}
+        if (!okc) { ipeLedgerStatus("已取消，账本没动", "#c9a227"); return; }
+    }
+    ipeLedgerInherit(key);
 }
 
 /* ============================================================
@@ -2324,6 +2453,7 @@ function ipeLedgerRefreshEpPreview() {
 }
 
 function ipeLedgerRefreshBotEditors() {
+    try { ipeLedgerRefreshInherit(); } catch(eI) {}
     ipeLedgerUpgradePrompts();
     var pv = ipePresetItem.apply(null, LP);
     var nv = ipePresetItem.apply(null, LN);
@@ -4801,6 +4931,9 @@ function createPanel() {
             '<button id="ipe-notice-demo" class="ipe-btn" type="button" title="看看报错卡长什么样，不动账本">\uD83D\uDD14 试一下报错卡</button>'+
         '</div>'+
         '<input type="file" id="ipe-ledger-file" accept=".json,application/json" style="display:none">'+
+        '<div class="ipe-preview-actions" style="margin-top:6px;align-items:center"><select id="ipe-ledger-inherit-sel" style="flex:1;min-width:0"><option value="">从别的聊天继承账本…</option></select>'+
+        '<button id="ipe-ledger-inherit" class="ipe-btn" style="flex:none" type="button">继承这份</button></div>'+
+        '<div class="ipe-hint">同一张卡开新聊天时用：把别的聊天的现任账本复制过来当起手（★ 是同一个角色的）。盖本聊天当前楼号的戳，这里原有的账本先进历史。</div>'+
         '<div id="ipe-ledger-ep-box" style="display:none;margin-top:6px">'+
             '<div style="font-size:12px;opacity:.7;margin-bottom:4px">\u{1F50D} \u8D34\u8033\u81EA\u68C0\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u4F1A\u8FDB\u8D26\u672C\uFF09</div>'+
             '<pre id="ipe-ledger-ep-out" style="white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;margin:0;padding:8px;border-radius:8px;background:rgba(127,127,127,.10)"></pre>'+
@@ -4903,6 +5036,9 @@ function createPanel() {
         '<details class="ipe-fold"><summary>\uD83C\uDFA7 贴耳细节（想看模型到底读到什么）</summary><div class="ipe-fold-body">'+
             '<label>注入深度<select id="ipe-ledger-ep-depth"></select></label>'+
             '<div class="ipe-hint">数字越小越靠近最新一楼。默认 2 就挺好。</div>'+
+            '<div style="color:#888;font-size:12px;margin:8px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><input type="checkbox" id="ipe-ledger-wait"> <span>发消息前等挂账跑完，最多</span> <input type="number" id="ipe-ledger-wait-sec" min="5" max="600" step="5" style="width:64px;padding:3px 6px"> <span>秒</span></div>'+
+            '<div class="ipe-hint">副 AI 还在挂账时你发了下一条，酒馆会先等账落下、贴耳换新再送出去；超时就照发并提醒。重 roll 不等。</div>'+
+            '<div style="color:#888;font-size:12px;margin:8px 0 2px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ipe-ledger-retry"> <span>挂账失败自动重试一次（网络错 / 5xx / 超时）</span></div>'+
             '<label style="margin-top:6px">模型实际读到的原文</label>'+
             '<pre id="ipe-ledger-ep-preview" class="ipe-ledger-age"></pre>'+
             '<div class="ipe-hint">不占楼层、不进聊天记录，一轮一换。</div>'+
@@ -5014,6 +5150,9 @@ function createDrawer() {
        +   '<input type="button" id="iped-notice-demo" class="menu_button" style="flex:1" value="\uD83D\uDD14 试一下报错卡">'
        + '</div>';
     h += '<input type="file" id="iped-ledger-file" accept=".json,application/json" style="display:none">';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;align-items:center"><select id="iped-ledger-inherit-sel" class="text_pole" style="flex:1;min-width:0"><option value="">从别的聊天继承账本…</option></select>'
+       + '<input type="button" id="iped-ledger-inherit" class="menu_button" value="继承这份"></div>';
+    h += '<small style="color:#888">同一张卡开新聊天时用：把别的聊天的现任账本复制过来当起手，盖本聊天当前楼号的戳。</small>';
     h += '<div id="iped-ledger-ep-box" style="display:none;margin-top:6px">'
        +   '<div style="font-size:12px;opacity:.7;margin-bottom:4px">\u{1F50D} \u8D34\u8033\u81EA\u68C0\uFF08\u53EA\u8BFB\uFF0C\u4E0D\u4F1A\u8FDB\u8D26\u672C\uFF09</div>'
        +   '<pre id="iped-ledger-ep-out" style="white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;font-size:12px;line-height:1.5;margin:0;padding:8px;border-radius:8px;background:rgba(127,127,127,.10)"></pre>'
@@ -5087,6 +5226,8 @@ function createDrawer() {
     h += '<div style="margin-bottom:6px"><label>贴耳注入（模型读得到，楼里读不到） <input type="checkbox" id="iped-ledger-ep-enabled"></label></div>';
     h += '<details class="ipe-fold"><summary>\uD83C\uDFA7 贴耳细节（想看模型到底读到什么）</summary><div class="ipe-fold-body">';
     h += '<label>注入深度</label><select id="iped-ledger-ep-depth" class="text_pole"></select>';
+    h += '<div style="margin-top:6px"><input type="checkbox" id="iped-ledger-wait"> 发消息前等挂账跑完，最多 <input type="number" id="iped-ledger-wait-sec" class="text_pole" min="5" max="600" step="5" style="width:64px;display:inline-block"> 秒</div>';
+    h += '<div style="margin-top:6px"><input type="checkbox" id="iped-ledger-retry"> 挂账失败自动重试一次（网络错 / 5xx / 超时）</div>';
     h += '<label>模型实际读到的原文</label>';
     h += '<pre id="iped-ledger-ep-preview" class="ipe-ledger-age"></pre>';
     h += '<small style="color:#888">不占楼层、不进聊天记录，一轮一换。</small>';
@@ -6312,6 +6453,28 @@ function bindAll() {
             ipeLedgerStatus(el.checked ? "贴耳已开启" : "贴耳已关闭（注入内容已清空）", "#6ec577");
         });
     });
+    // 2.18.0 等挂账 / 重试 / 继承
+    ["ipe-ledger-wait","iped-ledger-wait"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.checked = cfg().ledgerWaitBeforeSend !== false;
+        el.addEventListener("change", function(){ save("ledgerWaitBeforeSend", !!el.checked); ipeLedgerStatus(el.checked ? "发消息前会等挂账跑完" : "不等了，账没挂完也照发（贴耳可能落后一楼）", "#6ec577"); });
+    });
+    ["ipe-ledger-wait-sec","iped-ledger-wait-sec"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.value = String(Number(cfg().ledgerWaitMaxSec) > 0 ? Number(cfg().ledgerWaitMaxSec) : 60);
+        el.addEventListener("change", function(){ var v = Number(el.value); if (!(v > 0)) v = 60; save("ledgerWaitMaxSec", v); el.value = String(v); });
+    });
+    ["ipe-ledger-retry","iped-ledger-retry"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.checked = cfg().ledgerRetryOnce !== false;
+        el.addEventListener("change", function(){ save("ledgerRetryOnce", !!el.checked); });
+    });
+    [["ipe-ledger-inherit","ipe-ledger-inherit-sel"],["iped-ledger-inherit","iped-ledger-inherit-sel"]].forEach(function(pr){
+        var b = q("#" + pr[0]); if (!b || b.__ipeBound) return; b.__ipeBound = true;
+        b.addEventListener("click", function(){ ipeLedgerInheritClick(pr[1]); });
+        var s = q("#" + pr[1]); if (s) s.addEventListener("focus", ipeLedgerRefreshInherit);
+    });
+    try { ipeLedgerRefreshInherit(); } catch(eI) {}
 
     // 换聊天 → 账本跟着换 + 重贴耳
     try {

@@ -66,7 +66,7 @@ function boot(floors) {
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
-        "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
+        "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -74,7 +74,8 @@ function boot(floors) {
     try { w.eval(shim); } catch (e) { console.log("装载失败：" + e.message); }
     const F = n => w["__t_" + n];
     // 事件绑定藏在 createUI() 里，由 APP_READY 触发——不发这个事件，什么都没绑上
-    tavern.extensionSettings[F("EXT_NAME")] = Object.assign({}, F("DEFAULTS"));
+    // 2.18.0 起挂账失败默认自动重试一次；老测试都是「失败一次就该弹卡 / 计数」，测试环境默认关掉，【44】单独打开
+    tavern.extensionSettings[F("EXT_NAME")] = Object.assign({}, F("DEFAULTS"), { ledgerRetryOnce: false });
     try { F("init")(); } catch (e) { console.log("init 抛错：" + e.message); }
     return { w, tavern, F, EPK: F("IPE_LEDGER_EP_KEY") };
 }
@@ -646,7 +647,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.17.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -740,7 +741,7 @@ await (async () => {
 console.log("\n【32】 通知卡：挂账失败常驻带「知道了」；生图失败带进度线自动收起；样式内联、层级最高；不再碰 toastr");
 await (async () => {
     const { w, tavern, F } = boot(10);
-    withApi(tavern, F, "gpt-5");
+    withApi(tavern, F, "gpt-5").ledgerRetryOnce = false;   // 这条测的是通知卡，不测重试
     let toastrCalls = 0; w.toastr.error = () => { toastrCalls++; };
     w.fetch = async () => ({ ok: false, status: 500, text: async () => "boom" });
     await F("ipeLedgerRun")(9, true);
@@ -803,6 +804,7 @@ console.log("\n【33】 自动挂账被插件关掉要让人知道：提示常�
 await (async () => {
     const { w, tavern, F } = boot(10);
     const st = withApi(tavern, F, "gpt-5");
+    st.ledgerRetryOnce = false;   // 这条测的是连撞两次自动关，不测重试
     const d = w.document;
     const lab = d.querySelector("#ipe-ledger-auto").parentNode;
     eq(lab.firstElementChild.id, "ipe-ledger-auto", "面板：开关是 label 里第一个元素（在左边）");
@@ -1162,6 +1164,139 @@ console.log("\n【41】 历史里程碑（2.17.0）：最近 2 版之外每 10 �
     for (let f = 2; f <= 60; f += 2) F3("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
     eq(F3("ipeLedgerRead")().versions.length, 0, "历史版本数设 1（只留现任）：没有里程碑");
 }
+
+console.log("\n【42】 发消息前等挂账（2.18.0 generate_interceptor）：等落账再放行、贴耳已是新账；超时放行；swipe 不等直接掐；关掉就不等");
+await (async () => {
+    const { w, tavern, F, EPK } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    ok(typeof w.ipeGenerateInterceptor === "function", "window.ipeGenerateInterceptor 挂上了（manifest 里声明的名字）");
+    F("ipeLedgerCommit")("旧账本，够长够长够长够长够长够长。", 8);
+    F("ipeLedgerApplyEP")();
+    w.fetch = (u, o) => new Promise(res => setTimeout(() => res(okBody("等来的新账本，够长够长够长够长够长够长。")), 300));
+    F("ipeLedgerRun")(9, true);
+    await wait(20);
+    const t0 = Date.now();
+    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    ok(Date.now() - t0 >= 150 && !F("ipeLedgerRead")().current.includes("旧账本"), "拦截器等到挂账落账才返回（等了 " + (Date.now() - t0) + " ms）");
+    ok(String(tavern.extensionPrompts[EPK].value).indexOf("等来的新账本") >= 0, "放行时贴耳已经是新账");
+    ok(statusText(w).indexOf("读到的是新账") >= 0, "状态行说这一发读到的是新账", statusText(w));
+    // 超时：最多等 0.3 秒
+    st.ledgerWaitMaxSec = 0.3;
+    w.fetch = (u, o) => new Promise((res, rej) => { o.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); }); });
+    F("ipeLedgerRun")(9, true); await wait(20);
+    const t1 = Date.now();
+    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    ok(Date.now() - t1 >= 280 && Date.now() - t1 < 1500, "超时放行（等了 " + (Date.now() - t1) + " ms）");
+    ok(statusText(w).indexOf("先送出去") >= 0, "状态行说先送出去了", statusText(w));
+    F("ipeLedgerStop")(); await wait(50);
+    // swipe：正在挂末楼 → 掐掉不等
+    F("ipeLedgerRun")(9, true); await wait(20);
+    const t2 = Date.now();
+    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "swipe");
+    ok(Date.now() - t2 < 100, "swipe 不等，立刻返回");
+    await wait(60);
+    ok(statusText(w).indexOf("已中断") >= 0, "正在挂的末楼被掐掉", statusText(w));
+    // 关掉开关：不等
+    st.ledgerWaitBeforeSend = false; st.ledgerWaitMaxSec = 60;
+    F("ipeLedgerRun")(9, true); await wait(20);
+    const t3 = Date.now();
+    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    ok(Date.now() - t3 < 100, "开关关着：不等");
+    F("ipeLedgerStop")(); await wait(50);
+})();
+
+console.log("\n【43】 补挂队列（2.18.0）：跑着的时候又来一楼，跑完自动补最新一楼；人掐的不补");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
+    st.ledgerAutoRun = true;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    let n = 0;
+    w.fetch = (u, o) => new Promise(res => setTimeout(() => { n++; res({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>第 " + n + " 次挂的账本，够长够长够长够长够长够长。</ledger>" } }] }) }); }, 150));
+    F("ipeLedgerRun")(9, true); await wait(20);
+    F("ipeLedgerRun")(9, true);
+    ok(statusText(w).indexOf("补挂") >= 0, "第二楼来了：状态行说记下了、跑完补挂", statusText(w));
+    await wait(700);
+    eq(n, 2, "跑完自动补了一次（共两次请求）");
+    ok(F("ipeLedgerRead")().current.indexOf("第 2 次") >= 0, "现任是补挂那次的");
+    // 人掐的不补
+    n = 0;
+    w.fetch = (u, o) => new Promise((res, rej) => { o.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); }); });
+    F("ipeLedgerRun")(9, true); await wait(20);
+    F("ipeLedgerRun")(9, true);
+    F("ipeLedgerStop")(); await wait(300);
+    eq(n, 0, "人掐了：排着的那次也不跑");
+})();
+
+console.log("\n【44】 失败自动重试一次（2.18.0）：5xx / 网络错重试且不计失败不弹卡；4xx 不重试；重试再败才计失败");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
+    st.ledgerRetryOnce = true; st.ledgerRetryDelayMs = 20;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    let calls = 0;
+    w.fetch = async () => { calls++; return calls === 1 ? { ok: false, status: 502, text: async () => "bad gateway" } : okBody("重试成功的账本，够长够长够长够长够长够长。"); };
+    await F("ipeLedgerRun")(9, true); await wait(200);
+    eq(calls, 2, "502 → 重试了一次");
+    ok(F("ipeLedgerRead")().current.indexOf("重试成功") >= 0, "重试那次落账了");
+    eq(F("failStreak")(), 0, "第一次失败不计入失败计数");
+    ok(!w.document.querySelector(".ipe-notice-card") || !String(w.document.body.textContent).includes("挂账失败 · 账本还是上一份"), "没弹失败卡");
+    // 4xx 不重试
+    calls = 0;
+    w.fetch = async () => { calls++; return { ok: false, status: 401, text: async () => "unauthorized" }; };
+    await F("ipeLedgerRun")(9, true); await wait(200);
+    eq(calls, 1, "401 不重试");
+    eq(F("failStreak")(), 1, "计一次失败");
+    // 两次都 5xx → 计失败
+    calls = 0;
+    w.fetch = async () => { calls++; return { ok: false, status: 503, text: async () => "unavailable" }; };
+    await F("ipeLedgerRun")(9, true); await wait(200);
+    eq(calls, 2, "503 重试一次后不再重试");
+    eq(F("failStreak")(), 2, "重试也失败才计失败");
+    // 网络错也重试
+    calls = 0; st.ledgerAutoRun = false;
+    w.fetch = async () => { calls++; if (calls === 1) throw new TypeError("Failed to fetch"); return okBody("网络恢复后的账本，够长够长够长够长够长够长。"); };
+    await F("ipeLedgerRun")(9, true); await wait(200);
+    eq(calls, 2, "Failed to fetch → 重试");
+    ok(F("ipeLedgerRead")().current.indexOf("网络恢复") >= 0, "重试落账");
+    // 开关关掉：不重试
+    st.ledgerRetryOnce = false; calls = 0;
+    w.fetch = async () => { calls++; return { ok: false, status: 502, text: async () => "bad gateway" }; };
+    await F("ipeLedgerRun")(9, true); await wait(200);
+    eq(calls, 1, "开关关着：不重试");
+})();
+
+console.log("\n【45】 从别的聊天继承账本（2.18.0）：列表同角色排前、盖当前楼号的戳、原账本进历史、对账不误杀；镜像带角色名");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    F("ipeLedgerCommit")("本聊天现任的账，够长够长够长够长够长。", 8);
+    const mirror = JSON.parse(w.localStorage.getItem("ipe_ledger_mirror_v2"));
+    eq(mirror["test-chat"].who, "苑无忧", "镜像里带了角色名");
+    mirror["old-chat-A"] = { v: 2, current: "别人的账：顾寒的旧聊天，够长够长够长。", versions: [], order: "", lastFloor: 77, updatedAt: 5000, who: "顾寒" };
+    mirror["old-chat-B"] = { v: 2, current: "同角色的账：苑无忧上一个聊天，买了去北京的票。", versions: [{ floor: 100, ts: 1, text: "x" }], order: "别的指令", lastFloor: 120, updatedAt: 3000, who: "苑无忧" };
+    mirror["empty-chat"] = { v: 2, current: "", versions: [], lastFloor: 3, updatedAt: 9000, who: "苑无忧" };
+    w.localStorage.setItem("ipe_ledger_mirror_v2", JSON.stringify(mirror));
+    const list = F("ipeLedgerInheritList")();
+    eq(list.map(x => x.key).join(","), "old-chat-B,old-chat-A", "列表：不含本聊天和空账本，同角色排前面，其余按时间");
+    F("ipeLedgerRefreshInherit")();
+    const sel = d.querySelector("#ipe-ledger-inherit-sel");
+    eq(sel.options.length, 3, "下拉 = 占位 + 两份");
+    ok(sel.options[1].textContent.indexOf("★") === 0 && sel.options[1].textContent.indexOf("苑无忧") >= 0 && sel.options[1].textContent.indexOf("第 120 楼") >= 0, "同角色那份带 ★、角色名、楼号", sel.options[1].textContent);
+    let asked = 0; w.confirm = () => { asked++; return true; };
+    sel.value = "old-chat-B"; d.querySelector("#ipe-ledger-inherit").click();
+    eq(asked, 1, "本聊天已有账本：问了一句");
+    let s = F("ipeLedgerRead")();
+    ok(s.current.indexOf("北京的票") >= 0, "现任换成了继承来的");
+    eq(s.lastFloor, 10, "盖本聊天当前楼号（10）的戳，不是原来的 120");
+    eq(s.versions.length, 1, "继承来的历史不带过来，只有本聊天原账本进了历史");
+    ok(s.versions[0].text.indexOf("本聊天现任") >= 0 && s.versions[0].floor === 8, "原账本进历史、楼号照旧");
+    eq(s.order, "别的指令", "本聊天 User 指令为空：连对方的 User 指令一起带过来");
+})();
 
 console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");
 await (async () => {
