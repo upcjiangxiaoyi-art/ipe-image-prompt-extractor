@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.18.0";
+var IPE_VERSION = "2.18.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -468,12 +468,17 @@ function ipeWriteJsonLS(key, obj) {
    副 AI 只喂最近几版（ipeLedgerHistoryBlock 只切前 n-1），里程碑不进 prompt，只是后悔药。 */
 var IPE_LEDGER_MILESTONE_SPAN = 10;
 var IPE_LEDGER_MILESTONE_MAX  = 12;
+/* 第二层里程碑（2.18.1）：每 100 楼一段，只在那一段里连一个 10 楼里程碑都没有时才留一版（同段留最新），最多 10 个。
+   12 个 10 楼里程碑只罩得住最近 120 楼；从一千多楼删回一百多楼，靠这层退。 */
+var IPE_LEDGER_MILESTONE2_SPAN = 100;
+var IPE_LEDGER_MILESTONE2_MAX  = 10;
 function ipeLedgerNormalize(raw) {
     var o = (raw && typeof raw === "object") ? raw : {};
     var vs = Array.isArray(o.versions) ? o.versions : [];
     var out = [];
     var cap = ipeLedgerVerMax();
     var seenFloor = {}, buckets = {}, milestones = 0;   // 一层一账：同楼多版只留最新（数组头部即最新）
+    var covered100 = {}, milestones2 = 0;                // 每个 100 楼段里有没有已留的版本（现任外的 cap 版 + 10 楼里程碑都算）
     for (var i = 0; i < vs.length; i++) {
         var v = vs[i];
         if (!v) continue;
@@ -485,12 +490,18 @@ function ipeLedgerNormalize(raw) {
             seenFloor[f] = true;
         }
         var item = { floor: f, ts: Number.isFinite(Number(v.ts)) ? Number(v.ts) : 0, text: t };
-        if (out.length < cap) { out.push(item); continue; }
-        if (f < 0 || cap < 1 || milestones >= IPE_LEDGER_MILESTONE_MAX) continue;   // 历史关到只留现任：不留里程碑
+        var b100 = f >= 0 ? Math.floor(f / IPE_LEDGER_MILESTONE2_SPAN) : -1;
+        if (out.length < cap) { out.push(item); if (b100 >= 0) covered100[b100] = true; continue; }
+        if (f < 0 || cap < 1) continue;                                          // 历史关到只留现任：不留里程碑
         var b = Math.floor(f / IPE_LEDGER_MILESTONE_SPAN);
-        if (buckets[b]) continue;
-        buckets[b] = true; milestones++;
-        out.push(item);
+        if (milestones < IPE_LEDGER_MILESTONE_MAX && !buckets[b]) {
+            buckets[b] = true; milestones++; covered100[b100] = true;
+            out.push(item); continue;
+        }
+        if (milestones2 < IPE_LEDGER_MILESTONE2_MAX && !covered100[b100]) {     // 这一百楼里一版都没有：留最新的这版
+            covered100[b100] = true; milestones2++;
+            out.push(item);
+        }
     }
     return {
         v: 2,

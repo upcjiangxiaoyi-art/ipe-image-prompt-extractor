@@ -647,7 +647,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.0") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.1") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -1157,7 +1157,21 @@ console.log("\n【41】 历史里程碑（2.17.0）：最近 2 版之外每 10 �
     // 上限 12 个里程碑
     const { tavern: t2, F: F2 } = boot(4);
     for (let f = 2; f <= 400; f += 2) F2("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
-    eq(F2("ipeLedgerRead")().versions.length, 2 + 12, "里程碑最多 12 个");
+    const f2 = F2("ipeLedgerRead")().versions.map(v => v.floor);
+    eq(f2.length, 2 + 12 + 2, "10 楼里程碑最多 12 个，之外每 100 楼一段各留一版（2.18.1）");
+    eq(f2.slice(14).join(","), "198,98", "100 楼层：只在没有 10 楼里程碑的那几段里留，同段留最新");
+    // 一千楼删回一百楼：靠 100 楼层退
+    const { tavern: t4, F: F4 } = boot(4);
+    for (let f = 2; f <= 1000; f += 2) F4("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    const f4 = F4("ipeLedgerRead")().versions.map(v => v.floor);
+    eq(f4.length, 2 + 12 + 8, "一千楼：2 + 12 + 8 个 100 楼里程碑（前两段已被 10 楼层罩住）");
+    ok(f4.indexOf(98) >= 0 && f4.indexOf(198) >= 0 && f4.indexOf(798) >= 0, "100 楼层落在 98 / 198 / … / 798");
+    for (let i = 0; i < 1000; i++) t4.chat.push({ is_user: i % 2 === 0, mes: "x" });
+    t4.chat.splice(110); F4("ipeLedgerReconcile")(110);
+    eq(F4("ipeLedgerRead")().lastFloor, 98, "从 1000 楼删回 110 楼：现任退到第 98 楼那版，不再整本清空");
+    const { tavern: t5, F: F5 } = boot(4);
+    for (let f = 2; f <= 3000; f += 2) F5("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    eq(F5("ipeLedgerRead")().versions.length, 2 + 12 + 10, "100 楼里程碑最多 10 个");
     // 历史关到只留现任：不留里程碑
     const { tavern: t3, F: F3 } = boot(4);
     t3.extensionSettings[F3("EXT_NAME")].ledgerVersionsN = 1;
