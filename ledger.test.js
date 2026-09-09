@@ -66,7 +66,7 @@ function boot(floors) {
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
-        "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
+        "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -647,7 +647,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.2") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.19.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -1201,7 +1201,7 @@ await (async () => {
     await wait(20);
     const t0 = Date.now();
     await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
-    ok(Date.now() - t0 >= 150 && !F("ipeLedgerRead")().current.includes("旧账本"), "拦截器等到挂账落账才返回（等了 " + (Date.now() - t0) + " ms）");
+    ok(!F("ipeLedgerRead")().current.includes("旧账本") && F("ipeLedgerRead")().current.includes("等来的新账本"), "拦截器等到挂账落账才返回（等了 " + (Date.now() - t0) + " ms）");
     ok(String(tavern.extensionPrompts[EPK].value).indexOf("等来的新账本") >= 0, "放行时贴耳已经是新账");
     ok(statusText(w).indexOf("读到的是新账") >= 0, "状态行说这一发读到的是新账", statusText(w));
     // 超时：最多等 0.3 秒
@@ -1318,6 +1318,54 @@ await (async () => {
     eq(s.versions.length, 1, "继承来的历史不带过来，只有本聊天原账本进了历史");
     ok(s.versions[0].text.indexOf("本聊天现任") >= 0 && s.versions[0].floor === 8, "原账本进历史、楼号照旧");
     eq(s.order, "别的指令", "本聊天 User 指令为空：连对方的 User 指令一起带过来");
+})();
+
+console.log("\n【46】 压缩账本（2.19.0）：材料含规则与现任账本、走预览、采用后旧版标「压缩前」进历史且不喂副 AI、比例提示、阈值提醒、自定义指令");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    const st = withApi(tavern, F, "gpt-4.1");
+    const big = "【楼层状态】\n" + Array.from({ length: 60 }, (_, i) => "- 第 " + (i + 1) + " 条：某支线的过程描写，够长够长够长够长够长。").join("\n");
+    F("ipeLedgerCommit")(big, 10);
+    st.ledgerCompressWarnChars = 1000;
+    ok(F("ipeLedgerVersionInfo")().indexOf("账本 " + big.length + " 字") >= 0 && F("ipeLedgerVersionInfo")().indexOf("压缩一版") >= 0, "版本信息报字数，超过 3000 提醒可以压缩", F("ipeLedgerVersionInfo")());
+    let sent = null;
+    const small = "【楼层状态】\n- 支线已了结：结果一句话。\n- 硬设定：左肩刀伤第 10 楼起。";
+    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + small + "</ledger>" } }] }) }; };
+    await F("ipeLedgerCompress")();
+    ok(sent.messages[0].role === "system" && sent.messages[0].content.length > 100, "system 是当前生效的挂账规则");
+    ok(sent.messages[1].content.indexOf("【现任账本（" + big.length + " 字）】") >= 0 && sent.messages[1].content.indexOf("只删不添") >= 0 && sent.messages[1].content.indexOf("<ledger>") >= 0, "user 材料：现任账本 + 内置压缩指令 + 包裹要求");
+    ok(sent.messages[1].content.indexOf("【本轮正文】") < 0, "不带正文、不按楼挂");
+    const box = d.querySelector("#ipe-ledger-preview-box"), pv = d.querySelector("#ipe-ledger-preview");
+    ok(box.style.display !== "none" && pv.value === small, "结果进预览框，没直接落账");
+    ok(d.querySelector("#ipe-ledger-preview-tip").textContent.indexOf("%") >= 0, "提示带压缩比例");
+    eq(F("ipeLedgerRead")().current, big, "采用前账本没动");
+    d.querySelector("#ipe-ledger-adopt").click();
+    let s = F("ipeLedgerRead")();
+    eq(s.current, small, "采用后现任是压缩版");
+    eq(s.lastFloor, 10, "楼号不变");
+    ok(s.versions[0].tag === "压缩前" && s.versions[0].text === big && s.versions[0].floor === 10, "压缩前那版标记进历史");
+    const his = F("ipeLedgerHistoryBlock")();
+    ok(his.indexOf("某支线的过程描写") < 0 && his.indexOf("支线已了结") >= 0, "压缩前的全本不再喂给副 AI，只喂压缩版");
+    ok(box.style.display === "none", "预览收起");
+    F("ipeLedgerCommit")("第 12 楼的新账，够长够长够长够长够长。", 12);
+    s = F("ipeLedgerRead")();
+    ok(s.versions.some(v => v.tag === "压缩前") && s.versions.some(v => v.floor === 10 && !v.tag), "下一楼落账后：压缩前备份和第 10 楼压缩版并存，不被同楼去重吃掉");
+    F("ipeLedgerRefreshEditors")();
+    ok(Array.from(d.querySelector("#ipe-ledger-vers").options).some(o => o.textContent.indexOf("压缩前") >= 0), "历史下拉里能认出压缩前那版");
+    // 删得太狠 → 警告；自定义指令生效
+    st.ledgerCompressPrompt = "我的自定义压缩指令：只留三行";
+    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>太短</ledger>" } }] }) }; };
+    F("ipeLedgerCommit")(big, 14);
+    await F("ipeLedgerCompress")();
+    ok(sent.messages[1].content.indexOf("我的自定义压缩指令") >= 0 && sent.messages[1].content.indexOf("只删不添") < 0, "自定义指令替换内置");
+    ok(d.querySelector("#ipe-ledger-preview-tip").textContent.indexOf("⚠️") === 0, "只剩不到 30%：提示删得太狠");
+    d.querySelector("#ipe-ledger-preview-close").click();
+    eq(F("ipeLedgerRead")().current, big, "收起不采用：账本没动");
+    // 阈值 0 = 不提醒
+    st.ledgerCompressWarnChars = 0;
+    ok(F("ipeLedgerVersionInfo")().indexOf("压缩一版") < 0, "阈值 0：不提醒");
+    ok(!!d.querySelector("#ipe-ledger-compress") && !!d.querySelector("#ipe-ledger-compress-prompt") && !!d.querySelector("#ipe-ledger-compress-reset"), "面板里有压缩按钮 / 指令框 / 还原按钮");
 })();
 
 console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");

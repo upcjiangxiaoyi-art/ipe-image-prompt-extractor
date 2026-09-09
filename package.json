@@ -1,6 +1,6 @@
 {
   "name": "ipe-image-prompt-extractor",
-  "version": "2.18.2",
+  "version": "2.19.0",
   "private": true,
   "scripts": {
     "test": "node ledger.test.js"
