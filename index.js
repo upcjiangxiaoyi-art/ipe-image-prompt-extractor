@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.16.2";
+var IPE_VERSION = "2.17.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -456,13 +456,18 @@ function ipeWriteJsonLS(key, obj) {
 }
 
 /* ---- v2 结构规整：每次读都过，改 schema 不炸 ---- */
+/* 里程碑（2.17.0）：最近 cap 版之外，每 10 楼再留一版（同一段留最新那版），最多 12 个。
+   历史默认只留 2 版，倒退十几楼就没底稿可退、整本清空只剩近几楼摘要；有里程碑就能退到最近的那一版。
+   副 AI 只喂最近几版（ipeLedgerHistoryBlock 只切前 n-1），里程碑不进 prompt，只是后悔药。 */
+var IPE_LEDGER_MILESTONE_SPAN = 10;
+var IPE_LEDGER_MILESTONE_MAX  = 12;
 function ipeLedgerNormalize(raw) {
     var o = (raw && typeof raw === "object") ? raw : {};
     var vs = Array.isArray(o.versions) ? o.versions : [];
     var out = [];
     var cap = ipeLedgerVerMax();
-    var seenFloor = {};                               // 一层一账：同楼多版只留最新（数组头部即最新）
-    for (var i = 0; i < vs.length && out.length < cap; i++) {
+    var seenFloor = {}, buckets = {}, milestones = 0;   // 一层一账：同楼多版只留最新（数组头部即最新）
+    for (var i = 0; i < vs.length; i++) {
         var v = vs[i];
         if (!v) continue;
         var t = String(v.text == null ? "" : v.text);
@@ -472,7 +477,13 @@ function ipeLedgerNormalize(raw) {
             if (seenFloor[f]) continue;
             seenFloor[f] = true;
         }
-        out.push({ floor: f, ts: Number.isFinite(Number(v.ts)) ? Number(v.ts) : 0, text: t });
+        var item = { floor: f, ts: Number.isFinite(Number(v.ts)) ? Number(v.ts) : 0, text: t };
+        if (out.length < cap) { out.push(item); continue; }
+        if (f < 0 || cap < 1 || milestones >= IPE_LEDGER_MILESTONE_MAX) continue;   // 历史关到只留现任：不留里程碑
+        var b = Math.floor(f / IPE_LEDGER_MILESTONE_SPAN);
+        if (buckets[b]) continue;
+        buckets[b] = true; milestones++;
+        out.push(item);
     }
     return {
         v: 2,
@@ -2438,6 +2449,33 @@ function ipeLedgerRefreshBotEditors() {
 }
 
 /* 落盘 → 贴耳 → 刷预览 → 楼内重绘，一条龙 */
+/* 改楼（2.17.0）：第 i 楼（0-based）正文改了。现任账本若正是按这楼记的，那是照改前正文记的，作废，
+   回退到更早的版本；自动挂账开着就立刻按改后的正文重挂。
+   改更早的楼不动账（改个错别字不该丢记忆），只提示；改比账本还高的楼，账本本来就没记到那，不管。
+   典型场景：倒退回第 110 楼把回复改掉再续写——以前 110 楼那份「买票去北京」的账原样留着。 */
+function ipeLedgerOnEdited(i) {
+    var st = ipeLedgerRead();
+    var floor = i + 1;
+    if (!String(st.current || "").trim() || st.lastFloor < 0) return;
+    if (floor > st.lastFloor) return;
+    if (floor < st.lastFloor) {
+        ipeLedgerStatus("第 " + floor + " 楼改过了，比现任账本（第 " + st.lastFloor + " 楼）早，账本没动；要按改后的正文重记就点「重新挂账」", "#c9a227");
+        return;
+    }
+    ipeLedgerReconcile(i, { silent: true });
+    ipeLedgerApplyEP();
+    try { ipeLedgerRefreshEditors(); ipeLedgerRefreshEpPreview(); ipeLedgerRefreshBotEditors(); ipeLedgerRenderInline(); } catch(eR) {}
+    var st2 = ipeLedgerRead();
+    var auto = cfg().ledgerAutoRun === true;
+    var msg = null; try { msg = (ctx().chat || [])[i]; } catch(eM) {}
+    var rerun = auto && msg && !msg.is_user && msg.is_system !== true;
+    ipeLedgerStatus("第 " + floor + " 楼改过了，那楼的账作废"
+        + (st2.lastFloor >= 0 ? "，回退到第 " + st2.lastFloor + " 楼的账" : "，账本已清空")
+        + (rerun ? "，正在按改后的正文重挂…" : ""), "#c9a227");
+    try { console.log("[IPE] 改楼对账", { floor: floor, fallback: st2.lastFloor, rerun: !!rerun }); } catch(eL) {}
+    if (rerun) ipeLedgerRun(i, true);
+}
+
 function ipeLedgerSync() {
     try { ipeLedgerReconcile(ipeFloorNo()); } catch(eRec) {}   // 先对账再贴耳，幽灵账进不了 prompt
     ipeLedgerApplyEP();
@@ -6302,6 +6340,13 @@ function bindAll() {
                     setTimeout(function(){ try { ipeLedgerReconcile(ipeFloorNo()); ipeLedgerSync(); } catch(eD) {} }, 400);
                 });
             }
+            if (cd.event_types.MESSAGE_EDITED) {
+                cd.eventSource.on(cd.event_types.MESSAGE_EDITED, function(mesId){
+                    var i = Number(mesId);
+                    if (!Number.isFinite(i) || i < 0) return;
+                    setTimeout(function(){ try { ipeLedgerOnEdited(i); } catch(eE) {} }, 300);
+                });
+            }
             if (cd.event_types.MESSAGE_SWIPED) {
                 cd.eventSource.on(cd.event_types.MESSAGE_SWIPED, function(mesId){
                     // 重roll第 i 楼（0-based）→ 那楼换了灵魂，它的账（floor=i+1）连同更高楼一起碎 → limit=i
@@ -6312,7 +6357,8 @@ function bindAll() {
             }
             console.log("[IPE] 挂账楼层对账已绑定", {
                 del:   !!cd.event_types.MESSAGE_DELETED,
-                swipe: !!cd.event_types.MESSAGE_SWIPED
+                swipe: !!cd.event_types.MESSAGE_SWIPED,
+                edit:  !!cd.event_types.MESSAGE_EDITED
             });
         }
     } catch(e) { console.log("[IPE] 楼层对账事件绑定跳过"); }

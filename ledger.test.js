@@ -34,7 +34,7 @@ function makeTavern(floors) {
         event_types: {
             GENERATION_STARTED: "GENERATION_STARTED", MESSAGE_SENT: "MESSAGE_SENT",
             MESSAGE_RECEIVED: "MESSAGE_RECEIVED", MESSAGE_SWIPED: "MESSAGE_SWIPED",
-            MESSAGE_DELETED: "MESSAGE_DELETED", CHAT_CHANGED: "CHAT_CHANGED"
+            MESSAGE_DELETED: "MESSAGE_DELETED", MESSAGE_EDITED: "MESSAGE_EDITED", CHAT_CHANGED: "CHAT_CHANGED"
         },
         chatMetadata: {},
         characters: [{ name: "苑无忧", avatar: "yuan.png" }, { name: "顾寒", avatar: "gu.png" }], characterId: 0, groupId: null, name2: "苑无忧",
@@ -646,7 +646,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.16.2") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.17.0") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -1102,6 +1102,66 @@ await (async () => {
     eq(F("ipeGetSuppPresets")().join("|"), "只画一个人", "删掉选中的那条");
     eq(sel.options.length, 2, "下拉同步少一条");
 })();
+
+console.log("\n【40】 改楼撕账（2.17.0）：改现任账本那楼 → 那楼的账作废回退；改更早的楼不动；自动挂账开着就按改后正文重挂");
+await (async () => {
+    const { w, tavern, F, EPK } = boot(10);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    F("ipeLedgerCommit")("八楼的账：两人还在食堂，够长够长够长够长。", 8);
+    F("ipeLedgerCommit")("十楼的账：买了去北京的票，够长够长够长够长。", 10);
+    F("ipeLedgerApplyEP")();
+    ok(String(tavern.extensionPrompts[EPK].value).indexOf("北京") >= 0, "改之前贴耳里有北京");
+    // 改更早的楼：不动账
+    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await wait(400);
+    eq(F("ipeLedgerRead")().lastFloor, 10, "改第 4 楼：现任账本还是第 10 楼的");
+    // 改现任账本那楼（第 10 楼 = idx 9），自动挂账关着
+    tavern.chat[9].mes = "第 10 层改过的正文：不去北京了，留在学校。够长够长够长够长够长够长。";
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(400);
+    let s = F("ipeLedgerRead")();
+    eq(s.lastFloor, 8, "改第 10 楼：那楼的账作废，回退到第 8 楼的账");
+    ok(s.current.indexOf("北京") < 0 && s.current.indexOf("食堂") >= 0, "现任账本是食堂那份");
+    ok(String(tavern.extensionPrompts[EPK].value).indexOf("北京") < 0, "贴耳里北京没了（改完不 roll 直接续写也干净）");
+    // 自动挂账开着：改完立刻按改后正文重挂
+    withApi(tavern, F, "gpt-4.1");
+    let sent = null;
+    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>重挂的账：留在学校，不去北京。够长够长够长够长够长够长。</ledger>" } }] }) }; };
+    st.ledgerAutoRun = true;
+    F("ipeLedgerCommit")("十楼的账：买了去北京的票，够长够长够长够长。", 10);
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(600);
+    s = F("ipeLedgerRead")();
+    ok(!!sent && JSON.stringify(sent).indexOf("不去北京了，留在学校") >= 0, "副 AI 收到的是改后的正文");
+    ok(!!sent && JSON.stringify(sent.messages).indexOf("买了去北京的票") < 0, "副 AI 拿到的底稿里没有作废的北京账");
+    eq(s.lastFloor, 10, "重挂后现任回到第 10 楼");
+    ok(s.current.indexOf("重挂的账") >= 0, "现任是按改后正文重挂的那份");
+})();
+
+console.log("\n【41】 历史里程碑（2.17.0）：最近 2 版之外每 10 楼留一版，倒退十几楼也有底稿；副 AI 只喂最近几版");
+{
+    const { tavern, F } = boot(40);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    for (let f = 2; f <= 40; f += 2) F("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    let s = F("ipeLedgerRead")();
+    const floors = s.versions.map(v => v.floor);
+    eq(floors.slice(0, 2).join(","), "38,36", "最近 2 版照旧");
+    eq(floors.slice(2).join(","), "34,28,18,8", "之后每 10 楼一个里程碑（同段留最新）");
+    const his = F("ipeLedgerBuildUser")(tavern.chat[39].mes, "", 40);
+    ok(his.indexOf("第 38 楼时版本") >= 0 && his.indexOf("第 36 楼时版本") >= 0 && his.indexOf("第 34 楼时版本") < 0 && his.indexOf("第 8 楼时版本") < 0, "副 AI 只喂最近 2 版，里程碑不进 prompt");
+    // 倒退回第 11 楼：以前整本清空，现在退到第 8 楼的里程碑
+    tavern.chat.splice(11); F("ipeLedgerReconcile")(11);
+    s = F("ipeLedgerRead")();
+    eq(s.lastFloor, 8, "删到第 11 楼：现任回退到第 8 楼的里程碑，不再整本清空");
+    ok(s.current.indexOf("第 8 楼的账") >= 0, "内容是第 8 楼那份");
+    // 上限 12 个里程碑
+    const { tavern: t2, F: F2 } = boot(4);
+    for (let f = 2; f <= 400; f += 2) F2("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    eq(F2("ipeLedgerRead")().versions.length, 2 + 12, "里程碑最多 12 个");
+    // 历史关到只留现任：不留里程碑
+    const { tavern: t3, F: F3 } = boot(4);
+    t3.extensionSettings[F3("EXT_NAME")].ledgerVersionsN = 1;
+    for (let f = 2; f <= 60; f += 2) F3("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    eq(F3("ipeLedgerRead")().versions.length, 0, "历史版本数设 1（只留现任）：没有里程碑");
+}
 
 console.log("\n【36】 NSFW 槽面板：开了场景模式才出现；有自己的下拉 / 名称 / 新增 / 删除 / 文本框；改文字只动 NSFW 库");
 await (async () => {
