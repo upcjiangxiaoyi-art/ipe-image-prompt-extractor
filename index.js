@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.18.1";
+var IPE_VERSION = "2.18.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -472,11 +472,16 @@ var IPE_LEDGER_MILESTONE_MAX  = 12;
    12 个 10 楼里程碑只罩得住最近 120 楼；从一千多楼删回一百多楼，靠这层退。 */
 var IPE_LEDGER_MILESTONE2_SPAN = 100;
 var IPE_LEDGER_MILESTONE2_MAX  = 10;
+/* 近处全留（2.18.2）：存档至少留最近 6 版，之后才跳到每 10 楼一版。
+   以前只留「让它看最近几版」那 2 版，105 楼删回 95 楼要退到 88；现在退到 94。
+   副 AI 仍只喂「让它看最近几版」那几版，多存的只是后悔药。 */
+var IPE_LEDGER_RECENT_KEEP = 6;
 function ipeLedgerNormalize(raw) {
     var o = (raw && typeof raw === "object") ? raw : {};
     var vs = Array.isArray(o.versions) ? o.versions : [];
     var out = [];
     var cap = ipeLedgerVerMax();
+    var keepRecent = cap < 1 ? 0 : Math.max(cap, IPE_LEDGER_RECENT_KEEP);   // 历史关到只留现任：什么都不存
     var seenFloor = {}, buckets = {}, milestones = 0;   // 一层一账：同楼多版只留最新（数组头部即最新）
     var covered100 = {}, milestones2 = 0;                // 每个 100 楼段里有没有已留的版本（现任外的 cap 版 + 10 楼里程碑都算）
     for (var i = 0; i < vs.length; i++) {
@@ -491,9 +496,13 @@ function ipeLedgerNormalize(raw) {
         }
         var item = { floor: f, ts: Number.isFinite(Number(v.ts)) ? Number(v.ts) : 0, text: t };
         var b100 = f >= 0 ? Math.floor(f / IPE_LEDGER_MILESTONE2_SPAN) : -1;
-        if (out.length < cap) { out.push(item); if (b100 >= 0) covered100[b100] = true; continue; }
-        if (f < 0 || cap < 1) continue;                                          // 历史关到只留现任：不留里程碑
-        var b = Math.floor(f / IPE_LEDGER_MILESTONE_SPAN);
+        var b = f >= 0 ? Math.floor(f / IPE_LEDGER_MILESTONE_SPAN) : -1;
+        if (out.length < keepRecent) {
+            out.push(item);
+            if (b100 >= 0) { covered100[b100] = true; buckets[b] = true; }   // 近处已有的段，里程碑不再重复留
+            continue;
+        }
+        if (f < 0 || cap < 1) continue;
         if (milestones < IPE_LEDGER_MILESTONE_MAX && !buckets[b]) {
             buckets[b] = true; milestones++; covered100[b100] = true;
             out.push(item); continue;

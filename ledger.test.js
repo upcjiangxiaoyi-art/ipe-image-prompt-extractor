@@ -647,7 +647,7 @@ await (async () => {
     eq(ov.style.position, "fixed", "弹窗定位内联，不依赖外部 CSS");
     ok(ov.style.zIndex === "2147483647" && ov.style.getPropertyPriority("z-index") === "important" && ov.style.display === "flex", "z-index 最大值且 important，压得住被强制到 2147483646 的面板");
     ok(/px$/.test(ov.style.height) && parseInt(ov.style.height, 10) === w.innerHeight, "jsdom 里 rect 为 0 → 触发像素兜底，高度=视口高");
-    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.1") >= 0, "面板底栏带版本号");
+    ok(d.querySelector("#ipe-panel .ipe-footer").textContent.indexOf("v2.18.2") >= 0, "面板底栏带版本号");
     eq(src.parentNode.querySelector(".ipe-zoom-btn").style.position, "absolute", "按钮定位内联");
     const big = ov.querySelector(".ipe-zoom-ta");
     big.value = "he leans on the door frame.";
@@ -1138,15 +1138,15 @@ await (async () => {
     ok(s.current.indexOf("重挂的账") >= 0, "现任是按改后正文重挂的那份");
 })();
 
-console.log("\n【41】 历史里程碑（2.17.0）：最近 2 版之外每 10 楼留一版，倒退十几楼也有底稿；副 AI 只喂最近几版");
+console.log("\n【41】 历史里程碑（2.17.0 / 2.18.2）：最近 6 版全留，之外每 10 楼、每 100 楼各留一版；副 AI 只喂最近几版");
 {
     const { tavern, F } = boot(40);
     const st = tavern.extensionSettings[F("EXT_NAME")];
     for (let f = 2; f <= 40; f += 2) F("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
     let s = F("ipeLedgerRead")();
     const floors = s.versions.map(v => v.floor);
-    eq(floors.slice(0, 2).join(","), "38,36", "最近 2 版照旧");
-    eq(floors.slice(2).join(","), "34,28,18,8", "之后每 10 楼一个里程碑（同段留最新）");
+    eq(floors.slice(0, 6).join(","), "38,36,34,32,30,28", "最近 6 版全留（2.18.2）");
+    eq(floors.slice(6).join(","), "18,8", "之后每 10 楼一个里程碑（近处已有的段不重复留）");
     const his = F("ipeLedgerBuildUser")(tavern.chat[39].mes, "", 40);
     ok(his.indexOf("第 38 楼时版本") >= 0 && his.indexOf("第 36 楼时版本") >= 0 && his.indexOf("第 34 楼时版本") < 0 && his.indexOf("第 8 楼时版本") < 0, "副 AI 只喂最近 2 版，里程碑不进 prompt");
     // 倒退回第 11 楼：以前整本清空，现在退到第 8 楼的里程碑
@@ -1158,20 +1158,28 @@ console.log("\n【41】 历史里程碑（2.17.0）：最近 2 版之外每 10 �
     const { tavern: t2, F: F2 } = boot(4);
     for (let f = 2; f <= 400; f += 2) F2("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
     const f2 = F2("ipeLedgerRead")().versions.map(v => v.floor);
-    eq(f2.length, 2 + 12 + 2, "10 楼里程碑最多 12 个，之外每 100 楼一段各留一版（2.18.1）");
-    eq(f2.slice(14).join(","), "198,98", "100 楼层：只在没有 10 楼里程碑的那几段里留，同段留最新");
+    eq(f2.length, 6 + 12 + 2, "近 6 版 + 10 楼里程碑最多 12 个 + 每 100 楼一段各留一版（2.18.1）");
+    eq(f2.slice(18).join(","), "198,98", "100 楼层：只在没有 10 楼里程碑的那几段里留，同段留最新");
     // 一千楼删回一百楼：靠 100 楼层退
     const { tavern: t4, F: F4 } = boot(4);
     for (let f = 2; f <= 1000; f += 2) F4("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
     const f4 = F4("ipeLedgerRead")().versions.map(v => v.floor);
-    eq(f4.length, 2 + 12 + 8, "一千楼：2 + 12 + 8 个 100 楼里程碑（前两段已被 10 楼层罩住）");
+    eq(f4.length, 6 + 12 + 8, "一千楼：6 + 12 + 8 个 100 楼里程碑（前两段已被 10 楼层罩住）");
     ok(f4.indexOf(98) >= 0 && f4.indexOf(198) >= 0 && f4.indexOf(798) >= 0, "100 楼层落在 98 / 198 / … / 798");
     for (let i = 0; i < 1000; i++) t4.chat.push({ is_user: i % 2 === 0, mes: "x" });
     t4.chat.splice(110); F4("ipeLedgerReconcile")(110);
     eq(F4("ipeLedgerRead")().lastFloor, 98, "从 1000 楼删回 110 楼：现任退到第 98 楼那版，不再整本清空");
     const { tavern: t5, F: F5 } = boot(4);
     for (let f = 2; f <= 3000; f += 2) F5("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
-    eq(F5("ipeLedgerRead")().versions.length, 2 + 12 + 10, "100 楼里程碑最多 10 个");
+    eq(F5("ipeLedgerRead")().versions.length, 6 + 12 + 10, "100 楼里程碑最多 10 个");
+    // 105 楼删回 95 楼：以前退到 88，现在退到 94
+    const { tavern: t6, F: F6 } = boot(4);
+    for (let f = 2; f <= 104; f += 2) F6("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+    for (let i = 0; i < 100; i++) t6.chat.push({ is_user: i % 2 === 0, mes: "x" });
+    t6.chat.splice(95); F6("ipeLedgerReconcile")(95);
+    eq(F6("ipeLedgerRead")().lastFloor, 94, "105 楼删回 95 楼：退到第 94 楼那版（近 6 版全留的效果）");
+    const u6 = F6("ipeLedgerBuildUser")("正文", "", 95);
+    ok(u6.indexOf("第 92 楼时版本") >= 0 && u6.indexOf("第 88 楼时版本") >= 0 && u6.indexOf("第 78 楼时版本") < 0, "副 AI 仍只喂最近 2 版旧账（92、88），更早的不进 prompt");
     // 历史关到只留现任：不留里程碑
     const { tavern: t3, F: F3 } = boot(4);
     t3.extensionSettings[F3("EXT_NAME")].ledgerVersionsN = 1;
