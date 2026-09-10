@@ -1914,3 +1914,80 @@ body:has(#ipe-panel.ipe-mist) #ipe-drawer .ipe-ledger-age {
 
 /* ---------- 自动挂账开关在左（2.12.4，防误触） ---------- */
 #ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) > label.ipe-switch-left { justify-content: flex-start !important; gap: 10px !important; }
+
+/* v2.19.1 · 清透收纳：常用内容在前，配置轻折叠。 */
+html #ipe-panel .ipe-section-header {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+    font-family: inherit;
+    font-weight: 550 !important;
+    letter-spacing: .045em !important;
+}
+html #ipe-panel .ipe-section-header:focus-visible,
+html #ipe-drawer .ipe-fold > summary:focus-visible,
+html #ipe-panel .ipe-fold > summary:focus-visible {
+    outline: 2px solid #93a9cb;
+    outline-offset: -3px;
+}
+html #ipe-panel .ipe-section-body { gap: 7px !important; padding: 0 11px 11px !important; }
+html #ipe-panel .ipe-section-body label,
+html #ipe-drawer .inline-drawer-content label {
+    font-size: 11px !important;
+    font-weight: 400 !important;
+    line-height: 1.55 !important;
+}
+html #ipe-panel .ipe-section-body :is(input[type="text"], input[type="password"], select, textarea),
+html #ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="password"], select, textarea) {
+    min-width: 0 !important;
+    max-width: 100%;
+    min-height: 35px !important;
+    padding: 7px 10px !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    line-height: 1.55 !important;
+    box-sizing: border-box;
+}
+html #ipe-panel .ipe-section-body select,
+html #ipe-drawer .inline-drawer-content select { padding-right: 28px !important; }
+html #ipe-panel .ipe-btn,
+html #ipe-drawer .menu_button {
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+    font-size: 11.5px !important;
+    font-weight: 500 !important;
+    border-radius: 10px !important;
+}
+html #ipe-panel .ipe-preview-actions,
+html #ipe-drawer .ipe-fold-body > div[style*="display:flex"] {
+    flex-wrap: wrap;
+    gap: 6px !important;
+}
+html #ipe-panel .ipe-preview-actions > .ipe-btn,
+html #ipe-drawer .ipe-fold-body > div[style*="display:flex"] > .menu_button {
+    flex: 1 1 110px;
+    white-space: normal;
+}
+html #ipe-panel .ipe-fold > summary,
+html #ipe-drawer .ipe-fold > summary {
+    font-size: 11px !important;
+    font-weight: 550 !important;
+    letter-spacing: .025em;
+    cursor: pointer;
+}
+html #ipe-drawer .ipe-organized-card { margin: 9px 0 !important; border-radius: 15px !important; }
+html #ipe-drawer .ipe-organized-card > summary { padding: 10px 12px !important; }
+html #ipe-panel .ipe-organized-card { margin: 9px 0 !important; }
+html #ipe-panel .ipe-tab::before,
+html #ipe-drawer .ipe-tab::before { font-size: 12px !important; font-weight: 550 !important; }
+html #ipe-panel .ipe-footer { font-size: 9px !important; padding: 7px 12px !important; }
+html #ipe-panel .ipe-panel-title { font-size: 14px !important; }
+
+html #ipe-drawer .inline-drawer-content > div:has(> label) > label { display: flex !important; align-items: center !important; justify-content: space-between !important; width: 100% !important; }
