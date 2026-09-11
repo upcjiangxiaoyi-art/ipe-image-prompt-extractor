@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.3";
+var IPE_VERSION = "2.19.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2887,14 +2887,15 @@ function ipeAddApiProfile() {
         name: "API " + (list.length + 1),
         endpoint: c.apiEndpoint || "",
         key: c.apiKey || "",
-        model: c.model || ""
+        model: ""   // 2.19.4：不沿用旧预设的模型，新地址得自己拉一次列表
     };
     list.push(item);
     ipeSaveApiProfiles(list, true);
     saveCritical("activeApiProfile", item.id);
     ipeApplyApiProfile(item);
     ipeRefreshApiProfileEditors();
-    setStatus("已新增 API 预设，可直接改名和填写 key", "#6ec577");
+    ipeSetModelsStatus("新预设还没拉过模型，填好地址和 key 后点「加载模型」", "#888");
+    setStatus("已新增 API 预设，填好地址和 key 后点「加载模型」", "#6ec577");
 }
 
 function ipeDeleteApiProfile() {
@@ -2918,10 +2919,49 @@ function ipeDeleteApiProfile() {
     setStatus("已删除当前 API 预设", "#6ec577");
 }
 
+/* 2.19.4：模型下拉里的列表是「哪套预设拉的」记在 data-ipe-models-of 上。
+   新增 / 切换预设时列表不属于当前预设，就只留占位 + 这套预设已保存的模型，
+   不再把旧 API 的列表原样挂着让人误以为拉到了。 */
+function ipeResetModelSelect(selectId, model, note) {
+    var el = q("#" + selectId);
+    if (!el) return;
+    model = String(model || "");
+    var d = ipeRootDocument();
+    el.innerHTML = "";
+    var first = d.createElement("option");
+    first.value = "";
+    first.textContent = note || "请先加载模型";
+    el.appendChild(first);
+    if (model) {
+        first.disabled = true;
+        var opt = d.createElement("option");
+        opt.value = model;
+        opt.textContent = model + " (已保存)";
+        el.appendChild(opt);
+        el.value = model;
+    } else {
+        el.value = "";
+    }
+    el.setAttribute("data-ipe-models-of", String(ipeGetActiveApiProfileId()));
+}
+
+function ipeSetModelsStatus(text, color) {
+    ["#ipe-models-status", "#iped-models-status"].forEach(function(id){
+        var e = q(id); if (!e) return;
+        e.textContent = text || "";
+        e.style.color = color || "";
+        e.style.display = text ? "" : "none";
+    });
+}
+
 function ipeEnsureModelOption(selectId, model) {
     var el = q("#" + selectId);
     if (!el) return;
     model = String(model || "");
+    if (el.getAttribute("data-ipe-models-of") !== String(ipeGetActiveApiProfileId())) {
+        ipeResetModelSelect(selectId, model);
+        return;
+    }
     var found = false;
     for (var i = 0; i < el.options.length; i++) {
         if (String(el.options[i].value) === model) found = true;
@@ -3590,14 +3630,17 @@ async function fetchModels() {
     var url = buildModelsUrl(c.apiEndpoint);
     var headers = {};
     if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    var profileId = ipeGetActiveApiProfileId();
 
     try {
         setStatus("正在拉取模型…", "#6ec577");
+        ipeSetModelsStatus("正在拉取模型…", "#6ec577");
 
+        // 2.19.4：requestTimeout 默认 0 = 不设超时，中转挂死会「正在拉取」到天荒地老；拉模型至少给 30 秒
         var res = await ipeFetchWithTimeout(url, {
             method: "GET",
             headers: headers
-        }, Number(cfg().requestTimeout || 0));
+        }, Number(cfg().requestTimeout || 0) || 30000);
 
         var raw = await res.text();
 
@@ -3644,12 +3687,32 @@ async function fetchModels() {
                 sel.value = models[0];
                 ipeSetApiProfileField("model", models[0]);
             }
+            sel.setAttribute("data-ipe-models-of", String(profileId));
         });
 
         setStatus("已加载 " + models.length + " 个模型", "#6ec577");
+        ipeSetModelsStatus("已加载 " + models.length + " 个模型（" + url + "）", "#6ec577");
     } catch(e) {
         console.error("[IPE] fetchModels:", e);
-        setStatus("拉取模型失败：" + e.message, "#d4726a");
+        var msg = (e && e.name === "AbortError") ? "30 秒没回应，超时" : String((e && e.message) || e);
+        /* 2.19.4：失败以前只改预览区那行小字，下拉里旧 API 的列表原样挂着——
+           手机上按钮在下面、状态行在上面，人看不到报错，只看到「还是旧列表」。
+           现在：清掉旧列表、按钮旁边直接写失败、再弹一张常驻错误卡把请求地址写明。 */
+        var saved = ipeGetActiveApiProfileItem().model || "";
+        ["ipe-model", "iped-model"].forEach(function(sid) {
+            ipeResetModelSelect(sid, saved, "拉取失败，旧列表已清空");
+        });
+        setStatus("拉取模型失败：" + msg, "#d4726a");
+        ipeSetModelsStatus("拉取失败：" + msg, "#d4726a");
+        try {
+            ipeNotice({
+                kind: "error",
+                title: "小海螺 · 拉取模型失败",
+                body: "请求地址：" + url + "\n" + msg
+                    + "\n下拉里旧 API 的列表已清空。常见原因：这个中转不提供 /models 接口、地址多写或少写了 /v1、key 不对。",
+                sticky: true
+            });
+        } catch(_e) {}
     }
 }
 
@@ -4928,6 +4991,7 @@ function createPanel() {
         '<label>API 密钥<input type="password" id="ipe-api-key" value="'+esc(c.apiKey)+'" placeholder="sk-..."></label>'+
         '<label>模型</label><select id="ipe-model"><option value="'+esc(c.model)+'">'+(c.model?esc(c.model)+' (已保存)':'请先加载模型')+'</option></select>'+
         '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-btn-models" class="ipe-btn">加载模型</button><button id="ipe-btn-test" class="ipe-btn">测试连接</button></div>'+
+        '<div id="ipe-models-status" class="ipe-hint" style="display:none;white-space:pre-wrap;word-break:break-all"></div>'+
         '<div class="ipe-hint">可保存多个 API 预设；切换预设会同步地址、key 和模型。</div>');
 
     h += secHTML("system-prompt","系统提示", true,
@@ -5334,6 +5398,7 @@ function createDrawer() {
     h += '<label>API 密钥</label><input type="password" id="iped-api-key" class="text_pole" value="'+esc(c.apiKey)+'" placeholder="sk-...">';
     h += '<label>模型</label><select id="iped-model" class="text_pole"><option value="'+esc(c.model)+'">'+(c.model?esc(c.model)+' (已保存)':'请先加载模型')+'</option></select>';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-btn-models" class="menu_button" value="加载模型"><input type="button" id="iped-btn-test" class="menu_button" value="测试连接"></div>';
+    h += '<div id="iped-models-status" style="display:none;color:#888;font-size:12px;margin:4px 0;white-space:pre-wrap;word-break:break-all"></div>';
     h += '<small style="color:#888">可保存多个 API 预设；切换预设会同步地址、key 和模型。</small>';
     h += '<hr><small><b>系统提示</b></small>';
     h += '<label>系统提示预设</label><select id="iped-system-slot" class="text_pole"></select>';
