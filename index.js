@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.1";
+var IPE_VERSION = "2.19.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -5231,6 +5231,7 @@ function ipeArrangeUI() {
         if (prompt && prompt.closest("details") && !prompt.closest("details").dataset.ipeMemoryBound) prompt.closest("details").removeAttribute("open");
         if (nsfw && !nsfw.dataset.ipeMemoryBound) nsfw.removeAttribute("open");
     });
+    ipeArrangeLedgerDesk();
     var state = ipeFoldStates();
     d.querySelectorAll("#ipe-panel .ipe-section").forEach(function(section){
         if (typeof state[section.id] === "boolean") section.classList.toggle("collapsed", !state[section.id]);
@@ -5245,6 +5246,61 @@ function ipeArrangeUI() {
         fold.dataset.ipeMemoryBound = "1";
         if (typeof state[key] === "boolean") fold.open = state[key];
         fold.addEventListener("toggle", function(){ ipeRememberFold(key, fold.open); });
+    });
+}
+
+// Present the same existing ledger controls as a small desk, without rebuilding any input.
+function ipeArrangeLedgerDesk() {
+    var d = ipeRootDocument();
+    ["ipe", "iped"].forEach(function(prefix) {
+        var text = q("#" + prefix + "-ledger-text");
+        if (!text) return;
+        var body = prefix === "ipe" ? q("#ipe-section-ledger .ipe-section-body") : q('#ipe-drawer [data-ipe-tab="ledger"]');
+        if (!body || body.dataset.ipeDesk) return;
+        body.dataset.ipeDesk = "1";
+        body.classList.add("ipe-ledger-desk");
+        var nodes = Array.from(body.children), used = new Set();
+        function node(suffix) {
+            var el = q("#" + prefix + "-ledger-" + suffix);
+            while (el && el.parentElement !== body) el = el.parentElement;
+            return el;
+        }
+        function card(title, kind, folded) {
+            var box = d.createElement(folded ? "details" : "section");
+            box.className = "ipe-desk-card ipe-desk-" + kind + (folded ? " ipe-fold ipe-organized-card" : "");
+            if (folded) box.dataset.ipeFold = prefix + "-desk-" + kind;
+            var heading = d.createElement(folded ? "summary" : "h3");
+            heading.textContent = title; box.appendChild(heading);
+            var content = d.createElement("div"); content.className = "ipe-desk-content" + (folded ? " ipe-fold-body" : ""); box.appendChild(content);
+            return { box: box, content: content };
+        }
+        function take(target, el) { if (el && nodes.indexOf(el) >= 0 && !used.has(el)) { used.add(el); target.appendChild(el); } }
+        // Capture sibling relationships before moving fields.
+        var textNode = node("text"), order = node("order"), extra = node("extra");
+        var textLabel = textNode.previousElementSibling, orderLabel = order.previousElementSibling, extraLabel = extra.previousElementSibling;
+        var toolsStart = nodes.indexOf(node("compress")), toolsEnd = nodes.indexOf(node("ep-box"));
+        var history = node("age"), historyNote = history && history.nextElementSibling;
+        var record = card("当前账本", "record", false), request = card("本次挂账", "request", false), tools = card("账本管理 · 历史与备份", "tools", true);
+        var hero = d.createElement("div"); hero.className = "ipe-desk-overview";
+        [node("auto"), node("auto-hint"), node("chatkey")].forEach(function(el){ take(hero, el); });
+        [textLabel, textNode, node("save")].forEach(function(el){ take(record.content, el); });
+        [orderLabel, order, extraLabel, extra, node("run"), node("reconcile-box"), node("stop"), node("force"), node("status"), node("preview-box")].forEach(function(el){ take(request.content, el); });
+        for (var i = toolsStart; i >= 0 && i <= toolsEnd; i++) take(tools.content, nodes[i]);
+        take(tools.content, history); take(tools.content, historyNote);
+        var display = card("显示与贴耳", "display", true);
+        ["inline", "ep-enabled", "compress-prompt", "ep-depth"].forEach(function(key){ take(display.content, node(key)); });
+        var settings = d.createElement("section"); settings.className = "ipe-desk-settings";
+        var heading = d.createElement("h3"); heading.textContent = "规则与连接"; settings.appendChild(heading);
+        ["api", "prompt", "nsfw-fold", "mode-on", "rep-floors"].forEach(function(key){ take(settings, node(key)); });
+        nodes.forEach(function(el){ if (!used.has(el)) { if (el.tagName === "HR") el.remove(); else take(settings, el); } });
+        settings.appendChild(display.box);
+        body.appendChild(hero); body.appendChild(record.box); body.appendChild(request.box); body.appendChild(tools.box); body.appendChild(settings);
+        // Keep labels concise; the scope of each instruction remains explicit.
+        textLabel.textContent = "副 AI 记下的内容，也可以直接修改";
+        orderLabel.textContent = "长期指令 · 优先于副 AI 判断";
+        extraLabel.textContent = "这次补充 · 只对下一次挂账有效";
+        var run = q("#" + prefix + "-ledger-run");
+        if (run) { run.title = "读取最后一楼，先预览，再决定是否采用"; if (run.tagName === "INPUT") run.value = "重新挂账 · 先预览"; else run.textContent = "重新挂账 · 先预览"; }
     });
 }
 

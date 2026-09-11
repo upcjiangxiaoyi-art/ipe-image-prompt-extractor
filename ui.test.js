@@ -35,6 +35,15 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             check(!d.querySelector('#' + prefix + '-ledger-prompt').closest('details').open, prefix + '挂账规则折叠');
             check(!text.closest('details'), prefix + '账本编辑保持直接可见');
         }
+        for (const prefix of ['ipe', 'iped']) {
+            const el = suffix => d.querySelector('#' + prefix + '-ledger-' + suffix);
+            check(!!el('text').closest('.ipe-desk-record') && !!el('save').closest('.ipe-desk-record'), prefix + '账本与保存位于当前账本卡');
+            check(!!el('order').closest('.ipe-desk-request') && !!el('extra').closest('.ipe-desk-request'), prefix + '长期指令与一次性补充位于本次挂账卡');
+            for (const suffix of ['run', 'preview-box', 'stop', 'force']) check(!!el(suffix).closest('.ipe-desk-request') && !el(suffix).closest('details'), prefix + suffix + '不会被低频折叠隐藏');
+            check(!!el('export').closest('.ipe-desk-tools') && !!el('inherit').closest('.ipe-desk-tools') && !!el('age').closest('.ipe-desk-tools'), prefix + '备份继承历史集中收纳');
+            check(!!el('api').closest('.ipe-desk-settings') && !!el('prompt').closest('.ipe-desk-settings'), prefix + '规则与连接集中在底部');
+            check(!!el('inline').closest('.ipe-desk-display') && !!el('ep-enabled').closest('.ipe-desk-display'), prefix + '显示设置集中收起');
+        }
         const header = panel.querySelector('#ipe-section-api-config > .ipe-section-header');
         check(header.tagName === 'BUTTON' && header.type === 'button', '配置标题是可键盘操作的按钮');
         header.click();
