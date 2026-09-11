@@ -1992,66 +1992,74 @@ html #ipe-panel .ipe-panel-title { font-size: 14px !important; }
 
 html #ipe-drawer .inline-drawer-content > div:has(> label) > label { display: flex !important; align-items: center !important; justify-content: space-between !important; width: 100% !important; }
 
-/* v2.19.2 · 贝母手记：挂账工作区，静态雾光，清楚的操作层次。 */
+/* v2.19.3 · 海雾与月潮：保留挂账布局，浅蓝暖沙 / 深蓝微光。 */
 html #ipe-panel {
-    --ipe-ui-ink: #e8e5f6;
-    --ipe-ui-muted: #b7b1ce;
-    --ipe-ui-faint: #9994b3;
-    --ipe-ui-line: rgba(193,180,224,.16);
-    --ipe-ui-line-strong: rgba(193,180,224,.27);
-    --ipe-ui-card: rgba(39,39,65,.62);
-    --ipe-ui-card-strong: rgba(42,42,69,.83);
-    --ipe-ui-field: rgba(23,26,46,.76);
-    --ipe-ui-blue: #a7c6d9;
-    --ipe-ui-purple: #b3a1d6;
-    --ipe-ui-shadow: rgba(10,12,28,.22);
-    background: radial-gradient(ellipse at 0 0, rgba(126,102,166,.23), transparent 50%), radial-gradient(ellipse at 100% 40%, rgba(91,157,159,.12), transparent 52%), linear-gradient(155deg,#25263f,#1a2134 65%,#232338) !important;
+    --ipe-ui-ink: #deedf6;
+    --ipe-ui-muted: #a6c0d1;
+    --ipe-ui-faint: #8aa5b9;
+    --ipe-ui-line: rgba(137,188,218,.16);
+    --ipe-ui-line-strong: rgba(137,188,218,.27);
+    --ipe-ui-card: rgba(10,34,53,.62);
+    --ipe-ui-card-strong: rgba(12,38,58,.83);
+    --ipe-ui-field: rgba(4,20,35,.76);
+    --ipe-ui-blue: #86c4dc;
+    --ipe-ui-purple: #79a9cc;
+    --ipe-ui-shadow: rgba(0,12,26,.22);
+    --ipe-desk-action: linear-gradient(110deg,#254f74,#286781 58%,#397d8c);
+    --ipe-desk-action-ink: #edf8ff;
+    background: radial-gradient(ellipse at 6% 0, rgba(63,133,183,.28), transparent 48%), radial-gradient(ellipse at 100% 42%, rgba(62,175,194,.13), transparent 54%), linear-gradient(155deg,#102d46,#081d30 62%,#051321) !important;
     --ipe-desk-ink: var(--ipe-ui-ink);
     --ipe-desk-muted: var(--ipe-ui-muted);
     --ipe-desk-line: var(--ipe-ui-line);
     --ipe-desk-card: var(--ipe-ui-card-strong);
-    --ipe-desk-glow: rgba(160,138,205,.08);
+    --ipe-desk-glow: rgba(101,190,217,.08);
 }
 html #ipe-panel.ipe-mist {
-    --ipe-ui-ink: #49455f;
-    --ipe-ui-muted: #716b86;
-    --ipe-ui-faint: #847c95;
-    --ipe-ui-line: rgba(152,131,173,.16);
-    --ipe-ui-line-strong: rgba(152,131,173,.24);
+    --ipe-ui-ink: #354f65;
+    --ipe-ui-muted: #607a8e;
+    --ipe-ui-faint: #7b8e9c;
+    --ipe-ui-line: rgba(106,146,172,.16);
+    --ipe-ui-line-strong: rgba(106,146,172,.24);
     --ipe-ui-card: rgba(255,255,255,.55);
     --ipe-ui-card-strong: rgba(255,255,255,.76);
     --ipe-ui-field: rgba(255,255,255,.83);
-    --ipe-ui-blue: #87aebf;
-    --ipe-ui-purple: #b29bca;
-    --ipe-ui-shadow: rgba(111,92,142,.07);
-    --ipe-desk-glow: rgba(190,151,207,.10);
-    background: radial-gradient(ellipse at 0 0,#f5e4ef,transparent 54%), radial-gradient(ellipse at 100% 36%,#e6e5f8,transparent 55%), radial-gradient(ellipse at 16% 100%,#e3f0ee,transparent 52%),linear-gradient(150deg,#fbf7fb,#f1edf8 60%,#edf5f4) !important;
+    --ipe-ui-blue: #80acc9;
+    --ipe-ui-purple: #8ab7cb;
+    --ipe-ui-shadow: rgba(70,116,145,.07);
+    --ipe-desk-action: linear-gradient(110deg,#b9dceb,#d9eaf0 52%,#f1dfa9);
+    --ipe-desk-action-ink: #35536b;
+    --ipe-desk-glow: rgba(115,175,205,.10);
+    background: radial-gradient(ellipse at 0 0,rgba(125,193,229,.45),transparent 53%), radial-gradient(ellipse at 100% 12%,rgba(199,229,241,.6),transparent 52%), radial-gradient(ellipse at 85% 100%,rgba(244,213,142,.5),transparent 54%),linear-gradient(165deg,#d9ecf7,#edf5f7 44%,#fcf8ed 72%,#f5e7c3) !important;
 }
 html #ipe-drawer {
-    --iped-ink: #e8e5f6;
-    --iped-muted: #b7b1ce;
-    --iped-faint: #9994b3;
-    --iped-line: rgba(193,180,224,.16);
-    --iped-line-strong: rgba(193,180,224,.27);
-    --iped-field: rgba(23,26,46,.76);
+    --ipe-desk-action: linear-gradient(110deg,#254f74,#286781 58%,#397d8c);
+    --ipe-desk-action-ink: #edf8ff;
+    --iped-ink: #deedf6;
+    --iped-muted: #a6c0d1;
+    --iped-faint: #8aa5b9;
+    --iped-line: rgba(137,188,218,.16);
+    --iped-line-strong: rgba(137,188,218,.27);
+    --iped-field: rgba(4,20,35,.76);
     --ipe-desk-ink: var(--iped-ink);
     --ipe-desk-muted: var(--iped-muted);
     --ipe-desk-line: var(--iped-line);
-    --ipe-desk-card: rgba(42,42,69,.83);
-    --ipe-desk-glow: rgba(160,138,205,.08);
+    --ipe-desk-card: rgba(12,38,58,.83);
+    --ipe-desk-glow: rgba(101,190,217,.08);
 }
 html body:has(#ipe-panel.ipe-mist) #ipe-drawer {
-    --iped-ink: #49455f;
-    --iped-muted: #716b86;
-    --iped-faint: #847c95;
-    --iped-line: rgba(152,131,173,.16);
-    --iped-line-strong: rgba(152,131,173,.24);
+    --ipe-desk-action: linear-gradient(110deg,#b9dceb,#d9eaf0 52%,#f1dfa9);
+    --ipe-desk-action-ink: #35536b;
+    --iped-ink: #354f65;
+    --iped-muted: #607a8e;
+    --iped-faint: #7b8e9c;
+    --iped-line: rgba(106,146,172,.16);
+    --iped-line-strong: rgba(106,146,172,.24);
     --iped-field: rgba(255,255,255,.83);
     --ipe-desk-card: rgba(255,255,255,.76);
-    --ipe-desk-glow: rgba(190,151,207,.10);
+    --ipe-desk-glow: rgba(115,175,205,.10);
 }
-html #ipe-drawer > .inline-drawer { background: linear-gradient(150deg,#292940,#1d2638) !important; }
-html body:has(#ipe-panel.ipe-mist) #ipe-drawer > .inline-drawer { background: linear-gradient(145deg,#f7eaf3,#edeaf8 55%,#eaf4f1) !important; }
+html #ipe-drawer > .inline-drawer { background: radial-gradient(ellipse at 100% 15%,rgba(65,160,184,.16),transparent 52%),linear-gradient(155deg,#102d46,#081d30 65%,#051321) !important; }
+html body:has(#ipe-panel.ipe-mist) #ipe-drawer > .inline-drawer { background: radial-gradient(ellipse at 0 0,rgba(125,193,229,.35),transparent 52%),linear-gradient(155deg,#d9ecf7,#f0f6f5 48%,#fcf8ed 74%,#f5e7c3) !important; }
 html #ipe-panel #ipe-section-ledger { border: 0 !important; background: transparent !important; box-shadow: none !important; overflow: visible !important; }
 html #ipe-panel #ipe-section-ledger > .ipe-section-body { padding: 0 !important; border: 0 !important; }
 html #ipe-panel #ipe-section-ledger > .ipe-section-header { padding: 4px 3px 11px !important; min-height: 30px !important; }
@@ -2101,9 +2109,9 @@ html #ipe-panel [id="ipe-ledger-run"],
 html #ipe-drawer [id="iped-ledger-run"],
 html #ipe-panel.ipe-mist [id="ipe-ledger-run"],
 html body:has(#ipe-panel.ipe-mist) #ipe-drawer [id="iped-ledger-run"] {
-    background: linear-gradient(110deg,#e5cde1,#d5caef 55%,#c7e2e3) !important;
-    color: #514864 !important; -webkit-text-fill-color: #514864 !important;
-    border-color: rgba(174,149,193,.28) !important;
+    background: var(--ipe-desk-action) !important;
+    color: var(--ipe-desk-action-ink) !important; -webkit-text-fill-color: var(--ipe-desk-action-ink) !important;
+    border-color: var(--ipe-desk-line) !important;
     min-height: 38px !important;
 }
 html #ipe-panel .ipe-desk-request [id$="-ledger-preview-box"],
@@ -2118,3 +2126,13 @@ html #ipe-panel .ipe-tabs,
 html #ipe-panel.ipe-mist .ipe-tabs { background: var(--ipe-desk-glow) !important; border-color: var(--ipe-ui-line) !important; }
 html #ipe-panel .ipe-tab.ipe-tab-on,
 html #ipe-panel.ipe-mist .ipe-tab.ipe-tab-on { background: var(--ipe-ui-card-strong) !important; color: var(--ipe-ui-ink) !important; -webkit-text-fill-color: var(--ipe-ui-ink) !important; border-color: var(--ipe-ui-line-strong) !important; box-shadow: 0 2px 8px var(--ipe-ui-shadow) !important; }
+/* 主动作也随海色切换，白天蓝沙柔光，夜间深海青光。 */
+html #ipe-panel .ipe-btn-primary,
+html #ipe-panel.ipe-mist .ipe-btn-primary,
+html #ipe-drawer #iped-ledger-save,
+html body:has(#ipe-panel.ipe-mist) #ipe-drawer #iped-ledger-save {
+    background: var(--ipe-desk-action) !important;
+    color: var(--ipe-desk-action-ink) !important;
+    -webkit-text-fill-color: var(--ipe-desk-action-ink) !important;
+    border-color: var(--ipe-desk-line) !important;
+}
