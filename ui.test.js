@@ -104,13 +104,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         profileSel.value = oldProfile; profileSel.dispatchEvent(new w.Event('change', { bubbles: true })); await delay(30);
         check(settings.model === 'old-a' && JSON.stringify(options(modelSel)) === JSON.stringify(['', 'old-a']) && modelSel.value === 'old-a', '切回旧预设：只留它已保存的模型，不显示新预设的列表');
 
-        // 2.19.5 iOS 减负：浮标不再用滤镜与常驻动画；观察器防乒乓；镜像只在写过时重读
+        // 2.19.5/2.19.6 iOS 减负：观察器防乒乓；镜像只在写过时重读；浮标原样保留
         w.eval('window.ui.createChatQuickButton = createChatQuickButton; window.ui.ipeLedgerCommit = ipeLedgerCommit; window.ui.ipeLedgerRenderInline = ipeLedgerRenderInline; window.ui.ipeLedgerInstallInlineObserver = ipeLedgerInstallInlineObserver; window.ui.ipeLedgerSync = ipeLedgerSync; window.ui.ipeLedgerRefreshInherit = ipeLedgerRefreshInherit; window.ui.ipeLedgerSave = ipeLedgerSave; window.ui.ipeLedgerRead = ipeLedgerRead;');
         settings.showQuickEntry = true;
         w.ui.createChatQuickButton();
         const cap = d.querySelector('#ipe-chat-quick-entry');
-        check(!!cap && !cap.querySelector('animate'), '浮标 SVG 里没有常驻 <animate> 动画');
-        check(!!cap && !String(cap.getAttribute('style') || '').includes('drop-shadow') && String(cap.style.boxShadow || '').includes('rgba'), '浮标用普通 box-shadow，不用 filter: drop-shadow');
+        check(!!cap && !!cap.querySelector('animate') && String(cap.getAttribute('style') || '').includes('drop-shadow'), '浮标波纹动画与阴影滤镜按作者要求原样保留（2.19.6）');
         // 楼内展示：装一个「看到就抹掉」的敌对观察器，模拟别的扩展整楼重画
         d.body.insertAdjacentHTML('beforeend', '<div id="chat">' + tavern.chat.map((m, i) => '<div class="mes" mesid="' + i + '"' + (m.is_user ? ' is_user="true"' : '') + '><div class="mes_text">第 ' + (i + 1) + ' 楼</div></div>').join('') + '</div>');
         w.ui.ipeLedgerCommit('账本正文，够长够长够长够长够长够长够长够长。', tavern.chat.length);

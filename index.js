@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.5";
+var IPE_VERSION = "2.19.6";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4892,7 +4892,7 @@ function createChatQuickButton() {
     btn.id = "ipe-chat-quick-entry";
     btn.type = "button";
     /* 月灰入米霜 · SVG 胶囊皮肤（按钮外壳透明，视觉全由 SVG 承担） */
-    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="9" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.45"/><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
+    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="7" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.7"><animate attributeName="r" values="6;16" dur="3.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="3.4s" repeatCount="indefinite"/></circle><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
     btn.title = "可移动 IPE 快捷入口：拖动移动，点击打开小面板";
 
     function imp(k, v) {
@@ -4924,11 +4924,9 @@ function createChatQuickButton() {
     imp("font-size", "13px");
     imp("font-weight", "700");
     imp("line-height", "1");
-    /* 2.19.5 iOS 减负：以前是 filter: drop-shadow + SVG 里永远在跑的 <animate> 波纹。
-       WebKit 对「滤镜 + 逐帧动画」每帧都要重新光栅化整个元素，忙碌脉冲一起时更重，
-       长对话页面在 iOS 上就是被这种固定开销一点点顶到内存看门狗。
-       改成普通 box-shadow（不带 important，脉冲动画照样能压过它），波纹改静态。 */
-    btn.style.boxShadow = "0 6px 14px rgba(0,0,0,.30)";
+    btn.style.boxShadow = "none"; /* 不带 important：给脉冲动画让路 */
+    imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
+    /* 2.19.5 曾把滤镜和波纹动画拿掉，2.19.6 按作者要求原样恢复：作者用了很久没出过事，实测比推理硬。 */
     imp("z-index", "2147483647");
     imp("cursor", "grab");
     imp("pointer-events", "auto");
