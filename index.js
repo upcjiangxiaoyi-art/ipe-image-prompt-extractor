@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.4";
+var IPE_VERSION = "2.19.5";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -597,6 +597,7 @@ function ipeLedgerSave(state) {
             all[ipeChatKey()] = Object.assign({}, clean, { who: ipeCharName(), floors: ipeFloorNo() });   // 镜像多记角色名，「继承账本」列表用
             all = ipeLedgerPruneMirror(all, IPE_LEDGER_MIRROR_MAX_CHATS);
             lsOk = ipeWriteJsonLS(IPE_LEDGER_LS_KEY, all) !== false;
+            ipeLedgerMirrorDirty = true;
         } catch(eL) { lsOk = false; }
     }
     return { meta: metaOk, ls: lsOk };
@@ -1659,9 +1660,19 @@ function ipeLedgerInheritList() {
     out.sort(function(a, b){ return (Number(b.sameChar) - Number(a.sameChar)) || (b.updatedAt - a.updatedAt); });
     return out;
 }
-function ipeLedgerRefreshInherit() {
+/* 2.19.5：镜像是整份 localStorage JSON，每次刷新都要 parse 一遍；以前每来一楼刷好几遍。
+   现在只在镜像真的写过（落账 / 换聊天）或人点开下拉时才重读。 */
+var ipeLedgerMirrorDirty = true;
+function ipeLedgerRefreshInherit(force) {
+    var sels = ["ipe-ledger-inherit-sel", "iped-ledger-inherit-sel"];
+    if (force !== true && !ipeLedgerMirrorDirty) {
+        var filled = true;
+        sels.forEach(function(id){ var el = q("#" + id); if (el && !(el.options && el.options.length)) filled = false; });
+        if (filled) return;
+    }
+    ipeLedgerMirrorDirty = false;
     var list = ipeLedgerInheritList();
-    ["ipe-ledger-inherit-sel", "iped-ledger-inherit-sel"].forEach(function(id){
+    sels.forEach(function(id){
         var el = q("#" + id); if (!el) return;
         var cur = el.value;
         var html = '<option value="">从别的聊天继承账本…' + (list.length ? "（" + list.length + " 份）" : "（镜像里没有别的聊天）") + '</option>';
@@ -1790,6 +1801,65 @@ function ipeLedgerInspectEP() {
    ============================================================ */
 var IPE_LEDGER_INLINE_CLASS = "ipe-ledger-inline";
 
+/* 2.19.5 观察器防乒乓：楼内块和楼层 🎨 都是「看到 #chat 变动就补回来」。
+   要是别的扩展也是「看到变动就整楼重画」，两边会互相触发到内存爆掉。
+   这里给「补回来」记次数：窗口内超过上限就停手一段时间，只在控制台说一声。
+   停手期间自己的事件（落账、换聊天）照常重绘，只是不再被别人的变动牵着跑。 */
+function ipeMakeRepairGuard(name, maxHits, windowMs, coolMs) {
+    var hits = [], coolUntil = 0;
+    return {
+        allow: function(){
+            var now = Date.now();
+            if (now < coolUntil) return false;
+            while (hits.length && now - hits[0] > windowMs) hits.shift();
+            if (hits.length >= maxHits) {
+                coolUntil = now + coolMs;
+                hits = [];
+                try { console.warn("[IPE] " + name + "：" + windowMs / 1000 + " 秒内被抹掉 " + maxHits + " 次，像是和别的扩展互相触发，先停 " + coolMs / 1000 + " 秒"); } catch(e) {}
+                return false;
+            }
+            hits.push(now);
+            return true;
+        },
+        cooling: function(){ return Date.now() < coolUntil; }
+    };
+}
+/* 变动记录里只有「我们自己加进去的节点」→ 是自己刚补的，不用理。
+   有节点被摘掉（不管谁摘的）就要看一眼：别人抹掉了我们的块，得补；补几次还被抹就由 guard 停手。 */
+function ipeMutationsOnlyOurAdds(records, cls) {
+    try {
+        for (var i = 0; i < records.length; i++) {
+            var r = records[i];
+            if (r.type !== "childList") return false;
+            if (r.removedNodes && r.removedNodes.length) return false;
+            if (!r.addedNodes || !r.addedNodes.length) return false;
+            for (var k = 0; k < r.addedNodes.length; k++) {
+                var n = r.addedNodes[k];
+                if (!n || n.nodeType !== 1 || !n.classList || !n.classList.contains(cls)) return false;
+            }
+        }
+        return true;
+    } catch(e) { return false; }
+}
+/* 变动记录里有没有我们的节点被摘掉（直接摘，或整楼 / 整条操作栏被换掉时连带摘掉） */
+function ipeMutationsRemovedOurs(records, cls) {
+    try {
+        for (var i = 0; i < records.length; i++) {
+            var rn = records[i].removedNodes;
+            if (!rn || !rn.length) continue;
+            for (var k = 0; k < rn.length; k++) {
+                var n = rn[k];
+                if (!n || n.nodeType !== 1) continue;
+                if (n.classList && n.classList.contains(cls)) return true;
+                if (n.querySelector && n.querySelector("." + cls)) return true;
+            }
+        }
+    } catch(e) {}
+    return false;
+}
+var ipeLedgerInlineGuard = ipeMakeRepairGuard("楼内展示", 6, 30000, 120000);
+var ipeMesBtnGuard = ipeMakeRepairGuard("楼层 🎨 按钮", 8, 30000, 120000);
+
 function ipeLedgerRenderInline() {
     var d = ipeRootDocument();
     try {
@@ -1837,11 +1907,14 @@ function ipeLedgerInstallInlineObserver() {
         var chatEl = d.querySelector("#chat");
         if (!chatEl || typeof MutationObserver === "undefined") return;
         var t = null;
-        window.__ipeLedgerInlineObs = new MutationObserver(function(){
+        window.__ipeLedgerInlineObs = new MutationObserver(function(records){
+            if (ipeMutationsOnlyOurAdds(records, IPE_LEDGER_INLINE_CLASS)) return;   // 自己刚补的块，别自己触发自己
             // 酒馆重绘会抹掉 DOM 块，防抖后补回来
             if (t) clearTimeout(t);
             t = setTimeout(function(){
-                if (!d.querySelector("." + IPE_LEDGER_INLINE_CLASS)) ipeLedgerRenderInline();
+                if (d.querySelector("." + IPE_LEDGER_INLINE_CLASS)) return;
+                if (!ipeLedgerInlineGuard.allow()) return;                       // 2.19.5 被反复抹掉就停手
+                ipeLedgerRenderInline();
             }, 250);
         });
         window.__ipeLedgerInlineObs.observe(chatEl, { childList: true, subtree: true });
@@ -2674,8 +2747,16 @@ function ipeLedgerRefreshBotEditors() {
             ? "\u2139\uFE0F 这份预设没提 " + ipeLedgerTagOpen() + "，插件已自动在末尾附上包裹说明（只管包裹，不管你记什么）。想自己控制措辞就在预设里写一次，插件即刻让位。"
             : "\u2713 这份预设自己写了 " + ipeLedgerTagOpen() + "，插件不再附加任何内容。";
     });
-    var need = q("#ipe-ledger-size") || q("#iped-ledger-size");
-    if (need) {
+    /* 2.19.5：「拼装后约 N 字」要干跑一遍拼装（对账 + 摘要层正则扫楼）。它只是灰字，
+       不该挤在流刚结束那一刻和酒馆重绘、挂账启动抢主线程；挪到空闲时算，多次刷新合并成一次。 */
+    ipeLedgerScheduleEstimate();
+}
+var ipeLedgerEstimateTimer = null;
+function ipeLedgerScheduleEstimate() {
+    if (!(q("#ipe-ledger-size") || q("#iped-ledger-size"))) return;
+    if (ipeLedgerEstimateTimer) return;
+    var run = function(){
+        ipeLedgerEstimateTimer = null;
         var nchar = ipeLedgerEstimateChars();
         var warn  = nchar > IPE_LEDGER_REPORT_CAP;
         ["ipe-ledger-size","iped-ledger-size"].forEach(function(id){
@@ -2684,7 +2765,10 @@ function ipeLedgerRefreshBotEditors() {
                 + (warn ? "\u3000\u26A0\uFE0F 已超 " + IPE_LEDGER_REPORT_CAP.toLocaleString() + " 字上限，摘要层会从最旧开始丢" : "");
             el.style.color = warn ? "#c9a227" : "";
         });
-    }
+    };
+    var w = null; try { w = ipeRootWindow(); } catch(e) {}
+    if (w && typeof w.requestIdleCallback === "function") ipeLedgerEstimateTimer = w.requestIdleCallback(function(){ try { run(); } catch(e) { ipeLedgerEstimateTimer = null; } }, { timeout: 2000 });
+    else ipeLedgerEstimateTimer = setTimeout(function(){ try { run(); } catch(e) { ipeLedgerEstimateTimer = null; } }, 400);
 }
 
 /* 落盘 → 贴耳 → 刷预览 → 楼内重绘，一条龙 */
@@ -4808,7 +4892,7 @@ function createChatQuickButton() {
     btn.id = "ipe-chat-quick-entry";
     btn.type = "button";
     /* 月灰入米霜 · SVG 胶囊皮肤（按钮外壳透明，视觉全由 SVG 承担） */
-    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="7" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.7"><animate attributeName="r" values="6;16" dur="3.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="3.4s" repeatCount="indefinite"/></circle><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
+    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="9" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.45"/><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
     btn.title = "可移动 IPE 快捷入口：拖动移动，点击打开小面板";
 
     function imp(k, v) {
@@ -4840,8 +4924,11 @@ function createChatQuickButton() {
     imp("font-size", "13px");
     imp("font-weight", "700");
     imp("line-height", "1");
-    btn.style.boxShadow = "none"; /* 不带 important：给脉冲动画让路 */
-    imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
+    /* 2.19.5 iOS 减负：以前是 filter: drop-shadow + SVG 里永远在跑的 <animate> 波纹。
+       WebKit 对「滤镜 + 逐帧动画」每帧都要重新光栅化整个元素，忙碌脉冲一起时更重，
+       长对话页面在 iOS 上就是被这种固定开销一点点顶到内存看门狗。
+       改成普通 box-shadow（不带 important，脉冲动画照样能压过它），波纹改静态。 */
+    btn.style.boxShadow = "0 6px 14px rgba(0,0,0,.30)";
     imp("z-index", "2147483647");
     imp("cursor", "grab");
     imp("pointer-events", "auto");
@@ -6346,12 +6433,16 @@ function bindAll() {
     try {
         var d = ipeRootDocument ? ipeRootDocument() : document;
         if (typeof MutationObserver !== "undefined" && d.body && !window.__ipeQuickButtonObserver) {
+            /* 2.19.5：以前盯整棵 body 子树，流式输出每一帧都回调一次。浮标直接挂在 body 下，
+               只看 body 的直接子节点就能发现它被摘掉；再加 1 秒合并，一秒最多查一次。 */
             window.__ipeQuickButtonObserver = new MutationObserver(function(){
-                if (cfg().showQuickEntry && !q("#ipe-chat-quick-entry")) {
-                    setTimeout(createChatQuickButton, 100);
-                }
+                if (window.__ipeQuickButtonTimer) return;
+                window.__ipeQuickButtonTimer = setTimeout(function(){
+                    window.__ipeQuickButtonTimer = null;
+                    try { if (cfg().showQuickEntry && !q("#ipe-chat-quick-entry")) createChatQuickButton(); } catch(e) {}
+                }, 1000);
             });
-            window.__ipeQuickButtonObserver.observe(d.body, { childList: true, subtree: true });
+            window.__ipeQuickButtonObserver.observe(d.body, { childList: true });
         }
     } catch(e) {}
 
@@ -6828,7 +6919,7 @@ function bindAll() {
     [["ipe-ledger-inherit","ipe-ledger-inherit-sel"],["iped-ledger-inherit","iped-ledger-inherit-sel"]].forEach(function(pr){
         var b = q("#" + pr[0]); if (!b || b.__ipeBound) return; b.__ipeBound = true;
         b.addEventListener("click", function(){ ipeLedgerInheritClick(pr[1]); });
-        var s = q("#" + pr[1]); if (s) s.addEventListener("focus", ipeLedgerRefreshInherit);
+        var s = q("#" + pr[1]); if (s) s.addEventListener("focus", function(){ ipeLedgerRefreshInherit(true); });
     });
     try { ipeLedgerRefreshInherit(); } catch(eI) {}
 
@@ -6837,6 +6928,7 @@ function bindAll() {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
+                ipeLedgerMirrorDirty = true;   // 换了聊天，「继承」列表里该把上一个聊天算进来
                 setTimeout(function(){
                     ipeLedgerSync();
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
@@ -7153,6 +7245,7 @@ function ipeInstallMesButtons() {
     });
     return n;
 }
+var ipeMesBtnRemoved = false;
 function ipeInstallMesButtonsObserver() {
     try {
         if (window.__ipeMesBtnObs) return;
@@ -7160,9 +7253,18 @@ function ipeInstallMesButtonsObserver() {
         var chatEl = d.querySelector("#chat");
         if (!chatEl || typeof MutationObserver === "undefined") return;
         var t = null;
-        window.__ipeMesBtnObs = new MutationObserver(function(){
+        window.__ipeMesBtnObs = new MutationObserver(function(records){
+            if (ipeMutationsOnlyOurAdds(records, IPE_MES_BTN_CLASS)) return;     // 自己刚挂的按钮，别自己触发自己
+            if (ipeMutationsRemovedOurs(records, IPE_MES_BTN_CLASS)) ipeMesBtnRemoved = true;   // 有人摘了我们的按钮
             if (t) clearTimeout(t);
-            t = setTimeout(function(){ try { ipeInstallMesButtons(); } catch(e) {} }, 250);
+            t = setTimeout(function(){
+                var removed = ipeMesBtnRemoved; ipeMesBtnRemoved = false;
+                if (ipeMesBtnGuard.cooling()) return;
+                var n = 0;
+                try { n = ipeInstallMesButtons() || 0; } catch(e) {}
+                /* 2.19.5 只有「被摘掉后又补回去」才算一次乒乓；翻旧楼新渲染出来的楼挂按钮是正常的，不计 */
+                if (n > 0 && removed) ipeMesBtnGuard.allow();
+            }, 250);
         });
         window.__ipeMesBtnObs.observe(chatEl, { childList: true, subtree: true });
         if (!d.__ipeMesBtnClick) {

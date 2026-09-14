@@ -103,6 +103,43 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const profileSel = d.querySelector('#ipe-api-profile');
         profileSel.value = oldProfile; profileSel.dispatchEvent(new w.Event('change', { bubbles: true })); await delay(30);
         check(settings.model === 'old-a' && JSON.stringify(options(modelSel)) === JSON.stringify(['', 'old-a']) && modelSel.value === 'old-a', '切回旧预设：只留它已保存的模型，不显示新预设的列表');
+
+        // 2.19.5 iOS 减负：浮标不再用滤镜与常驻动画；观察器防乒乓；镜像只在写过时重读
+        w.eval('window.ui.createChatQuickButton = createChatQuickButton; window.ui.ipeLedgerCommit = ipeLedgerCommit; window.ui.ipeLedgerRenderInline = ipeLedgerRenderInline; window.ui.ipeLedgerInstallInlineObserver = ipeLedgerInstallInlineObserver; window.ui.ipeLedgerSync = ipeLedgerSync; window.ui.ipeLedgerRefreshInherit = ipeLedgerRefreshInherit; window.ui.ipeLedgerSave = ipeLedgerSave; window.ui.ipeLedgerRead = ipeLedgerRead;');
+        settings.showQuickEntry = true;
+        w.ui.createChatQuickButton();
+        const cap = d.querySelector('#ipe-chat-quick-entry');
+        check(!!cap && !cap.querySelector('animate'), '浮标 SVG 里没有常驻 <animate> 动画');
+        check(!!cap && !String(cap.getAttribute('style') || '').includes('drop-shadow') && String(cap.style.boxShadow || '').includes('rgba'), '浮标用普通 box-shadow，不用 filter: drop-shadow');
+        // 楼内展示：装一个「看到就抹掉」的敌对观察器，模拟别的扩展整楼重画
+        d.body.insertAdjacentHTML('beforeend', '<div id="chat">' + tavern.chat.map((m, i) => '<div class="mes" mesid="' + i + '"' + (m.is_user ? ' is_user="true"' : '') + '><div class="mes_text">第 ' + (i + 1) + ' 楼</div></div>').join('') + '</div>');
+        w.ui.ipeLedgerCommit('账本正文，够长够长够长够长够长够长够长够长。', tavern.chat.length);
+        let wiped = 0;
+        const hostile = new w.MutationObserver(recs => { recs.forEach(r => r.addedNodes.forEach(n => { if (n.classList && n.classList.contains('ipe-ledger-inline')) { wiped++; n.remove(); } })); });
+        hostile.observe(d.querySelector('#chat'), { childList: true, subtree: true });
+        w.ui.ipeLedgerInstallInlineObserver();
+        w.ui.ipeLedgerRenderInline();
+        await delay(3200);
+        const wipedAt3s = wiped;
+        check(wipedAt3s >= 2 && wipedAt3s <= 8, '楼内块被反复抹掉时补块有上限（3 秒内 ' + wipedAt3s + ' 次），不会无限乒乓');
+        await delay(1200);
+        check(wiped === wipedAt3s, '进入冷却后不再跟着别人的变动补块');
+        w.ui.ipeLedgerSync(); await delay(30);
+        check(wiped === wipedAt3s + 1, '冷却期间自己的落账 / 同步照常重绘楼内块');
+        hostile.disconnect();
+        // 继承列表：没写镜像就不重读 localStorage
+        w.eval('window.ui.LSK = IPE_LEDGER_LS_KEY;');
+        let lsReads = 0;
+        const rawGet = w.Storage.prototype.getItem;   // jsdom 的 Storage 实例上赋值会变成存一个键，得改原型
+        w.Storage.prototype.getItem = function(k){ if (k === w.ui.LSK) lsReads++; return rawGet.call(this, k); };
+        w.ui.ipeLedgerRefreshInherit(); w.ui.ipeLedgerRefreshInherit(); w.ui.ipeLedgerRefreshInherit();
+        const readsBefore = lsReads;
+        w.ui.ipeLedgerSave(w.ui.ipeLedgerRead());
+        const readsAfterSave = lsReads;
+        w.ui.ipeLedgerRefreshInherit();
+        check(readsBefore <= 1 && lsReads > readsAfterSave, '「继承账本」列表只在镜像写过之后才重读（连刷三次只读 ' + readsBefore + ' 次）');
+        w.Storage.prototype.getItem = rawGet;
+        check(!!d.querySelector('#ipe-ledger-size'), '字数估算灰字仍然存在（改为空闲时算）');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
