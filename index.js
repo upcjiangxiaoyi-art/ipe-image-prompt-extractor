@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.7";
+var IPE_VERSION = "2.19.8";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -546,7 +546,14 @@ function ipeLedgerMigrateV1(rawV1) {
     return st;
 }
 
+// 仅同步调用栈内复用；离开同步立即释放，保存时立即失效。
+var ipeLedgerReadScope = null;
 function ipeLedgerRead() {
+    if (!ipeLedgerReadScope) return ipeLedgerReadFresh();
+    if (!ipeLedgerReadScope.state) ipeLedgerReadScope.state = ipeLedgerReadFresh();
+    return ipeLedgerReadScope.state;
+}
+function ipeLedgerReadFresh() {
     // 1) v2 主档
     try {
         var root = ipeMetaRoot();
@@ -578,6 +585,8 @@ function ipeLedgerRead() {
 }
 
 function ipeLedgerSave(state) {
+    if (ipeLedgerReadScope) ipeLedgerReadScope.state = null;
+    ipeLedgerLastAutoInput = null; // 手动改账、回退、导入后允许重新自动挂账。
     var clean = ipeLedgerNormalize(state);
     clean.updatedAt = Date.now();
     var metaOk = false, lsOk = false;
@@ -1489,6 +1498,21 @@ function ipeLedgerShowForce(on) {
     });
 }
 
+var ipeLedgerActiveInput = null;
+var ipeLedgerLastAutoInput = null;
+var ipeLedgerChatEpoch = 0;
+function ipeLedgerInput(msg, floor) {
+    return { chat: ipeChatKey(), root: ipeMetaRoot(), epoch: ipeLedgerChatEpoch,
+        msg: msg, floor: floor, swipe: msg.swipe_id,
+        text: String(msg.mes || "") };
+}
+function ipeLedgerSameInput(a, b) {
+    return !!a && !!b && a.chat === b.chat && a.root === b.root && a.epoch === b.epoch
+        && a.msg === b.msg && a.floor === b.floor && a.swipe === b.swipe && a.text === b.text;
+}
+function ipeLedgerInputChatCurrent(input) {
+    return input.chat === ipeChatKey() && input.root === ipeMetaRoot() && input.epoch === ipeLedgerChatEpoch;
+}
 var ipeLedgerQueued = false;          // 2.18.0 补挂队列：跑着的时候又来了一楼，跑完自动补最新一楼
 /* 可重试：5xx / 429 / 408 / 网络错 / 中转回了非 JSON。看门狗超时不重试——默认 300 秒一次，再等一轮太久，按老规矩计失败。 */
 var IPE_LEDGER_RETRYABLE_RE = /^API (5\d\d|429|408)|Failed to fetch|NetworkError|Load failed|network|ECONN|socket|返回不是 JSON/i;
@@ -1498,12 +1522,6 @@ function ipeLedgerRetryable(e) {
 }
 async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
     retryAttempt = Number(retryAttempt || 0);
-    if (ipeLedgerBusy) {
-        if (silent) { ipeLedgerQueued = true; ipeLedgerStatus("挂账还在跑，这楼记下了，跑完自动补挂最新一楼", "#c9a227"); }
-        else ipeLedgerStatus("上一次挂账还没跑完", "#c9a227");
-        return;
-    }
-
     var msg = null, msgFloor = 0;
     try {
         var chat = ctx().chat;
@@ -1516,6 +1534,15 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
 
+    var input = ipeLedgerInput(msg, msgFloor);
+    if (silent && (ipeLedgerSameInput(input, ipeLedgerActiveInput)
+        || ipeLedgerSameInput(input, ipeLedgerLastAutoInput))) return;
+    if (ipeLedgerBusy) {
+        if (silent) { ipeLedgerQueued = true; ipeLedgerStatus("挂账还在跑，这楼记下了，跑完自动补挂最新一楼", "#c9a227"); }
+        else ipeLedgerStatus("上一次挂账还没跑完", "#c9a227");
+        return;
+    }
+    ipeLedgerActiveInput = input;
     ipeLedgerPreviewFloor = msgFloor;
     ipeLedgerSetBusy(true);
     ipeLedgerPending = null;
@@ -1523,6 +1550,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
     ipeLedgerStatus("自动挂账中…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var out = await ipeLedgerCallAPI(msg.mes, "", msgFloor);
+        if (!ipeLedgerInputChatCurrent(input)) return; // 旧聊天的请求不能落进新聊天。
         var usedMode = ipeLedgerLastMode;
         var got = ipeLedgerExtract(out);
 
@@ -1538,6 +1566,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
 
         if (body.replace(/\s+/g, "") === IPE_LEDGER_SENTINEL) { // 静默哨兵
             ipeLedgerModeAfterRun(usedMode);
+            ipeLedgerLastAutoInput = input;
             ipeLedgerStatus("本轮无变化（第 " + (msgFloor || ipeFloorNo()) + " 楼）" + note, "#6ec577");
             return;
         }
@@ -1574,7 +1603,9 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
             + (ipeLedgerReportTruncated ? "（report 层已截断）" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
+        ipeLedgerLastAutoInput = input;
     } catch(e) {
+        if (!ipeLedgerInputChatCurrent(input)) return;
         if (ipeLedgerIsAbort(e)) {
             ipeLedgerQueued = false;                       // 人掐的：排着的也别跑了
             ipeLedgerStatus("已中断挂账。账本没动，还是上一份。", "#c9a227");
@@ -1589,7 +1620,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
             var rIdx = (typeof targetIdx === "number") ? targetIdx : (msgFloor - 1);
             ipeLedgerStatus("挂账失败（" + d.slice(0, 80) + "），" + Math.round(delay / 1000) + " 秒后自动重试一次…", "#c9a227");
             try { console.log("[IPE] 挂账重试", { floor: msgFloor, err: d.slice(0, 120) }); } catch(eL) {}
-            setTimeout(function(){ ipeLedgerRun(rIdx, silent, 1); }, delay);
+            setTimeout(function(){ if (ipeLedgerInputChatCurrent(input)) ipeLedgerRun(rIdx, silent, 1); }, delay);
             return;
         }
         ipeLedgerFailStreak++;
@@ -1603,6 +1634,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         ipeLedgerStatus("挂账失败：" + d + (offNote ? "｜" + offNote : ""), "#d4726a");
         ipeLedgerFailNotice(d + (offNote ? "\n" + offNote : ""));
     } finally {
+        ipeLedgerActiveInput = null;
         ipeLedgerSetBusy(false);
         if (ipeLedgerQueued) {
             ipeLedgerQueued = false;
@@ -2816,9 +2848,13 @@ function ipeLedgerOnEdited(i) {
 
 function ipeLedgerSync() {
     try { ipeLedgerReconcile(ipeFloorNo()); } catch(eRec) {}   // 先对账再贴耳，幽灵账进不了 prompt
-    ipeLedgerApplyEP();
-    ipeLedgerRefreshVisibleUI();
-    ipeLedgerRenderInline();
+    var previousScope = ipeLedgerReadScope;
+    ipeLedgerReadScope = { state: null };
+    try {
+        ipeLedgerApplyEP();
+        ipeLedgerRefreshVisibleUI();
+        ipeLedgerRenderInline();
+    } finally { ipeLedgerReadScope = previousScope; }
 }
 
 /* 2.19.7：收尾只同步数据与贴耳；隐藏的编辑器等打开时刷新。
@@ -6994,6 +7030,8 @@ function bindAll() {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
+                ipeLedgerChatEpoch++;
+                ipeLedgerLastAutoInput = null;
                 ipeLedgerMirrorDirty = true;   // 换了聊天，「继承」列表里该把上一个聊天算进来
                 setTimeout(function(){
                     ipeLedgerSync();
