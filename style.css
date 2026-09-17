@@ -2189,8 +2189,8 @@ html body:has(#ipe-panel.ipe-apricot) #ipe-drawer > .inline-drawer {
 }
 html #ipe-panel.ipe-apricot .ipe-toggle input:checked + .ipe-toggle-slider { background: #959e96 !important; }
 html #ipe-panel.ipe-apricot input:checked { accent-color: #7b8c80 !important; }
-html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry stop:first-child { stop-color: #959e96; }
-html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry stop:last-child { stop-color: #fde4d0; }
-html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry text { fill: #66574e; }
-html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry circle,
-html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry path { stroke: #fff6ec; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry svg stop:first-child { stop-color: #959e96 !important; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry svg stop:last-child { stop-color: #fde4d0 !important; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry svg text { fill: #66574e !important; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry svg circle,
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry svg path { stroke: #fff6ec !important; }
