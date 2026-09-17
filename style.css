@@ -2149,3 +2149,48 @@ html body:has(#ipe-panel.ipe-mist) #ipe-drawer #iped-ledger-save {
         -webkit-backdrop-filter: none !important;
     }
 }
+
+/* 2.19.9 杏岸 · 奶杏、暖灰与鼠尾草绿；沿用浅色布局与原浮标动画。 */
+html #ipe-panel.ipe-apricot {
+    --ipe-ui-ink: #514940;
+    --ipe-ui-muted: #70665d;
+    --ipe-ui-faint: #82756b;
+    --ipe-ui-line: rgba(181,160,145,.25);
+    --ipe-ui-line-strong: rgba(149,158,150,.48);
+    --ipe-ui-card: rgba(255,250,243,.58);
+    --ipe-ui-card-strong: rgba(255,250,243,.82);
+    --ipe-ui-field: rgba(255,252,247,.88);
+    --ipe-ui-blue: #7b8c80;
+    --ipe-ui-purple: #b58b77;
+    --ipe-ui-shadow: rgba(126,101,81,.08);
+    --ipe-desk-action: linear-gradient(110deg,#caa290,#fde4d0 60%,#e4dcd1);
+    --ipe-desk-action-ink: #514940;
+    --ipe-desk-glow: rgba(149,158,150,.12);
+    background: radial-gradient(ellipse at 0 0,rgba(202,162,144,.48),transparent 53%),radial-gradient(ellipse at 100% 100%,rgba(149,158,150,.38),transparent 55%),linear-gradient(160deg,#fde4d0,#faf0e5 45%,#e4dcd1) !important;
+}
+html body:has(#ipe-panel.ipe-apricot) #ipe-drawer {
+    --iped-ink: #514940;
+    --iped-muted: #70665d;
+    --iped-faint: #82756b;
+    --iped-line: rgba(181,160,145,.25);
+    --iped-line-strong: rgba(149,158,150,.48);
+    --iped-card: rgba(255,250,243,.58);
+    --iped-field: rgba(255,252,247,.88);
+    --iped-blue: #7b8c80;
+    --iped-purple: #b58b77;
+    --iped-sand: #b58b77;
+    --ipe-desk-action: linear-gradient(110deg,#caa290,#fde4d0 60%,#e4dcd1);
+    --ipe-desk-action-ink: #514940;
+    --ipe-desk-card: rgba(255,250,243,.82);
+    --ipe-desk-glow: rgba(149,158,150,.12);
+}
+html body:has(#ipe-panel.ipe-apricot) #ipe-drawer > .inline-drawer {
+    background: radial-gradient(ellipse at 100% 100%,rgba(149,158,150,.38),transparent 55%),linear-gradient(160deg,#fde4d0,#faf0e5 45%,#e4dcd1) !important;
+}
+html #ipe-panel.ipe-apricot .ipe-toggle input:checked + .ipe-toggle-slider { background: #959e96 !important; }
+html #ipe-panel.ipe-apricot input:checked { accent-color: #7b8c80 !important; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry stop:first-child { stop-color: #959e96; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry stop:last-child { stop-color: #fde4d0; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry text { fill: #66574e; }
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry circle,
+html body:has(#ipe-panel.ipe-apricot) #ipe-chat-quick-entry path { stroke: #fff6ec; }
