@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.10";
+var IPE_VERSION = "2.19.11";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -47,6 +47,7 @@ function ipeImgFillTemplate(tpl, vals) {
 }
 const DEFAULTS = {
     enabled: true,
+    jadeTheme: false, // 碧岸：粉沙与浅碧海水
     apricotTheme: false, // 杏岸：独立保存，兼容旧开灯设置
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
     autoInject: false,
@@ -199,10 +200,11 @@ function ipeApplyTheme() {
         var mist = cfg().mistTheme === true;
         p.classList.toggle("ipe-mist", mist);
         p.classList.toggle("ipe-apricot", cfg().apricotTheme === true);
+        p.classList.toggle("ipe-jade", cfg().jadeTheme === true);
         var tg = ipeRootDocument().getElementById("ipe-theme-toggle");
         if (tg) {
-            tg.textContent = cfg().apricotTheme === true ? "🌅" : (mist ? "☀️" : "🌙");
-            tg.title = "配色：" + (cfg().apricotTheme === true ? "杏岸" : (mist ? "海雾" : "月潮")) + " · 点击切换";
+            tg.textContent = cfg().jadeTheme === true ? "🌊" : (cfg().apricotTheme === true ? "🌅" : (mist ? "☀️" : "🌙"));
+            tg.title = "配色：" + (cfg().jadeTheme === true ? "碧岸" : (cfg().apricotTheme === true ? "杏岸" : (mist ? "海雾" : "月潮"))) + " · 点击切换";
             tg.setAttribute("aria-label", tg.title);
         }
     } catch(e) {}
@@ -6511,10 +6513,12 @@ function bindAll() {
     if (themeToggleBtn && !themeToggleBtn.__ipeThemeBound) {
         themeToggleBtn.__ipeThemeBound = true;
         themeToggleBtn.addEventListener("click", function(){
+            var jade = cfg().jadeTheme === true;
             var apricot = cfg().apricotTheme === true;
             var mist = cfg().mistTheme === true;
-            save("apricotTheme", !apricot && mist);
-            save("mistTheme", !apricot);
+            save("jadeTheme", !jade && apricot);
+            save("apricotTheme", !jade && !apricot && mist);
+            save("mistTheme", !jade);
             ipeSaveNow();
             ipeApplyTheme();
         });
