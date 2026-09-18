@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.11";
+var IPE_VERSION = "2.19.12";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -47,6 +47,7 @@ function ipeImgFillTemplate(tpl, vals) {
 }
 const DEFAULTS = {
     enabled: true,
+    beachTheme: false, // 2.19.12 粉蓝海滩：海蓝与粉霞，叠在浅色皮上
     jadeTheme: false, // 碧岸：粉沙与浅碧海水
     apricotTheme: false, // 杏岸：独立保存，兼容旧开灯设置
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
@@ -193,6 +194,29 @@ function ipeRootDocument() {
 
 // v1.8.7 开灯：莫兰迪雾蓝浅色皮。仅在 .ipe-panel 上挂/摘 ipe-mist 类，
 // 全部配色交给 style.css 级联；不动任何功能逻辑。
+/* 配色五档（2.19.12 加粉蓝海滩）：月潮 🌙 → 海雾 ☀️ → 杏岸 🌅 → 碧岸 🌊 → 粉蓝海滩 🏝️ → 月潮。
+   除月潮外都是浅色皮 .ipe-mist 再叠一层自己的类只换颜色；设置里各存一个布尔，老设置照常。 */
+var IPE_THEME_ORDER = ["night", "mist", "apricot", "jade", "beach"];
+var IPE_THEME_ICON = { night: "🌙", mist: "☀️", apricot: "🌅", jade: "🌊", beach: "🏝️" };
+var IPE_THEME_NAME = { night: "月潮", mist: "海雾", apricot: "杏岸", jade: "碧岸", beach: "粉蓝海滩" };
+function ipeThemeCurrent() {
+    var c = cfg();
+    if (c.beachTheme === true) return "beach";
+    if (c.jadeTheme === true) return "jade";
+    if (c.apricotTheme === true) return "apricot";
+    if (c.mistTheme === true) return "mist";
+    return "night";
+}
+function ipeThemeSet(name) {
+    save("mistTheme", name !== "night");
+    save("apricotTheme", name === "apricot");
+    save("jadeTheme", name === "jade");
+    save("beachTheme", name === "beach");
+}
+function ipeThemeCycle() {
+    var i = IPE_THEME_ORDER.indexOf(ipeThemeCurrent());
+    ipeThemeSet(IPE_THEME_ORDER[(i + 1) % IPE_THEME_ORDER.length]);
+}
 function ipeApplyTheme() {
     try {
         var p = ipeRootDocument().getElementById("ipe-panel");
@@ -201,10 +225,12 @@ function ipeApplyTheme() {
         p.classList.toggle("ipe-mist", mist);
         p.classList.toggle("ipe-apricot", cfg().apricotTheme === true);
         p.classList.toggle("ipe-jade", cfg().jadeTheme === true);
+        p.classList.toggle("ipe-beach", cfg().beachTheme === true);
         var tg = ipeRootDocument().getElementById("ipe-theme-toggle");
         if (tg) {
-            tg.textContent = cfg().jadeTheme === true ? "🌊" : (cfg().apricotTheme === true ? "🌅" : (mist ? "☀️" : "🌙"));
-            tg.title = "配色：" + (cfg().jadeTheme === true ? "碧岸" : (cfg().apricotTheme === true ? "杏岸" : (mist ? "海雾" : "月潮"))) + " · 点击切换";
+            var cur = ipeThemeCurrent();
+            tg.textContent = IPE_THEME_ICON[cur];
+            tg.title = "配色：" + IPE_THEME_NAME[cur] + " · 点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️）";
             tg.setAttribute("aria-label", tg.title);
         }
     } catch(e) {}
@@ -5169,7 +5195,7 @@ function createPanel() {
 
     var h = '<div class="ipe-panel-header">';
     h += '<span class="ipe-panel-title">🐚 小海螺 · IPE</span>';
-    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="开灯 / 关灯">'+(c.mistTheme===true?'☀️':'🌙')+'</button>' + '<label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
+    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
     h += '</div>';
     h += '<div class="ipe-tabs">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
@@ -6513,12 +6539,7 @@ function bindAll() {
     if (themeToggleBtn && !themeToggleBtn.__ipeThemeBound) {
         themeToggleBtn.__ipeThemeBound = true;
         themeToggleBtn.addEventListener("click", function(){
-            var jade = cfg().jadeTheme === true;
-            var apricot = cfg().apricotTheme === true;
-            var mist = cfg().mistTheme === true;
-            save("jadeTheme", !jade && apricot);
-            save("apricotTheme", !jade && !apricot && mist);
-            save("mistTheme", !jade);
+            ipeThemeCycle();
             ipeSaveNow();
             ipeApplyTheme();
         });
