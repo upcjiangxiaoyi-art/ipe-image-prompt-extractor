@@ -2333,3 +2333,112 @@ html body:has(#ipe-panel.ipe-beach) #ipe-chat-quick-entry.ipe-ledger-busy.proces
 @keyframes ipe-cap-ledger-pulse-beach { 0%, 100% { box-shadow: 0 0 0 0 rgba(0,145,189,.60); } 50% { box-shadow: 0 0 0 9px rgba(0,145,189,0); } }
 html body:has(#ipe-panel.ipe-beach) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #0091bd; box-shadow: 0 0 5px rgba(0,145,189,.8); }
 html body:has(#ipe-panel.ipe-beach) #ipe-chat-quick-entry.processing::after { background: #e8b2c6; box-shadow: 0 0 5px rgba(232,178,198,.9); }
+
+/* 2.19.13 珠光海螺 🐚 · 取自月光石色系「雾蓝月辉」：6f7f92 风暴蓝 · c9d0d8 银纱薄雾 · f6f2d8 月漾奶黄 · f3eee7 珍珠白。
+   叠在浅色皮上只换颜色：左上灰蓝莫兰迪、右下珍珠白，中段银雾过渡，一点月漾奶黄做暖光；
+   珍珠白留给卡片与输入框，主动作风暴蓝→珍珠白渐变，深灰蓝做墨色。 */
+html #ipe-panel.ipe-pearl {
+    --ipe-ui-ink: #3f4b5a;
+    --ipe-ui-muted: #6f7f92;
+    --ipe-ui-faint: #8e9aa8;
+    --ipe-ui-line: rgba(111,127,146,.24);
+    --ipe-ui-line-strong: rgba(111,127,146,.38);
+    --ipe-ui-card: rgba(243,238,231,.62);
+    --ipe-ui-card-strong: rgba(243,238,231,.84);
+    --ipe-ui-field: rgba(255,253,250,.88);
+    --ipe-ui-blue: #6f7f92;
+    --ipe-ui-purple: #aab4c0;
+    --ipe-ui-sand: #f6f2d8;
+    --ipe-ui-shadow: rgba(111,127,146,.12);
+    --ipe-desk-action: linear-gradient(110deg,#6f7f92,#aab4c0 50%,#f3eee7);
+    --ipe-desk-action-ink: #2f3b4a;
+    --ipe-desk-glow: rgba(246,242,216,.22);
+    border-color: rgba(111,127,146,.50) !important;
+    background:
+        radial-gradient(ellipse at 0 0, rgba(111,127,146,.72), transparent 52%),
+        radial-gradient(ellipse at 14% 52%, rgba(201,208,216,.60), transparent 50%),
+        radial-gradient(ellipse at 100% 100%, rgba(246,242,216,.85), transparent 56%),
+        radial-gradient(ellipse at 88% 40%, rgba(243,238,231,.75), transparent 50%),
+        linear-gradient(160deg,#9ba8b7,#c9d0d8 40%,#e7e7e4 68%,#f3eee7) !important;
+    box-shadow: 0 12px 44px rgba(111,127,146,.22), 0 0 0 1px rgba(255,255,255,.60) inset !important;
+}
+html #ipe-panel.ipe-pearl .ipe-panel-title { color: #ffffff !important; text-shadow: 0 1px 6px rgba(63,75,90,.45) !important; }
+html #ipe-panel.ipe-pearl .ipe-panel-header { border-bottom: 1px solid rgba(255,255,255,.50) !important; }
+html #ipe-panel.ipe-pearl .ipe-panel-header .ipe-btn,
+html #ipe-panel.ipe-pearl .ipe-panel-header button { background: rgba(243,238,231,.70) !important; border-color: rgba(201,208,216,.90) !important; color: #3f4b5a !important; -webkit-text-fill-color: #3f4b5a !important; }
+html #ipe-panel.ipe-pearl .ipe-toggle-slider { background: rgba(201,208,216,.80) !important; }
+html #ipe-panel.ipe-pearl .ipe-toggle-slider::before { background: #fffdfa !important; box-shadow: 0 1px 3px rgba(63,75,90,.30) !important; }
+html #ipe-panel.ipe-pearl .ipe-toggle input:checked + .ipe-toggle-slider { background: rgba(111,127,146,.70) !important; }
+html #ipe-panel.ipe-pearl .ipe-toggle input:checked + .ipe-toggle-slider::before { background: #f6f2d8 !important; box-shadow: 0 1px 4px rgba(63,75,90,.45) !important; }
+html #ipe-panel.ipe-pearl input:checked { accent-color: #6f7f92 !important; }
+html #ipe-panel.ipe-pearl .ipe-tab { background: rgba(243,238,231,.66) !important; border-color: rgba(255,255,255,.8) !important; color: #56677c !important; -webkit-text-fill-color: #56677c !important; }
+html #ipe-panel.ipe-pearl .ipe-tab.ipe-tab-on { background: #fffdfa !important; border-color: #6f7f92 !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; box-shadow: 0 2px 12px rgba(111,127,146,.22) !important; }
+html #ipe-panel.ipe-pearl .ipe-section { border-bottom-color: rgba(111,127,146,.18) !important; }
+html #ipe-panel.ipe-pearl .ipe-section-header { color: #56677c !important; }
+html #ipe-panel.ipe-pearl .ipe-section-header:hover { color: #2f3b4a !important; }
+html #ipe-panel.ipe-pearl .ipe-section-body label { color: #6f7f92 !important; }
+html #ipe-panel.ipe-pearl .ipe-hint { color: #8e9aa8 !important; }
+html #ipe-panel.ipe-pearl .ipe-section-body input[type="text"],
+html #ipe-panel.ipe-pearl .ipe-section-body input[type="password"],
+html #ipe-panel.ipe-pearl .ipe-section-body input[type="number"],
+html #ipe-panel.ipe-pearl .ipe-section-body textarea,
+html #ipe-panel.ipe-pearl .ipe-section-body select { background: rgba(255,253,250,.92) !important; border-color: rgba(111,127,146,.40) !important; color: #3f4b5a !important; }
+html #ipe-panel.ipe-pearl .ipe-section-body input:focus,
+html #ipe-panel.ipe-pearl .ipe-section-body textarea:focus { border-color: #6f7f92 !important; background: #fffdfa !important; }
+html #ipe-panel.ipe-pearl .ipe-btn { background: rgba(243,238,231,.84) !important; border-color: rgba(111,127,146,.40) !important; color: #3f4b5a !important; -webkit-text-fill-color: #3f4b5a !important; }
+html #ipe-panel.ipe-pearl .ipe-btn:hover:not(:disabled) { background: #fffdfa !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; }
+html #ipe-panel.ipe-pearl .ipe-btn-primary,
+html #ipe-panel.ipe-pearl [id="ipe-ledger-run"] { background: linear-gradient(110deg,#6f7f92,#aab4c0 50%,#f3eee7) !important; border-color: rgba(111,127,146,.45) !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; }
+html #ipe-panel.ipe-pearl .ipe-btn-primary:hover:not(:disabled) { background: linear-gradient(110deg,#56677c,#6f7f92 50%,#c9d0d8) !important; color: #fffdfa !important; -webkit-text-fill-color: #fffdfa !important; }
+html #ipe-panel.ipe-pearl .ipe-fold { border-color: rgba(111,127,146,.30) !important; background: rgba(243,238,231,.58) !important; }
+html #ipe-panel.ipe-pearl .ipe-fold[open] { background: rgba(243,238,231,.80) !important; }
+html #ipe-panel.ipe-pearl .ipe-fold > summary { color: #6f7f92 !important; }
+html #ipe-panel.ipe-pearl .ipe-fold[open] > summary { color: #3f4b5a !important; }
+html #ipe-panel.ipe-pearl .ipe-ledger-age,
+html #ipe-panel.ipe-pearl .ipe-anchor-guide { border-color: rgba(111,127,146,.30) !important; background: rgba(243,238,231,.82) !important; color: #3f4b5a !important; }
+html #ipe-panel.ipe-pearl .ipe-footer { color: #8e9aa8 !important; border-top-color: rgba(111,127,146,.24) !important; }
+html body:has(#ipe-panel.ipe-pearl) #ipe-drawer {
+    --iped-ink: #3f4b5a;
+    --iped-muted: #6f7f92;
+    --iped-faint: #8e9aa8;
+    --iped-line: rgba(111,127,146,.24);
+    --iped-line-strong: rgba(111,127,146,.38);
+    --iped-card: rgba(243,238,231,.62);
+    --iped-field: rgba(255,253,250,.88);
+    --iped-blue: #6f7f92;
+    --iped-purple: #aab4c0;
+    --iped-sand: #f6f2d8;
+    --ipe-desk-action: linear-gradient(110deg,#6f7f92,#aab4c0 50%,#f3eee7);
+    --ipe-desk-action-ink: #2f3b4a;
+    --ipe-desk-card: rgba(243,238,231,.84);
+    --ipe-desk-glow: rgba(246,242,216,.22);
+}
+html body:has(#ipe-panel.ipe-pearl) #ipe-drawer > .inline-drawer {
+    background: radial-gradient(ellipse at 0 0,rgba(111,127,146,.45),transparent 50%), radial-gradient(ellipse at 100% 100%,rgba(246,242,216,.80),transparent 55%), linear-gradient(160deg,#b4bfcb,#c9d0d8 40%,#e7e7e4 70%,#f3eee7) !important;
+}
+/* 抽屉开关：浅色皮通用的紫蓝换成风暴蓝，圆点用珍珠白 / 月漾奶黄。 */
+html body:has(#ipe-panel.ipe-pearl) #ipe-drawer input[type="checkbox"] {
+    border-color: rgba(111,127,146,.40) !important;
+    background:
+        radial-gradient(circle at 9px 50%, #fffdfa 0 6px, transparent 6.6px),
+        rgba(201,208,216,.70) !important;
+}
+html body:has(#ipe-panel.ipe-pearl) #ipe-drawer input[type="checkbox"]:checked {
+    border-color: rgba(111,127,146,.55) !important;
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #f6f2d8 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #56677c, #6f7f92 55%, #8f9dae) !important;
+}
+/* 浮标：胶囊从风暴蓝渐到珍珠白，字用深灰蓝，海螺与波纹描白；忙碌脉冲银雾 / 风暴蓝，两粒小灯同样换色。 */
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg stop:first-child { stop-color: #6f7f92 !important; }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg stop:last-child { stop-color: #f3eee7 !important; }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg text { fill: #2f3b4a !important; }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg circle,
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg path { stroke: #ffffff !important; }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-pearl; }
+@keyframes ipe-cap-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,208,216,.85); } 50% { box-shadow: 0 0 0 9px rgba(201,208,216,0); } }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.ipe-ledger-busy,
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-pearl; }
+@keyframes ipe-cap-ledger-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(111,127,146,.65); } 50% { box-shadow: 0 0 0 9px rgba(111,127,146,0); } }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #56677c; box-shadow: 0 0 5px rgba(111,127,146,.9); }
+html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.processing::after { background: #c9d0d8; box-shadow: 0 0 5px rgba(111,127,146,.85); }
