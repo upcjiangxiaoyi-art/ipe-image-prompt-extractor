@@ -2442,3 +2442,112 @@ html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.ipe-ledger-busy.proces
 @keyframes ipe-cap-ledger-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(111,127,146,.65); } 50% { box-shadow: 0 0 0 9px rgba(111,127,146,0); } }
 html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #56677c; box-shadow: 0 0 5px rgba(111,127,146,.9); }
 html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry.processing::after { background: #c9d0d8; box-shadow: 0 0 5px rgba(111,127,146,.85); }
+
+/* 2.19.14 柠檬海滩 🍋 · 三色组合：f7ea5e 柠檬黄 · afc5e6 长春花蓝 · f4b4d0 樱花粉。
+   叠在浅色皮上只换颜色：左上柠檬黄、中段亮白、右下樱花粉，长春花蓝在右侧点一片；
+   白留给卡片与输入框，长春花蓝做按钮描边与开关，主动作柠檬→长春花蓝→樱花粉渐变，深蓝灰做墨色。 */
+html #ipe-panel.ipe-lemon {
+    --ipe-ui-ink: #3a4a68;
+    --ipe-ui-muted: #62739a;
+    --ipe-ui-faint: #8a98b8;
+    --ipe-ui-line: rgba(175,197,230,.55);
+    --ipe-ui-line-strong: rgba(127,157,214,.60);
+    --ipe-ui-card: rgba(255,255,255,.62);
+    --ipe-ui-card-strong: rgba(255,255,255,.84);
+    --ipe-ui-field: rgba(255,255,255,.90);
+    --ipe-ui-blue: #afc5e6;
+    --ipe-ui-purple: #f4b4d0;
+    --ipe-ui-sand: #f7ea5e;
+    --ipe-ui-shadow: rgba(127,157,214,.14);
+    --ipe-desk-action: linear-gradient(110deg,#f7ea5e,#afc5e6 55%,#f4b4d0);
+    --ipe-desk-action-ink: #2f3f5c;
+    --ipe-desk-glow: rgba(247,234,94,.22);
+    border-color: rgba(175,197,230,.80) !important;
+    background:
+        radial-gradient(ellipse at 0 0, rgba(247,234,94,.95), transparent 55%),
+        radial-gradient(ellipse at 16% 46%, rgba(247,234,94,.55), transparent 50%),
+        radial-gradient(ellipse at 100% 100%, rgba(244,180,208,.88), transparent 56%),
+        radial-gradient(ellipse at 86% 52%, rgba(175,197,230,.60), transparent 46%),
+        linear-gradient(160deg,#fbf3a0,#fffbe3 38%,#ffffff 58%,#fbe3ec) !important;
+    box-shadow: 0 12px 44px rgba(127,157,214,.22), 0 0 0 1px rgba(255,255,255,.70) inset !important;
+}
+html #ipe-panel.ipe-lemon .ipe-panel-title { color: #2f3f5c !important; text-shadow: 0 1px 0 rgba(255,255,255,.7) !important; }
+html #ipe-panel.ipe-lemon .ipe-panel-header { border-bottom: 1px solid rgba(255,255,255,.70) !important; }
+html #ipe-panel.ipe-lemon .ipe-panel-header .ipe-btn,
+html #ipe-panel.ipe-lemon .ipe-panel-header button { background: rgba(255,255,255,.72) !important; border-color: rgba(175,197,230,.95) !important; color: #3a4a68 !important; -webkit-text-fill-color: #3a4a68 !important; }
+html #ipe-panel.ipe-lemon .ipe-toggle-slider { background: rgba(175,197,230,.55) !important; }
+html #ipe-panel.ipe-lemon .ipe-toggle-slider::before { background: #ffffff !important; box-shadow: 0 1px 3px rgba(58,74,104,.30) !important; }
+html #ipe-panel.ipe-lemon .ipe-toggle input:checked + .ipe-toggle-slider { background: #8fabdc !important; }
+html #ipe-panel.ipe-lemon .ipe-toggle input:checked + .ipe-toggle-slider::before { background: #f7ea5e !important; box-shadow: 0 1px 4px rgba(58,74,104,.40) !important; }
+html #ipe-panel.ipe-lemon input:checked { accent-color: #7f9dd6 !important; }
+html #ipe-panel.ipe-lemon .ipe-tab { background: rgba(255,255,255,.66) !important; border-color: rgba(255,255,255,.9) !important; color: #62739a !important; -webkit-text-fill-color: #62739a !important; }
+html #ipe-panel.ipe-lemon .ipe-tab.ipe-tab-on { background: #ffffff !important; border-color: #afc5e6 !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; box-shadow: 0 2px 12px rgba(127,157,214,.26) !important; }
+html #ipe-panel.ipe-lemon .ipe-section { border-bottom-color: rgba(175,197,230,.40) !important; }
+html #ipe-panel.ipe-lemon .ipe-section-header { color: #62739a !important; }
+html #ipe-panel.ipe-lemon .ipe-section-header:hover { color: #2f3f5c !important; }
+html #ipe-panel.ipe-lemon .ipe-section-body label { color: #62739a !important; }
+html #ipe-panel.ipe-lemon .ipe-hint { color: #8a98b8 !important; }
+html #ipe-panel.ipe-lemon .ipe-section-body input[type="text"],
+html #ipe-panel.ipe-lemon .ipe-section-body input[type="password"],
+html #ipe-panel.ipe-lemon .ipe-section-body input[type="number"],
+html #ipe-panel.ipe-lemon .ipe-section-body textarea,
+html #ipe-panel.ipe-lemon .ipe-section-body select { background: rgba(255,255,255,.92) !important; border-color: rgba(175,197,230,.85) !important; color: #3a4a68 !important; }
+html #ipe-panel.ipe-lemon .ipe-section-body input:focus,
+html #ipe-panel.ipe-lemon .ipe-section-body textarea:focus { border-color: #7f9dd6 !important; background: #ffffff !important; }
+html #ipe-panel.ipe-lemon .ipe-btn { background: rgba(255,255,255,.84) !important; border-color: rgba(175,197,230,.85) !important; color: #3a4a68 !important; -webkit-text-fill-color: #3a4a68 !important; }
+html #ipe-panel.ipe-lemon .ipe-btn:hover:not(:disabled) { background: #ffffff !important; border-color: #7f9dd6 !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; }
+html #ipe-panel.ipe-lemon .ipe-btn-primary,
+html #ipe-panel.ipe-lemon [id="ipe-ledger-run"] { background: linear-gradient(110deg,#f7ea5e,#afc5e6 55%,#f4b4d0) !important; border-color: rgba(127,157,214,.55) !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; }
+html #ipe-panel.ipe-lemon .ipe-btn-primary:hover:not(:disabled) { background: linear-gradient(110deg,#eedb3c,#8fabdc 55%,#ee9dbf) !important; color: #1f2d48 !important; -webkit-text-fill-color: #1f2d48 !important; }
+html #ipe-panel.ipe-lemon .ipe-fold { border-color: rgba(175,197,230,.70) !important; background: rgba(255,255,255,.58) !important; }
+html #ipe-panel.ipe-lemon .ipe-fold[open] { background: rgba(255,255,255,.80) !important; }
+html #ipe-panel.ipe-lemon .ipe-fold > summary { color: #62739a !important; }
+html #ipe-panel.ipe-lemon .ipe-fold[open] > summary { color: #3a4a68 !important; }
+html #ipe-panel.ipe-lemon .ipe-ledger-age,
+html #ipe-panel.ipe-lemon .ipe-anchor-guide { border-color: rgba(175,197,230,.70) !important; background: rgba(255,255,255,.82) !important; color: #3a4a68 !important; }
+html #ipe-panel.ipe-lemon .ipe-footer { color: #8a98b8 !important; border-top-color: rgba(175,197,230,.55) !important; }
+html body:has(#ipe-panel.ipe-lemon) #ipe-drawer {
+    --iped-ink: #3a4a68;
+    --iped-muted: #62739a;
+    --iped-faint: #8a98b8;
+    --iped-line: rgba(175,197,230,.55);
+    --iped-line-strong: rgba(127,157,214,.60);
+    --iped-card: rgba(255,255,255,.62);
+    --iped-field: rgba(255,255,255,.90);
+    --iped-blue: #afc5e6;
+    --iped-purple: #f4b4d0;
+    --iped-sand: #f7ea5e;
+    --ipe-desk-action: linear-gradient(110deg,#f7ea5e,#afc5e6 55%,#f4b4d0);
+    --ipe-desk-action-ink: #2f3f5c;
+    --ipe-desk-card: rgba(255,255,255,.84);
+    --ipe-desk-glow: rgba(247,234,94,.22);
+}
+html body:has(#ipe-panel.ipe-lemon) #ipe-drawer > .inline-drawer {
+    background: radial-gradient(ellipse at 0 0,rgba(247,234,94,.85),transparent 50%), radial-gradient(ellipse at 100% 100%,rgba(244,180,208,.85),transparent 55%), radial-gradient(ellipse at 90% 45%,rgba(175,197,230,.55),transparent 45%), linear-gradient(160deg,#fbf3a0,#fffbe3 40%,#ffffff 60%,#fbe3ec) !important;
+}
+/* 抽屉开关：长春花蓝底、白圆点，开着是柠檬→长春花蓝→樱花粉渐变。 */
+html body:has(#ipe-panel.ipe-lemon) #ipe-drawer input[type="checkbox"] {
+    border-color: rgba(127,157,214,.55) !important;
+    background:
+        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
+        rgba(175,197,230,.55) !important;
+}
+html body:has(#ipe-panel.ipe-lemon) #ipe-drawer input[type="checkbox"]:checked {
+    border-color: rgba(127,157,214,.75) !important;
+    background:
+        radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px),
+        linear-gradient(90deg, #f7ea5e, #afc5e6 55%, #f4b4d0) !important;
+}
+/* 浮标：胶囊从柠檬黄渐到樱花粉，字深蓝灰、海螺与波纹描白；生图脉冲柠檬黄、挂账脉冲长春花蓝，两粒小灯同色。 */
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg stop:first-child { stop-color: #f7ea5e !important; }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg stop:last-child { stop-color: #f4b4d0 !important; }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg text { fill: #2f3f5c !important; }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg circle,
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg path { stroke: #ffffff !important; }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-lemon; }
+@keyframes ipe-cap-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(247,234,94,.90); } 50% { box-shadow: 0 0 0 9px rgba(247,234,94,0); } }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry.ipe-ledger-busy,
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-lemon; }
+@keyframes ipe-cap-ledger-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(143,171,220,.80); } 50% { box-shadow: 0 0 0 9px rgba(143,171,220,0); } }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7f9dd6; box-shadow: 0 0 5px rgba(127,157,214,.95); }
+html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry.processing::after { background: #f7ea5e; box-shadow: 0 0 5px rgba(230,205,40,.95); }

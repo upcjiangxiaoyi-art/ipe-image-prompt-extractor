@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.13";
+var IPE_VERSION = "2.19.14";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -47,6 +47,7 @@ function ipeImgFillTemplate(tpl, vals) {
 }
 const DEFAULTS = {
     enabled: true,
+    lemonTheme: false, // 2.19.14 柠檬海滩：柠檬黄、长春花蓝与樱花粉，明媚，叠在浅色皮上
     pearlTheme: false, // 2.19.13 珠光海螺：灰蓝莫兰迪渐到珍珠白，叠在浅色皮上
     beachTheme: false, // 2.19.12 粉蓝海滩：海蓝与粉霞，叠在浅色皮上
     jadeTheme: false, // 碧岸：粉沙与浅碧海水
@@ -195,13 +196,14 @@ function ipeRootDocument() {
 
 // v1.8.7 开灯：莫兰迪雾蓝浅色皮。仅在 .ipe-panel 上挂/摘 ipe-mist 类，
 // 全部配色交给 style.css 级联；不动任何功能逻辑。
-/* 配色六档（2.19.13 加珠光海螺）：月潮 🌙 → 海雾 ☀️ → 杏岸 🌅 → 碧岸 🌊 → 粉蓝海滩 🏝️ → 珠光海螺 🐚 → 月潮。
+/* 配色七档（2.19.14 加柠檬海滩）：月潮 🌙 → 海雾 ☀️ → 杏岸 🌅 → 碧岸 🌊 → 粉蓝海滩 🏝️ → 珠光海螺 🐚 → 柠檬海滩 🍋 → 月潮。
    除月潮外都是浅色皮 .ipe-mist 再叠一层自己的类只换颜色；设置里各存一个布尔，老设置照常。 */
-var IPE_THEME_ORDER = ["night", "mist", "apricot", "jade", "beach", "pearl"];
-var IPE_THEME_ICON = { night: "🌙", mist: "☀️", apricot: "🌅", jade: "🌊", beach: "🏝️", pearl: "🐚" };
-var IPE_THEME_NAME = { night: "月潮", mist: "海雾", apricot: "杏岸", jade: "碧岸", beach: "粉蓝海滩", pearl: "珠光海螺" };
+var IPE_THEME_ORDER = ["night", "mist", "apricot", "jade", "beach", "pearl", "lemon"];
+var IPE_THEME_ICON = { night: "🌙", mist: "☀️", apricot: "🌅", jade: "🌊", beach: "🏝️", pearl: "🐚", lemon: "🍋" };
+var IPE_THEME_NAME = { night: "月潮", mist: "海雾", apricot: "杏岸", jade: "碧岸", beach: "粉蓝海滩", pearl: "珠光海螺", lemon: "柠檬海滩" };
 function ipeThemeCurrent() {
     var c = cfg();
+    if (c.lemonTheme === true) return "lemon";
     if (c.pearlTheme === true) return "pearl";
     if (c.beachTheme === true) return "beach";
     if (c.jadeTheme === true) return "jade";
@@ -215,6 +217,7 @@ function ipeThemeSet(name) {
     save("jadeTheme", name === "jade");
     save("beachTheme", name === "beach");
     save("pearlTheme", name === "pearl");
+    save("lemonTheme", name === "lemon");
 }
 function ipeThemeCycle() {
     var i = IPE_THEME_ORDER.indexOf(ipeThemeCurrent());
@@ -230,11 +233,12 @@ function ipeApplyTheme() {
         p.classList.toggle("ipe-jade", cfg().jadeTheme === true);
         p.classList.toggle("ipe-beach", cfg().beachTheme === true);
         p.classList.toggle("ipe-pearl", cfg().pearlTheme === true);
+        p.classList.toggle("ipe-lemon", cfg().lemonTheme === true);
         var tg = ipeRootDocument().getElementById("ipe-theme-toggle");
         if (tg) {
             var cur = ipeThemeCurrent();
             tg.textContent = IPE_THEME_ICON[cur];
-            tg.title = "配色：" + IPE_THEME_NAME[cur] + " · 点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚）";
+            tg.title = "配色：" + IPE_THEME_NAME[cur] + " · 点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）";
             tg.setAttribute("aria-label", tg.title);
         }
     } catch(e) {}
@@ -5199,7 +5203,7 @@ function createPanel() {
 
     var h = '<div class="ipe-panel-header">';
     h += '<span class="ipe-panel-title">🐚 小海螺 · IPE</span>';
-    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
+    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
     h += '</div>';
     h += '<div class="ipe-tabs">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'

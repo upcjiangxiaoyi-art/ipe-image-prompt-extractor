@@ -142,12 +142,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         // 2.19.12 粉蓝海滩：配色按钮五档循环，海滩叠在浅色皮上
         w.eval('window.ui.ipeApplyTheme = ipeApplyTheme;');
-        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; w.ui.ipeApplyTheme();
+        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; settings.lemonTheme = false; w.ui.ipeApplyTheme();
         const tt = d.querySelector('#ipe-theme-toggle');
-        const modeOf = () => ['pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
+        const modeOf = () => ['lemon','pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
         const seq = [modeOf() + tt.textContent];
-        for (let i = 0; i < 6; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
-        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 night🌙', '配色六档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 月潮（' + seq.join(' ') + '）');
+        for (let i = 0; i < 7; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
+        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 night🌙', '配色七档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 月潮（' + seq.join(' ') + '）');
         for (let i = 0; i < 4; i++) tt.click();
         check(settings.mistTheme === true && settings.beachTheme === true && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-beach') && !panel.classList.contains('ipe-jade'), '粉蓝海滩 = 浅色皮 + ipe-beach，杏岸 / 碧岸标记都清掉');
         check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('html body:has(#ipe-panel.ipe-beach) #ipe-chat-quick-entry svg stop:first-child'), '浮标有海滩配色规则');
@@ -157,8 +157,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.mistTheme === true && settings.pearlTheme === true && settings.beachTheme === false && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-pearl') && !panel.classList.contains('ipe-beach'), '珠光海螺 = 浅色皮 + ipe-pearl，粉蓝海滩标记清掉');
         const css = fs.readFileSync(__dirname + '/style.css', 'utf8');
         check(css.includes('html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-pearl') && css.includes('ipe-cap-ledger-pulse-pearl'), '浮标有珠光海螺配色规则（渐变与忙碌脉冲）');
+        // 2.19.14 柠檬海滩：第七档，柠檬黄、长春花蓝与樱花粉，浮标同步
         tt.click();
-        check(settings.mistTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-pearl') && !panel.classList.contains('ipe-mist'), '珠光海螺再点一下回到月潮');
+        check(settings.mistTheme === true && settings.lemonTheme === true && settings.pearlTheme === false && settings.beachTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-pearl'), '柠檬海滩 = 浅色皮 + ipe-lemon，珠光海螺标记清掉');
+        check(css.includes('html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-lemon') && css.includes('ipe-cap-ledger-pulse-lemon'), '浮标有柠檬海滩配色规则（渐变与忙碌脉冲）');
+        tt.click();
+        check(settings.mistTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '柠檬海滩再点一下回到月潮');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
