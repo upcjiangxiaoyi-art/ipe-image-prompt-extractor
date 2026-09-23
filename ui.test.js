@@ -126,18 +126,24 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.ui.ipeLedgerSync(); await delay(30);
         check(wiped === wipedAt3s + 1, '冷却期间自己的落账 / 同步照常重绘楼内块');
         hostile.disconnect();
-        // 继承列表：没写镜像就不重读 localStorage
-        w.eval('window.ui.LSK = IPE_LEDGER_LS_KEY;');
-        let lsReads = 0;
-        const rawGet = w.Storage.prototype.getItem;   // jsdom 的 Storage 实例上赋值会变成存一个键，得改原型
+        // 继承列表：镜像只解析一次留在内存里；落账只标脏，空闲时才写 localStorage（2.19.15）
+        w.eval('window.ui.LSK = IPE_LEDGER_LS_KEY; window.ui.ipeLedgerMirrorFlush = ipeLedgerMirrorFlush;');
+        let lsReads = 0, lsWrites = 0;
+        const rawGet = w.Storage.prototype.getItem, rawSet = w.Storage.prototype.setItem;   // jsdom 的 Storage 实例上赋值会变成存一个键，得改原型
         w.Storage.prototype.getItem = function(k){ if (k === w.ui.LSK) lsReads++; return rawGet.call(this, k); };
+        w.Storage.prototype.setItem = function(k, v){ if (k === w.ui.LSK) lsWrites++; return rawSet.call(this, k, v); };
         w.ui.ipeLedgerRefreshInherit(); w.ui.ipeLedgerRefreshInherit(); w.ui.ipeLedgerRefreshInherit();
         const readsBefore = lsReads;
         w.ui.ipeLedgerSave(w.ui.ipeLedgerRead());
-        const readsAfterSave = lsReads;
+        const writesRightAfterSave = lsWrites;
         w.ui.ipeLedgerRefreshInherit();
-        check(readsBefore <= 1 && lsReads > readsAfterSave, '「继承账本」列表只在镜像写过之后才重读（连刷三次只读 ' + readsBefore + ' 次）');
-        w.Storage.prototype.getItem = rawGet;
+        check(readsBefore <= 1 && lsReads === readsBefore, '「继承账本」列表与落账都走内存里的镜像副本，不再反复解析 localStorage（共读 ' + lsReads + ' 次）');
+        check(writesRightAfterSave === 0, '落账当下不写 localStorage（镜像写盘挪到空闲时）');
+        await delay(400);
+        check(lsWrites === 1, '空闲后镜像落盘一次（' + lsWrites + ' 次）');
+        w.ui.ipeLedgerSave(w.ui.ipeLedgerRead()); w.ui.ipeLedgerSave(w.ui.ipeLedgerRead());
+        check(w.ui.ipeLedgerMirrorFlush() === true && lsWrites === 2, '连着落两次账只写一次盘，手动 flush 立刻落（' + lsWrites + ' 次）');
+        w.Storage.prototype.getItem = rawGet; w.Storage.prototype.setItem = rawSet;
         check(!!d.querySelector('#ipe-ledger-size'), '字数估算灰字仍然存在（改为空闲时算）');
 
         // 2.19.12 粉蓝海滩：配色按钮五档循环，海滩叠在浅色皮上
@@ -150,19 +156,38 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 night🌙', '配色七档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 月潮（' + seq.join(' ') + '）');
         for (let i = 0; i < 4; i++) tt.click();
         check(settings.mistTheme === true && settings.beachTheme === true && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-beach') && !panel.classList.contains('ipe-jade'), '粉蓝海滩 = 浅色皮 + ipe-beach，杏岸 / 碧岸标记都清掉');
-        check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('html body:has(#ipe-panel.ipe-beach) #ipe-chat-quick-entry svg stop:first-child'), '浮标有海滩配色规则');
+        check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg stop:first-child'), '浮标有海滩配色规则');
 
         // 2.19.13 珠光海螺：第六档，灰蓝莫兰迪渐到珍珠白，浮标同步
         tt.click();
         check(settings.mistTheme === true && settings.pearlTheme === true && settings.beachTheme === false && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-pearl') && !panel.classList.contains('ipe-beach'), '珠光海螺 = 浅色皮 + ipe-pearl，粉蓝海滩标记清掉');
         const css = fs.readFileSync(__dirname + '/style.css', 'utf8');
-        check(css.includes('html body:has(#ipe-panel.ipe-pearl) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-pearl') && css.includes('ipe-cap-ledger-pulse-pearl'), '浮标有珠光海螺配色规则（渐变与忙碌脉冲）');
+        check(css.includes('html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-pearl') && css.includes('ipe-cap-ledger-pulse-pearl'), '浮标有珠光海螺配色规则（渐变与忙碌脉冲）');
         // 2.19.14 柠檬海滩：第七档，柠檬黄、长春花蓝与樱花粉，浮标同步
         tt.click();
         check(settings.mistTheme === true && settings.lemonTheme === true && settings.pearlTheme === false && settings.beachTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-pearl'), '柠檬海滩 = 浅色皮 + ipe-lemon，珠光海螺标记清掉');
-        check(css.includes('html body:has(#ipe-panel.ipe-lemon) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-lemon') && css.includes('ipe-cap-ledger-pulse-lemon'), '浮标有柠檬海滩配色规则（渐变与忙碌脉冲）');
+        check(css.includes('html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-lemon') && css.includes('ipe-cap-ledger-pulse-lemon'), '浮标有柠檬海滩配色规则（渐变与忙碌脉冲）');
+        check(d.body.classList.contains('ipe-skin-mist') && d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-pearl') && !css.includes('body:has(#ipe-panel'), '2.19.15 配色写在 body 的 ipe-skin-* 类上，CSS 不再用 body:has()');
         tt.click();
         check(settings.mistTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '柠檬海滩再点一下回到月潮');
+        check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon'), '月潮：body 上没有任何 ipe-skin-* 类');
+
+        // 2.19.15 预设下拉按拼音排序（显示顺序），存储顺序与选中项不动
+        w.eval('window.ui.ipeRefreshTemplateEditors = ipeRefreshTemplateEditors; window.ui.ipeGetBaseTemplates = ipeGetBaseTemplates; window.ui.ipeRefreshAnchorEditors = ipeRefreshAnchorEditors;');
+        settings.baseTemplatesJson = JSON.stringify([
+            { id: 'tpl_a', name: '月潮', value: 'a' }, { id: 'tpl_b', name: '杏岸', value: 'b' }, { id: 'tpl_c', name: '预设10', value: 'c' },
+            { id: 'tpl_d', name: '海雾', value: 'd' }, { id: 'tpl_e', name: '预设2', value: 'e' }]);
+        settings.activeBaseTemplate = 'tpl_b';
+        w.ui.ipeRefreshTemplateEditors();
+        const optNames = [...d.querySelector('#ipe-template-slot').options].map(o => o.textContent);
+        const pos = n => optNames.indexOf(n);
+        check(pos('海雾') < pos('杏岸') && pos('杏岸') < pos('月潮') && pos('预设2') < pos('预设10'), '模板下拉按拼音排：海雾 → 杏岸 → 月潮，预设2 在 预设10 前（' + optNames.join(' ') + '）');
+        check(d.querySelector('#ipe-template-slot').value === 'tpl_b' && d.querySelector('#iped-reinject-tpl').value === 'tpl_b', '排序后当前选中的模板不变');
+        check(w.ui.ipeGetBaseTemplates().map(x => x.name).join(' ') === '月潮 杏岸 预设10 海雾 预设2', '存储顺序仍是先后顺序，只有下拉显示在排');
+        settings.anchorPresetsJson = JSON.stringify([{ id: 'anchor_1', name: '张三', value: '' }, { id: 'anchor_2', name: '阿宝', value: '' }, { id: 'anchor_3', name: 'Lina', value: '' }]);
+        w.ui.ipeRefreshAnchorEditors();
+        const ancNames = [...d.querySelector('#ipe-anchor-slot').options].map(o => o.textContent);
+        check(ancNames.indexOf('阿宝') < ancNames.indexOf('张三'), '锚点下拉同样按拼音排（' + ancNames.join(' ') + '）');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

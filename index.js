@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.14";
+var IPE_VERSION = "2.19.15";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -234,6 +234,20 @@ function ipeApplyTheme() {
         p.classList.toggle("ipe-beach", cfg().beachTheme === true);
         p.classList.toggle("ipe-pearl", cfg().pearlTheme === true);
         p.classList.toggle("ipe-lemon", cfg().lemonTheme === true);
+        /* 2.19.15：抽屉和浮标的配色以前靠 body:has(#ipe-panel.ipe-xxx) 跟着面板走，
+           :has() 盯着整棵 body，聊天区流式输出每改一次 DOM 浏览器都要重算一遍匹配。
+           现在直接把当前配色写到 body 的类上（ipe-skin-xxx），CSS 不再需要 :has()。 */
+        try {
+            var body = ipeRootDocument().body;
+            if (body) {
+                var curTheme = ipeThemeCurrent();
+                for (var ti = 0; ti < IPE_THEME_ORDER.length; ti++) {
+                    var tn = IPE_THEME_ORDER[ti];
+                    if (tn === "night") continue;
+                    body.classList.toggle("ipe-skin-" + tn, tn === "mist" ? mist : curTheme === tn);
+                }
+            }
+        } catch(eB) {}
         var tg = ipeRootDocument().getElementById("ipe-theme-toggle");
         if (tg) {
             var cur = ipeThemeCurrent();
@@ -492,18 +506,63 @@ function ipeLedgerPruneMirror(all, keepN) {
     return out;
 }
 function ipeWriteJsonLS(key, obj) {
-    try { localStorage.setItem(key, JSON.stringify(obj || {})); return true; }
+    try { localStorage.setItem(key, JSON.stringify(obj || {})); return obj || {}; }
     catch(e) {
         // 撞到配额：只对账本镜像做减法——先砍到 10 个聊天，再砍到只剩当前这个，仍不行才放弃
-        if (key !== IPE_LEDGER_LS_KEY) return false;
+        if (key !== IPE_LEDGER_LS_KEY) return null;
         try {
             var cur = ipeChatKey();
             var shrunk = ipeLedgerPruneMirror(obj, 10);
-            try { localStorage.setItem(key, JSON.stringify(shrunk)); return true; } catch(e2) {}
+            try { localStorage.setItem(key, JSON.stringify(shrunk)); return shrunk; } catch(e2) {}
             var only = {}; if (obj && obj[cur]) only[cur] = obj[cur];
-            localStorage.setItem(key, JSON.stringify(only)); return true;
-        } catch(e3) { return false; }
+            localStorage.setItem(key, JSON.stringify(only)); return only;
+        } catch(e3) { return null; }
     }
+}
+
+/* ---- 镜像缓存（2.19.15）----
+   镜像是整份 localStorage JSON：最近 30 个聊天的账本连历史版本，动辄几百 KB 到几 MB。
+   以前每次落账都在主线程里 parse 一遍、stringify 一遍、setItem 一遍，正好卡在新楼刚到、酒馆还在渲染的那一刻，
+   手机上能顿半秒。现在解析一次留在内存里，改了只标脏，等浏览器空闲（或页面要藏起来 / 关掉）再落盘；
+   读的人（回退读取、继承列表）都走这份内存副本。别的标签页改了镜像会发 storage 事件，收到就作废缓存。 */
+var ipeMirrorCache = null, ipeMirrorFlushTimer = null, ipeMirrorFlushIdle = null, ipeMirrorBound = false;
+function ipeLedgerMirrorInvalidate() { ipeMirrorCache = null; }
+function ipeMirrorBind() {
+    if (ipeMirrorBound) return;
+    ipeMirrorBound = true;
+    try {
+        var w = ipeRootWindow() || window;
+        w.addEventListener("storage", function(ev){ if (ev && ev.key === IPE_LEDGER_LS_KEY && !ipeMirrorFlushTimer && !ipeMirrorFlushIdle) ipeLedgerMirrorInvalidate(); });
+        w.addEventListener("pagehide", function(){ ipeLedgerMirrorFlush(); });
+        var d = w.document || document;
+        d.addEventListener("visibilitychange", function(){ if (d.visibilityState === "hidden") ipeLedgerMirrorFlush(); });
+    } catch(e) {}
+}
+function ipeLedgerMirrorGet() {
+    if (ipeMirrorCache) return ipeMirrorCache;
+    ipeMirrorCache = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
+    ipeMirrorBind();
+    return ipeMirrorCache;
+}
+function ipeLedgerMirrorFlush() {
+    if (ipeMirrorFlushTimer) { try { clearTimeout(ipeMirrorFlushTimer); } catch(e) {} ipeMirrorFlushTimer = null; }
+    if (ipeMirrorFlushIdle) { try { var w0 = ipeRootWindow() || window; if (typeof w0.cancelIdleCallback === "function") w0.cancelIdleCallback(ipeMirrorFlushIdle); } catch(e) {} ipeMirrorFlushIdle = null; }
+    if (!ipeMirrorCache) return true;
+    var written = ipeWriteJsonLS(IPE_LEDGER_LS_KEY, ipeMirrorCache);
+    if (written) { ipeMirrorCache = written; return true; }   // 撞配额被砍过：内存副本跟着砍，别下次再撞一遍
+    return false;
+}
+function ipeLedgerMirrorPut(all) {
+    ipeMirrorCache = all || {};
+    ipeMirrorBind();
+    if (ipeMirrorFlushTimer || ipeMirrorFlushIdle) return true;
+    var w = null; try { w = ipeRootWindow() || window; } catch(e) { w = window; }
+    if (w && typeof w.requestIdleCallback === "function") {
+        ipeMirrorFlushIdle = w.requestIdleCallback(function(){ ipeMirrorFlushIdle = null; ipeLedgerMirrorFlush(); }, { timeout: 2000 });
+    } else {
+        ipeMirrorFlushTimer = setTimeout(function(){ ipeMirrorFlushTimer = null; ipeLedgerMirrorFlush(); }, 400);
+    }
+    return true;
 }
 
 /* ---- v2 结构规整：每次读都过，改 schema 不炸 ---- */
@@ -605,7 +664,7 @@ function ipeLedgerReadFresh() {
     } catch(e0) {}
     // 2) v2 镜像
     try {
-        var all2 = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
+        var all2 = ipeLedgerMirrorGet();
         var hit2 = all2[ipeChatKey()];
         if (hit2 && typeof hit2 === "object") return ipeLedgerNormalize(hit2);
     } catch(e1) {}
@@ -644,10 +703,10 @@ function ipeLedgerSave(state) {
     } catch(eM) { metaOk = false; }
     if (ipeChatKeyReady()) {
         try {
-            var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
+            var all = ipeLedgerMirrorGet();
             all[ipeChatKey()] = Object.assign({}, clean, { who: ipeCharName(), floors: ipeFloorNo() });   // 镜像多记角色名，「继承账本」列表用
             all = ipeLedgerPruneMirror(all, IPE_LEDGER_MIRROR_MAX_CHATS);
-            lsOk = ipeWriteJsonLS(IPE_LEDGER_LS_KEY, all) !== false;
+            lsOk = ipeLedgerMirrorPut(all);   // 2.19.15 只改内存副本，空闲时再落盘
             ipeLedgerMirrorDirty = true;
         } catch(eL) { lsOk = false; }
     }
@@ -1724,7 +1783,7 @@ try { window.ipeGenerateInterceptor = ipeGenerateInterceptor; } catch(e) {}
    盖本聊天当前楼号的戳（盖原楼号会被下一次对账当幽灵账碎掉），本聊天原有的账先进历史。
    ============================================================ */
 function ipeLedgerInheritList() {
-    var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY), cur = ipeChatKey(), me = ipeCharName();
+    var all = ipeLedgerMirrorGet(), cur = ipeChatKey(), me = ipeCharName();
     var out = [];
     Object.keys(all).forEach(function(k){
         var v = all[k];
@@ -1762,7 +1821,7 @@ function ipeLedgerRefreshInherit(force) {
     });
 }
 function ipeLedgerInherit(key) {
-    var all = ipeReadJsonLS(IPE_LEDGER_LS_KEY);
+    var all = ipeLedgerMirrorGet();
     var src = all[String(key || "")];
     if (!src || !String(src.current || "").trim()) { ipeLedgerStatus("那份账本读不到了（镜像里没有）", "#d4726a"); return false; }
     var cur = ipeLedgerRead();
@@ -1986,14 +2045,34 @@ function ipeLedgerRenderInline() {
     } catch(e) {}
 }
 
+/* 2.19.15：#chat 只挂一个 MutationObserver。
+   以前楼内账本块和楼层 🎨 按钮各挂一个，都是 childList + subtree，流式输出每一帧浏览器都得给两边各造一份变动记录。
+   现在一个观察器分发给几个处理函数，记录只造一份。处理函数各自的防抖、防乒乓照旧。 */
+var ipeChatObsHandlers = [];
+function ipeChatObserve(name, handler) {
+    var d = ipeRootDocument();
+    var chatEl = d.querySelector("#chat");
+    if (!chatEl || typeof MutationObserver === "undefined") return false;
+    var known = false;
+    for (var i = 0; i < ipeChatObsHandlers.length; i++) if (ipeChatObsHandlers[i].name === name) known = true;
+    if (!known) ipeChatObsHandlers.push({ name: name, fn: handler });
+    if (window.__ipeChatObs && window.__ipeChatObsTarget === chatEl) return true;
+    if (window.__ipeChatObs) { try { window.__ipeChatObs.disconnect(); } catch(e) {} }
+    window.__ipeChatObs = new MutationObserver(function(records){
+        for (var k = 0; k < ipeChatObsHandlers.length; k++) {
+            try { ipeChatObsHandlers[k].fn(records); } catch(e) {}
+        }
+    });
+    window.__ipeChatObs.observe(chatEl, { childList: true, subtree: true });
+    window.__ipeChatObsTarget = chatEl;
+    return true;
+}
+
 function ipeLedgerInstallInlineObserver() {
     try {
-        if (window.__ipeLedgerInlineObs) return;
         var d = ipeRootDocument();
-        var chatEl = d.querySelector("#chat");
-        if (!chatEl || typeof MutationObserver === "undefined") return;
         var t = null;
-        window.__ipeLedgerInlineObs = new MutationObserver(function(records){
+        ipeChatObserve("ledger-inline", function(records){
             if (cfg().ledgerInlineShow === false) return;
             if (ipeMutationsOnlyOurAdds(records, IPE_LEDGER_INLINE_CLASS)) return;   // 自己刚补的块，别自己触发自己
             // 酒馆重绘会抹掉 DOM 块，防抖后补回来
@@ -2005,7 +2084,6 @@ function ipeLedgerInstallInlineObserver() {
                 ipeLedgerRenderInline();
             }, 250);
         });
-        window.__ipeLedgerInlineObs.observe(chatEl, { childList: true, subtree: true });
     } catch(e) {}
 }
 
@@ -3512,8 +3590,9 @@ function ipeRefreshSystemPromptEditors() {
     var active = ipeGetActiveSystemPromptId();
     var item = ipeGetActiveSystemPromptItem();
 
-    ipeFillSelect("ipe-system-slot", list, active);
-    ipeFillSelect("iped-system-slot", list, active);
+    var shown = ipeSortByName(list);
+    ipeFillSelect("ipe-system-slot", shown, active);
+    ipeFillSelect("iped-system-slot", shown, active);
 
     ["ipe-system-prompt","iped-system-prompt"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
@@ -3637,8 +3716,9 @@ function ipeRefreshRuleEditors() {
     var active = ipeGetActiveRuleId();
     var item = ipeGetActiveRuleItem();
 
-    ipeFillSelect("ipe-rule-slot", list, active);
-    ipeFillSelect("iped-rule-slot", list, active);
+    var shown = ipeSortByName(list);
+    ipeFillSelect("ipe-rule-slot", shown, active);
+    ipeFillSelect("iped-rule-slot", shown, active);
 
     ["ipe-rule-name","iped-rule-name"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
@@ -3646,6 +3726,23 @@ function ipeRefreshRuleEditors() {
     ["ipe-extract-rules","iped-extract-rules"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
+}
+
+/* 2.19.15：预设下拉按名字的拼音排序（数字按数值比：预设2 排在 预设10 前面）。
+   只影响下拉的显示顺序；存储顺序、id、当前选中项都不动。 */
+var ipeNameCollator = null;
+function ipeSortByName(list) {
+    var arr = Array.isArray(list) ? list.slice() : [];
+    if (ipeNameCollator === null) {
+        try { ipeNameCollator = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" }); }
+        catch(e) { ipeNameCollator = false; }
+    }
+    arr.sort(function(a, b){
+        var x = String((a && a.name) || ""), y = String((b && b.name) || "");
+        if (ipeNameCollator) return ipeNameCollator.compare(x, y);
+        return x < y ? -1 : (x > y ? 1 : 0);
+    });
+    return arr;
 }
 
 function ipeFillSelect(id, list, active) {
@@ -3689,10 +3786,11 @@ function ipeRefreshTemplateEditors() {
     var active = ipeGetActiveTemplateId();
     var item = ipeGetActiveTemplateItem();
 
-    ipeFillSelect("ipe-template-slot", list, active);
-    ipeFillSelect("iped-template-slot", list, active);
-    ipeFillSelect("ipe-reinject-tpl", list, active);     // 预览区的快捷下拉，与模板预设同一份
-    ipeFillSelect("iped-reinject-tpl", list, active);
+    var shown = ipeSortByName(list);
+    ipeFillSelect("ipe-template-slot", shown, active);
+    ipeFillSelect("iped-template-slot", shown, active);
+    ipeFillSelect("ipe-reinject-tpl", shown, active);     // 预览区的快捷下拉，与模板预设同一份
+    ipeFillSelect("iped-reinject-tpl", shown, active);
 
     ["ipe-template-name","iped-template-name"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
@@ -3707,8 +3805,9 @@ function ipeRefreshAnchorEditors() {
     var active = ipeGetActiveAnchorId();
     var item = ipeGetActiveAnchorItem();
 
-    ipeFillSelect("ipe-anchor-slot", list, active);
-    ipeFillSelect("iped-anchor-slot", list, active);
+    var shown = ipeSortByName(list);
+    ipeFillSelect("ipe-anchor-slot", shown, active);
+    ipeFillSelect("iped-anchor-slot", shown, active);
 
     ["ipe-anchor-name","iped-anchor-name"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
@@ -7415,13 +7514,11 @@ function ipeMesButtonRows(records) {
 }
 function ipeInstallMesButtonsObserver() {
     try {
-        if (window.__ipeMesBtnObs) return;
         var d = ipeRootDocument();
-        var chatEl = d.querySelector("#chat");
-        if (!chatEl || typeof MutationObserver === "undefined") return;
+        if (!d.querySelector("#chat") || typeof MutationObserver === "undefined") return;
         var t = null;
         var pendingRows = new Set();
-        window.__ipeMesBtnObs = new MutationObserver(function(records){
+        ipeChatObserve("mes-buttons", function(records){
             if (ipeMutationsOnlyOurAdds(records, IPE_MES_BTN_CLASS)) return;     // 自己刚挂的按钮，别自己触发自己
             var changed = ipeMesButtonRows(records);
             if (!changed.size) return;
@@ -7438,7 +7535,6 @@ function ipeInstallMesButtonsObserver() {
                 if (n > 0 && removed) ipeMesBtnGuard.allow();
             }, 250);
         });
-        window.__ipeMesBtnObs.observe(chatEl, { childList: true, subtree: true });
         if (!d.__ipeMesBtnClick) {
             d.__ipeMesBtnClick = true;
             d.addEventListener("click", function(ev){

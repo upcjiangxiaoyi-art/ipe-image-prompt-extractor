@@ -66,6 +66,7 @@ function boot(floors) {
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
+        "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
         "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
@@ -1200,11 +1201,17 @@ await (async () => {
     ok(typeof w.ipeGenerateInterceptor === "function", "window.ipeGenerateInterceptor 挂上了（manifest 里声明的名字）");
     F("ipeLedgerCommit")("旧账本，够长够长够长够长够长够长。", 8);
     F("ipeLedgerApplyEP")();
-    w.fetch = (u, o) => new Promise(res => setTimeout(() => res(okBody("等来的新账本，够长够长够长够长够长够长。")), 300));
+    /* 2.19.15：假 fetch 不再靠 300ms 定时器——机器忙时事件循环一堵，Node 会把同一时长桶里已到期的定时器一起跑，
+       挂账可能在拦截器被调用之前就落账，拦截器见 busy=false 直接返回。改成拦截器进入等待之后再由测试放行。 */
+    let release = null;
+    w.fetch = (u, o) => new Promise(res => { release = () => res(okBody("等来的新账本，够长够长够长够长够长够长。")); });
     F("ipeLedgerRun")(9, false);
     await wait(20);
+    ok(w.eval("ipeLedgerBusy") === true && typeof release === "function", "副 AI 请求已发出、挂账进行中");
     const t0 = Date.now();
-    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    const gate = w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    await wait(150); release();
+    await gate;
     ok(!F("ipeLedgerRead")().current.includes("旧账本") && F("ipeLedgerRead")().current.includes("等来的新账本"), "拦截器等到挂账落账才返回（等了 " + (Date.now() - t0) + " ms）");
     ok(String(tavern.extensionPrompts[EPK].value).indexOf("等来的新账本") >= 0, "放行时贴耳已经是新账");
     ok(statusText(w).indexOf("读到的是新账") >= 0, "状态行说这一发读到的是新账", statusText(w));
@@ -1304,12 +1311,14 @@ await (async () => {
     const d = w.document;
     const wait = ms => new Promise(r => setTimeout(r, ms));
     F("ipeLedgerCommit")("本聊天现任的账，够长够长够长够长够长。", 8);
+    F("ipeLedgerMirrorFlush")();   // 2.19.15 镜像空闲时才落盘，测试里手动落一次
     const mirror = JSON.parse(w.localStorage.getItem("ipe_ledger_mirror_v2"));
     eq(mirror["test-chat"].who, "苑无忧", "镜像里带了角色名");
     mirror["old-chat-A"] = { v: 2, current: "别人的账：顾寒的旧聊天，够长够长够长。", versions: [], order: "", lastFloor: 77, updatedAt: 5000, who: "顾寒" };
     mirror["old-chat-B"] = { v: 2, current: "同角色的账：苑无忧上一个聊天，买了去北京的票。", versions: [{ floor: 100, ts: 1, text: "x" }], order: "别的指令", lastFloor: 120, updatedAt: 3000, who: "苑无忧" };
     mirror["empty-chat"] = { v: 2, current: "", versions: [], lastFloor: 3, updatedAt: 9000, who: "苑无忧" };
     w.localStorage.setItem("ipe_ledger_mirror_v2", JSON.stringify(mirror));
+    F("ipeLedgerMirrorInvalidate")();   // 绕过插件直接改了 localStorage，让内存副本作废
     const list = F("ipeLedgerInheritList")();
     eq(list.map(x => x.key).join(","), "old-chat-B,old-chat-A", "列表：不含本聊天和空账本，同角色排前面，其余按时间");
     F("ipeLedgerRefreshInherit")();
