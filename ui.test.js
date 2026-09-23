@@ -110,6 +110,16 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.ui.createChatQuickButton();
         const cap = d.querySelector('#ipe-chat-quick-entry');
         check(!!cap && !!cap.querySelector('animate') && String(cap.getAttribute('style') || '').includes('drop-shadow'), '浮标波纹动画与阴影滤镜按作者要求原样保留（2.19.6）');
+        // 2.19.16 浮标动效开关：关 = 无 <animate>、无 drop-shadow；开 = 恢复；面板 / 抽屉两个勾同步
+        w.eval('window.ui.ipeRebuildQuickButton = ipeRebuildQuickButton;');
+        const motionCb = d.querySelector('#ipe-quick-motion'), motionCbD = d.querySelector('#iped-quick-motion');
+        check(!!motionCb && !!motionCbD && motionCb.checked && motionCbD.checked, '两处入口都有「浮标动效」勾，默认开');
+        motionCb.checked = false; motionCb.dispatchEvent(new w.Event('change', { bubbles: true }));
+        const capOff = d.querySelector('#ipe-chat-quick-entry');
+        check(settings.quickEntryMotion === false && !motionCbD.checked && !!capOff && capOff !== cap && !capOff.querySelector('animate') && !String(capOff.getAttribute('style') || '').includes('drop-shadow') && !!capOff.querySelector('circle'), '关掉动效：浮标重建，无 animate、无 drop-shadow，波纹圈静止保留');
+        motionCbD.checked = true; motionCbD.dispatchEvent(new w.Event('change', { bubbles: true }));
+        const capOn = d.querySelector('#ipe-chat-quick-entry');
+        check(settings.quickEntryMotion === true && motionCb.checked && !!capOn && !!capOn.querySelector('animate') && String(capOn.getAttribute('style') || '').includes('drop-shadow'), '再打开：animate 与 drop-shadow 都回来');
         // 楼内展示：装一个「看到就抹掉」的敌对观察器，模拟别的扩展整楼重画
         d.body.insertAdjacentHTML('beforeend', '<div id="chat">' + tavern.chat.map((m, i) => '<div class="mes" mesid="' + i + '"' + (m.is_user ? ' is_user="true"' : '') + '><div class="mes_text">第 ' + (i + 1) + ' 楼</div></div>').join('') + '</div>');
         w.ui.ipeLedgerCommit('账本正文，够长够长够长够长够长够长够长够长。', tavern.chat.length);

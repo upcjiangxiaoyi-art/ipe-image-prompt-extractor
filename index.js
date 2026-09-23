@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.15";
+var IPE_VERSION = "2.19.16";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -71,6 +71,7 @@ const DEFAULTS = {
     systemPromptPresetsJson: "",
     activeSystemPromptPreset: "sys_emo",
     showQuickEntry: true,
+    quickEntryMotion: true,   // 2.19.16 浮标动效：波纹 <animate> + 阴影滤镜；关掉给怀疑手机发烫的人做对照
     baseTemplateSlot1: "",
     baseTemplateSlot2: "",
     baseTemplateSlot3: "",
@@ -5170,8 +5171,15 @@ function createChatQuickButton() {
     imp("font-weight", "700");
     imp("line-height", "1");
     btn.style.boxShadow = "none"; /* 不带 important：给脉冲动画让路 */
-    imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
-    /* 2.19.5 曾把滤镜和波纹动画拿掉，2.19.6 按作者要求原样恢复：作者用了很久没出过事，实测比推理硬。 */
+    /* 2.19.5 曾把滤镜和波纹动画拿掉，2.19.6 按作者要求原样恢复：作者用了很久没出过事，实测比推理硬。
+       2.19.16 做成开关（默认开）：有人觉得手机发烫是浮标动的缘故，关掉对照一下就知道。
+       关 = 去掉两条 <animate>（波纹圈停在静止的一圈）和 drop-shadow 滤镜；忙碌脉冲与小灯不受影响。 */
+    if (cfg().quickEntryMotion === false) {
+        try { btn.querySelectorAll("animate").forEach(function(a){ a.remove(); }); } catch(eA) {}
+        imp("filter", "none");
+    } else {
+        imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
+    }
     imp("z-index", "2147483647");
     imp("cursor", "grab");
     imp("pointer-events", "auto");
@@ -5282,6 +5290,15 @@ function createChatQuickButton() {
     ipeSetStopButtonsState(!!ipeAbortController);
 }
 
+/* 2.19.16 动效开关切换：拆了重建，位置在设置里记着，重建不跑位 */
+function ipeRebuildQuickButton() {
+    try {
+        var old = q("#ipe-chat-quick-entry");
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+    } catch(e) {}
+    if (cfg().showQuickEntry) createChatQuickButton();
+}
+
 function ipeEnsureQuickButtonLater() {
     createChatQuickButton();
     setTimeout(createChatQuickButton, 700);
@@ -5379,6 +5396,7 @@ function createPanel() {
 
     h += secHTML("preview","预览", false,
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
+        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="ipe-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
@@ -5713,6 +5731,7 @@ function createDrawer() {
     h += '<div class="inline-drawer-content">';
     h += '<div style="margin-bottom:6px"><label>启用 <input type="checkbox" id="iped-enabled"'+(c.enabled?' checked':'')+'></label></div>';
     h += '<div style=\"margin-bottom:6px\"><label>显示快捷入口 <input type=\"checkbox\" id=\"iped-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>';
+    h += '<div style="margin-bottom:6px"><label title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="iped-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label>自动注入 <input type="checkbox" id="iped-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>';
     h += '<div style="margin:8px 0;display:flex;gap:6px"><input type="button" id="iped-open-panel" class="menu_button" value="打开 IPE 小面板"><input type="button" id="iped-reset-entry" class="menu_button" value="重置入口位置"></div>';
     h += '<div class="ipe-tabs" style="margin:8px 0">'
@@ -6572,6 +6591,17 @@ function bindAll() {
             save("enabled", el.checked);
             var o=q("#"+(id==="ipe-enabled"?"iped-enabled":"ipe-enabled"));
             if(o) o.checked=el.checked;
+        });
+    });
+
+    ["ipe-quick-motion","iped-quick-motion"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("change", function(){
+            save("quickEntryMotion", el.checked);
+            var o=q("#"+(id==="ipe-quick-motion"?"iped-quick-motion":"ipe-quick-motion"));
+            if(o) o.checked=el.checked;
+            ipeRebuildQuickButton();
+            setStatus(el.checked ? "浮标动效已开：波纹与阴影恢复" : "浮标动效已关：不泛波纹、不带阴影，用几天看看手机还烫不烫", "#6ec577");
         });
     });
 
