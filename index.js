@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.19.16";
+var IPE_VERSION = "2.19.17";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2064,9 +2064,37 @@ function ipeChatObserve(name, handler) {
             try { ipeChatObsHandlers[k].fn(records); } catch(e) {}
         }
     });
-    window.__ipeChatObs.observe(chatEl, { childList: true, subtree: true });
     window.__ipeChatObsTarget = chatEl;
+    if (!ipeChatObsPaused) window.__ipeChatObs.observe(chatEl, { childList: true, subtree: true });   // 撤哨期间先不接，恢复时一起接
     return true;
+}
+/* 2.19.17 生成期间撤哨：AI 吐字时酒馆一秒把那一楼重画十几次，每画一次浏览器都得给每个观察器造一份变动清单，
+   我们看一眼扔掉，但造清单这步躲不掉。楼内账本块挂在上一楼、🎨 按钮只挂有记录的楼，流式期间都不需要补，
+   所以生成开始就断开，生成结束 / 中止 / 收到新楼 / 换聊天再接上并补查一次。
+   请求报错或人点停止酒馆可能不发结束事件，撤哨超过 IPE_CHAT_OBS_PAUSE_MAX_MS 自动接回。 */
+var ipeChatObsPaused = false, ipeChatObsPauseTimer = null;
+var IPE_CHAT_OBS_PAUSE_MAX_MS = 5 * 60 * 1000;
+function ipeChatObsPause() {
+    if (ipeChatObsPaused) return;
+    ipeChatObsPaused = true;
+    if (window.__ipeChatObs) { try { window.__ipeChatObs.disconnect(); } catch(e) {} }
+    if (ipeChatObsPauseTimer) { try { clearTimeout(ipeChatObsPauseTimer); } catch(e) {} }
+    ipeChatObsPauseTimer = setTimeout(function(){ ipeChatObsPauseTimer = null; ipeChatObsResume("timeout"); }, IPE_CHAT_OBS_PAUSE_MAX_MS);
+}
+function ipeChatObsResume(why) {
+    if (ipeChatObsPauseTimer) { try { clearTimeout(ipeChatObsPauseTimer); } catch(e) {} ipeChatObsPauseTimer = null; }
+    if (!ipeChatObsPaused) return;
+    ipeChatObsPaused = false;
+    try {
+        var target = window.__ipeChatObsTarget;
+        if (window.__ipeChatObs && target && target.isConnected) window.__ipeChatObs.observe(target, { childList: true, subtree: true });
+    } catch(e) {}
+    // 撤哨期间漏掉的变动一次补齐：账本块没了就补，🎨 按钮全楼查一遍
+    try {
+        var d = ipeRootDocument();
+        if (cfg().ledgerInlineShow !== false && String(ipeLedgerRead().current || "").trim() && !d.querySelector("." + IPE_LEDGER_INLINE_CLASS)) ipeLedgerRenderInline();
+    } catch(e) {}
+    try { ipeInstallMesButtons(); } catch(e) {}
 }
 
 function ipeLedgerInstallInlineObserver() {
@@ -7277,6 +7305,23 @@ function bindAll() {
                     ipeLedgerStatus("\u26A0\uFE0F 账本还没记完你就发了——这一发 Gemini 读到的是上一楼的账本。"
                         + "记完会自动补上，下一发就是新的。", "#c9a227");
                 });
+            });
+        }
+    } catch(e) {}
+
+    // 2.19.17 生成期间撤哨：开始就断开 #chat 观察器，结束 / 中止 / 新楼 / 换聊天接回并补查
+    try {
+        var cg = ctx();
+        if (cg.eventSource && cg.event_types) {
+            if (cg.event_types.GENERATION_STARTED) {
+                cg.eventSource.on(cg.event_types.GENERATION_STARTED, function(genType, genParams, dryRun){
+                    if (dryRun === true) return;          // 只是算 token，不会重画聊天区
+                    ipeChatObsPause();
+                });
+            }
+            ["GENERATION_ENDED", "GENERATION_STOPPED", "MESSAGE_RECEIVED", "CHAT_CHANGED"].forEach(function(n){
+                var ev = cg.event_types[n]; if (!ev) return;
+                cg.eventSource.on(ev, function(){ ipeChatObsResume(n); });
             });
         }
     } catch(e) {}

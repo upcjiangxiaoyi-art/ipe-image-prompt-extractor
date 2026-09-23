@@ -123,6 +123,29 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         // 楼内展示：装一个「看到就抹掉」的敌对观察器，模拟别的扩展整楼重画
         d.body.insertAdjacentHTML('beforeend', '<div id="chat">' + tavern.chat.map((m, i) => '<div class="mes" mesid="' + i + '"' + (m.is_user ? ' is_user="true"' : '') + '><div class="mes_text">第 ' + (i + 1) + ' 楼</div></div>').join('') + '</div>');
         w.ui.ipeLedgerCommit('账本正文，够长够长够长够长够长够长够长够长。', tavern.chat.length);
+
+        // 2.19.17 生成期间撤哨：GENERATION_STARTED 断开 #chat 观察器，结束事件接回并补查；dryRun 不撤；超时自动接回
+        w.ui.ipeLedgerInstallInlineObserver(); w.ui.ipeLedgerRenderInline();
+        const blockNow = () => d.querySelector('#chat .ipe-ledger-inline');
+        check(!!blockNow(), '楼内账本块已渲染');
+        await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, true);
+        blockNow().remove(); await delay(450);
+        check(!!blockNow(), 'dryRun 的 GENERATION_STARTED 不撤哨：块被抹掉 250ms 内补回');
+        await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, false);
+        blockNow().remove(); await delay(450);
+        check(!blockNow() && w.eval('ipeChatObsPaused') === true, '生成开始撤哨：流式期间块被抹掉不补，观察器不再收变动');
+        await tavern.eventSource.emit('GENERATION_ENDED');
+        check(!!blockNow() && w.eval('ipeChatObsPaused') === false, '生成结束接回哨兵并补查：账本块立刻补回');
+        blockNow().remove(); await delay(450);
+        check(!!blockNow(), '接回之后观察器照常工作：再抹掉还是会补');
+        w.eval('IPE_CHAT_OBS_PAUSE_MAX_MS = 300;');
+        await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, false);
+        blockNow().remove(); await delay(150);
+        check(!blockNow(), '撤哨中（保险还没到点）');
+        await delay(400);
+        check(!!blockNow() && w.eval('ipeChatObsPaused') === false, '没等到结束事件也不怕：撤哨超时自动接回并补查');
+        w.eval('IPE_CHAT_OBS_PAUSE_MAX_MS = 5 * 60 * 1000;');
+        blockNow().remove();   // 下面的敌对观察器用例要从「块不在」开始，才看得到补块
         let wiped = 0;
         const hostile = new w.MutationObserver(recs => { recs.forEach(r => r.addedNodes.forEach(n => { if (n.classList && n.classList.contains('ipe-ledger-inline')) { wiped++; n.remove(); } })); });
         hostile.observe(d.querySelector('#chat'), { childList: true, subtree: true });

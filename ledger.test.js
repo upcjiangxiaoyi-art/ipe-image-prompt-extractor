@@ -34,7 +34,8 @@ function makeTavern(floors) {
         event_types: {
             GENERATION_STARTED: "GENERATION_STARTED", MESSAGE_SENT: "MESSAGE_SENT",
             MESSAGE_RECEIVED: "MESSAGE_RECEIVED", MESSAGE_SWIPED: "MESSAGE_SWIPED",
-            MESSAGE_DELETED: "MESSAGE_DELETED", MESSAGE_EDITED: "MESSAGE_EDITED", CHAT_CHANGED: "CHAT_CHANGED"
+            MESSAGE_DELETED: "MESSAGE_DELETED", MESSAGE_EDITED: "MESSAGE_EDITED", CHAT_CHANGED: "CHAT_CHANGED",
+            GENERATION_ENDED: "GENERATION_ENDED", GENERATION_STOPPED: "GENERATION_STOPPED"
         },
         chatMetadata: {},
         characters: [{ name: "苑无忧", avatar: "yuan.png" }, { name: "顾寒", avatar: "gu.png" }], characterId: 0, groupId: null, name2: "苑无忧",
