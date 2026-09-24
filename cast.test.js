@@ -145,6 +145,21 @@ async function setup(opts) {
         check(u.indexOf('short silver hair') < 0 && u.indexOf('【人物锁】') >= 0 && u.indexOf('苑无忧') >= 0, '每楼请求只带人名，外貌不再重复发', u.slice(0, 300));
         check(w.document.querySelector('#ipe-preview-text').value.indexOf('苑无忧: tall woman, short silver hair.') === 0, '贴进提示词的是整理好的那一行');
     }
+    console.log('\n【user 叫「你」】正文里 user 被称作「你」也能锁上（2.22.3）');
+    {
+        const { tavern, cap, api, box, run, st } = await setup();
+        tavern.name1 = '小雨';
+        st.anchorPresetsJson = JSON.stringify([{ id: 'anchor_1', name: '主角', value: '【苑无忧】\n外貌: tall woman, black hair\n\n【小雨】\n外貌: 18-year-old girl, short black bob, round glasses' }]);
+        api('苑无忧 leans toward 小雨.\n<cast>苑无忧, 你</cast>');
+        await run();
+        const u = cap.body.messages[1].content;
+        check(u.indexOf('用第二人称「你」称呼的人就是 user「小雨」') >= 0, '约定里点明「你」就是 user');
+        check(u.indexOf('你的输出') < 0, '约定里不再用「你」称呼副 AI，免得和 user 混');
+        check(box('ipe-preview-text').indexOf('小雨: 18-year-old girl') > 0, '<cast> 写「你」也认成 user，外貌贴上', box('ipe-preview-text'));
+        api('Close-up of 苑无忧.\n<cast>苑无忧, you</cast>');
+        await run();
+        check(box('ipe-preview-text').indexOf('小雨: ') > 0, '写 you 也认');
+    }
     console.log('\n【开关】人物锁关掉 / 温度留空');
     {
         const { cap, api, box, run } = await setup({ imgCastLock: false, imgTemperature: '' });

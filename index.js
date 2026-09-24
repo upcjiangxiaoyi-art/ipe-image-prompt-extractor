@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.22.2";
+var IPE_VERSION = "2.22.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4524,14 +4524,28 @@ function ipeCastBlock(present) {
 }
 
 /* 附在提取请求末尾的约定 */
+/* user 在正文里几乎总被叫作「你」，不点名字：副 AI 不知道「你」是谁，<cast> 就漏报，user 的长相贴不上。
+   这里认出哪张人物段是 user（名字或别名等于酒馆里的 user 名），约定里点明「你」= 这个人；
+   副 AI 在 <cast> 里写「你 / you / user」也照样认成 user。 */
+var IPE_CAST_USER_WORDS = ["你", "您", "you", "user", "{{user}}", "<user>"];
+function ipeCastUserName() { try { return String(ctx().name1 || "").trim(); } catch(e) { return ""; } }
+function ipeCastUserCard(cards) {
+    var u = ipeCastUserName();
+    return u ? ipeCastFind(cards, u) : null;
+}
 function ipeCastContract(cards) {
+    var uName = ipeCastUserName(), uCard = ipeCastUserCard(cards);
+    var youLine = uCard
+        ? "正文里用第二人称「你」称呼的人就是 user「" + uCard.name + "」（上面名单里的「" + uCard.name + "」）。「你」出现在画面里时，<cast> 里必须写「" + uCard.name + "」，描述里也用「" + uCard.name + "」称呼，不要写 you。"
+        : (uName ? "正文里用第二人称「你」称呼的人就是 user「" + uName + "」；描述里用「" + uName + "」称呼，不要写 you。" : "");
     return [
         "【人物锁】",
-        "下列人物的固定长相（性别、年龄感、脸、发型发色、瞳色、肤色、体型、标志特征）由插件原样贴进最终提示词。你的输出里不要再写这些，也不要换说法复述；服装、表情、视线、动作、临时身体状态（湿发、受伤、脸红等）照常写。提到他们时直接用下面的名字：",
+        "下列人物的固定长相（性别、年龄感、脸、发型发色、瞳色、肤色、体型、标志特征）由插件原样贴进最终提示词。输出里不要再写这些，也不要换说法复述；服装、表情、视线、动作、临时身体状态（湿发、受伤、脸红等）照常写。提到他们时直接用下面的名字：",
         cards.map(function(c){ return c.name + (c.aliases.length ? "（又名 " + c.aliases.join(" / ") + "）" : ""); }).join("、"),
+        youLine,
         "在全部输出的最后另起一行附上：",
         "<cast>本楼实际入镜的上述人物名，按上面的名字原样写，英文逗号分隔；没有就写 NONE</cast>"
-    ].join("\n");
+    ].filter(Boolean).join("\n");
 }
 
 /* 从副 AI 的输出里摘掉 <cast>（老约定的 <outfit> 也顺手摘掉），返回剩下的正文和 cast 值（没写就是 null） */
@@ -4549,10 +4563,14 @@ function ipeCastStripTags(txt) {
 
 /* 谁入镜：以 <cast> 为准；副 AI 没写 <cast> 就看正文里点到了谁 */
 function ipeCastResolve(cards, castVal, fallbackText) {
-    var hit = {};
+    var hit = {}, uCard = ipeCastUserCard(cards);
     if (castVal != null) {
         if (!/^\s*(none|无|没有)?\s*$/i.test(castVal)) {
-            castVal.split(/[,，、;；\n]/).forEach(function(n){ var c = ipeCastFind(cards, n); if (c) hit[c.name] = true; });
+            castVal.split(/[,，、;；\n]/).forEach(function(n){
+                var c = ipeCastFind(cards, n);
+                if (!c && uCard && IPE_CAST_USER_WORDS.indexOf(String(n).trim().toLowerCase()) >= 0) c = uCard;
+                if (c) hit[c.name] = true;
+            });
         }
     } else {
         var low = String(fallbackText || "").toLowerCase();
