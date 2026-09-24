@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.22.3";
+var IPE_VERSION = "2.22.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4561,9 +4561,16 @@ function ipeCastStripTags(txt) {
     return { text: b.s.replace(/\n{3,}/g, "\n\n").trim(), cast: a.v };
 }
 
-/* 谁入镜：以 <cast> 为准；副 AI 没写 <cast> 就看正文里点到了谁 */
+/* 谁入镜：<cast> 点到的 ∪ 描述正文里写到名字 / 别名的。
+   2.22.3 前只认 <cast>：副 AI 在 <cast> 里写 NONE、写拼音、漏人时一个都不贴，
+   可规则又叫它别写外貌——描述里明明写了「陆籍北 stands…」，外貌两边都没有。
+   描述里点名就说明这人在画面里，照贴。 */
 function ipeCastResolve(cards, castVal, fallbackText) {
     var hit = {}, uCard = ipeCastUserCard(cards);
+    var low = String(fallbackText || "").toLowerCase();
+    cards.forEach(function(c){
+        [c.name].concat(c.aliases).forEach(function(k){ if (k && low.indexOf(k.toLowerCase()) >= 0) hit[c.name] = true; });
+    });
     if (castVal != null) {
         if (!/^\s*(none|无|没有)?\s*$/i.test(castVal)) {
             castVal.split(/[,，、;；\n]/).forEach(function(n){
@@ -4572,11 +4579,6 @@ function ipeCastResolve(cards, castVal, fallbackText) {
                 if (c) hit[c.name] = true;
             });
         }
-    } else {
-        var low = String(fallbackText || "").toLowerCase();
-        cards.forEach(function(c){
-            [c.name].concat(c.aliases).forEach(function(k){ if (k && low.indexOf(k.toLowerCase()) >= 0) hit[c.name] = true; });
-        });
     }
     return cards.filter(function(c){ return hit[c.name]; });
 }
@@ -4589,6 +4591,8 @@ function ipeCastProcess(raw) {
     var t = ipeCastStripTags(raw);
     var present = ipeCastResolve(cards, t.cast, t.text);
     var note = present.length ? "🧷 人物锁：" + present.map(function(c){ return c.name; }).join("、") : "🧷 本楼没有锁定人物入镜";
+    if (!present.length && t.cast) note += "（副 AI 的 <cast> 写的是「" + t.cast.slice(0, 40) + "」，锚点里对不上号）";
+    try { console.log("[IPE] 🧷 人物锁", { cast: t.cast, present: present.map(function(c){ return c.name; }), cards: cards.map(function(c){ return c.name; }) }); } catch(e) {}
     return { text: t.text, block: ipeCastBlock(present), names: present.map(function(c){ return c.name; }), note: note };
 }
 

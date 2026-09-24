@@ -59,13 +59,22 @@ async function setup(opts) {
     }
     console.log('\n【兜底】副 AI 没写 <cast> 就看正文点名；写 NONE 就不贴');
     {
-        const { api, box, run } = await setup();
+        const { w, api, box, run } = await setup();
         api('小屿 walks alone in the rain.');
         await run();
         check(box('ipe-preview-text').indexOf('Lin Yu: ') === 0, '别名点名也认');
         api('An empty street at dawn.\n<cast>NONE</cast>');
         await run();
         check(box('ipe-preview-text') === 'An empty street at dawn.', 'NONE → 不贴任何外貌');
+        api('Lin Yu stands on the veranda, looking back.\n<cast>NONE</cast>');
+        await run();
+        check(box('ipe-preview-text').indexOf('Lin Yu: ' + LOOK_LIN) === 0, '<cast> 写 NONE 但描述里写了名字 → 照贴', box('ipe-preview-text'));
+        api('Lin Yu stands on the veranda.\n<cast>Lu Jibei</cast>');
+        await run();
+        check(box('ipe-preview-text').indexOf('Lin Yu: ' + LOOK_LIN) === 0, '<cast> 写了对不上的名字，描述里有名字 → 照贴');
+        api('An empty veranda.\n<cast>Lu Jibei</cast>');
+        await run();
+        check(w.document.querySelector('#ipe-status').textContent.indexOf('锚点里对不上号') >= 0, '<cast> 对不上号时状态行说出来');
     }
     console.log('\n【分层】人物层 = 外貌段 + 此刻状态；锁住的人物层不动');
     {
