@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.20.2";
+var IPE_VERSION = "2.21.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -108,7 +108,9 @@ const DEFAULTS = {
     ledgerReasoningEffort: "",     // reasoning_effort；空 = 不发，用模型默认
     ledgerMaxTokens: 0,            // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
     imgLayered: false,             // 2.11.0 分层生图：一次请求四层输出（镜头 / 环境 / 人物 / 动作）
-    imgLockCamera: false, imgLockEnv: false, imgLockMood: false, imgLockChars: false, imgLockPose: false
+    imgLockCamera: false, imgLockEnv: false, imgLockMood: false, imgLockChars: false, imgLockPose: false,
+    imgCastLock: true,             // 2.20.0 人物锁：锚点里写成角色卡的角色，外貌与服装由插件原样贴入
+    imgTemperature: 0.2            // 2.20.0 提取温度（原先写死 0.4）；空 = 不发，用模型默认
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -3847,6 +3849,7 @@ function ipeRefreshAnchorEditors() {
     ["ipe-anchor-guide-editor","iped-anchor-guide-editor"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = ipeGetAnchorUsageGuide();
     });
+    try { ipeCastRefreshUI(); } catch(eC) {}
 }
 
 function normalizeApiBase(base) {
@@ -4284,6 +4287,7 @@ function ipeImgLayerContract(prev, locks) {
         "<chars>只写本楼实际出场且入镜的角色：按角色锚点校准外貌，再写此刻的服装状态、表情、身体状态（受伤、湿发、绷带等）。</chars>",
         "<pose>动作与空间关系，写成明确的空间句：谁在哪、面朝哪、视线落在哪、手放在哪、身体接触点、相对位置与距离。</pose>"
     ];
+    if (ipeCastActive()) lines[4] = "<chars>只写本楼实际出场且入镜的角色此刻的表情、视线、身体状态（受伤、湿发、脸红等）。锚点角色的固定外貌与服装由插件贴入，这里不要写；非锚点角色（路人、NPC）照常写外貌与服装。</chars>";
     var lockLines = [];
     IPE_IMG_LAYERS.forEach(function(l){
         if (locks && locks[l] && prev && String(prev[l] || "").trim()) lockLines.push("<" + l + ">" + prev[l] + "</" + l + ">");
@@ -4411,9 +4415,11 @@ function ipeImgRefreshLayerUI() {
     });
     var st = ipeImgLayersRead();
     ipeImgSetLayerBoxes(st || {});
+    try { ipeCastRefreshUI(); } catch(eC) {}   // 服装跟聊天走，换聊天一起刷
 }
 
 function ipeImgBindLayerUI() {
+    ipeCastBindUI();
     ["ipe-layered", "iped-layered"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -4443,14 +4449,487 @@ function ipeImgBindLayerUI() {
     });
 }
 
+/* ============================================================
+   🧷 人物锁（2.20.0）
+   老路：角色锚点整段交给副 AI，由它"按锚点校准外貌"后改写进 Description。
+   副 AI 每次措辞都不一样——今天 short black hair，明天 dark cropped hair，
+   生图模型读到的是两个人，丑图多半就是这么漂出来的。
+   新路：锚点里按「角色卡」格式写的角色，外貌由插件原样贴进提示词，一字不差：
+       【Lin Yu】
+       外貌: young man, early 20s, short messy black hair, amber eyes, slim tall build
+       服装: white oversized shirt, black slacks
+       别名: 林屿, 小屿
+   副 AI 只负责：本楼谁入镜（<cast>）、谁换了装（<outfit>）、表情动作。
+   服装按聊天记在 chat_metadata，不变就一直沿用，换装才更新；面板里可以手改。
+   没写外貌行的角色、非卡片格式的锚点照旧交给副 AI 校准，老锚点不受影响。
+   ============================================================ */
+var IPE_CAST_META_KEY = "ipe_img_outfits_v1";
+var IPE_CAST_HEAD_RE = /^\s*[【\[]\s*([^\]】\n]+?)\s*[】\]]\s*$/;
+var IPE_CAST_FIELD_RE = /^\s*(固定外貌|外貌|look|identity|默认服装|服装|outfit|别名|aliases|alias)\s*[:：]\s*(.*)$/i;
+var IPE_CAST_TAG_END = "(?=<\\s*(?:cast|outfit|camera|env|mood|chars|pose)\\s*>)";
+
+/* 从锚点文本里挑出角色卡：有标题行、有外貌行才算。别的行留给副 AI 看，不直贴。 */
+function ipeCastParse(text) {
+    var lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    var cards = [], cur = null;
+    lines.forEach(function(line){
+        var h = line.match(IPE_CAST_HEAD_RE);
+        if (h) { cur = { name: h[1].trim(), look: "", outfit: "", aliases: [] }; cards.push(cur); return; }
+        if (!cur) return;
+        var f = line.match(IPE_CAST_FIELD_RE);
+        if (!f) return;
+        var k = f[1].toLowerCase(), v = f[2].trim();
+        if (/外貌|look|identity/.test(k)) cur.look = v;
+        else if (/服装|outfit/.test(k)) cur.outfit = v;
+        else cur.aliases = v.split(/[,，、\/]/).map(function(x){ return x.trim(); }).filter(Boolean);
+    });
+    var seen = {}, out = [];
+    cards.forEach(function(c){
+        if (!c.name || !c.look) return;
+        var k = ipeCastNorm(c.name);
+        if (seen[k]) return;            // 同名卡只认第一张，不会出现两个 Lin Yu
+        seen[k] = true; out.push(c);
+    });
+    return out;
+}
+/* 锚点文字去掉能锁定的人物段（标题行起到下一个标题前），剩下的自由文字 */
+function ipeCastStripCards(text) {
+    var lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    var cards = ipeCastParse(text), keep = [], inCard = false;
+    lines.forEach(function(line){
+        var h = line.match(IPE_CAST_HEAD_RE);
+        if (h) inCard = !!ipeCastFind(cards, h[1]);
+        if (!inCard) keep.push(line);
+    });
+    return keep.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function ipeCastCards() { return ipeCastParse(ipeStripBuiltInAnchorGuide(ipeGetAnchorValue())); }
+function ipeCastLockOn() { return cfg().imgCastLock !== false; }
+function ipeCastActive() { return ipeCastLockOn() && ipeCastCards().length > 0; }
+
+function ipeCastNorm(s) { return String(s || "").toLowerCase().replace(/[\s"'`*_\-.。·•()（）\[\]【】]/g, ""); }
+function ipeCastFind(cards, name) {
+    var n = ipeCastNorm(name);
+    if (!n) return null;
+    for (var i = 0; i < cards.length; i++) {
+        var keys = [cards[i].name].concat(cards[i].aliases);
+        for (var j = 0; j < keys.length; j++) if (ipeCastNorm(keys[j]) === n) return cards[i];
+    }
+    return null;
+}
+
+/* 本聊天的服装记录：{ 角色名: 服装 }；只记和卡片默认不同的 */
+function ipeCastOutfitsRead() {
+    try {
+        var root = ipeMetaRoot();
+        var v = root && root[IPE_CAST_META_KEY];
+        if (v && typeof v === "object") return v;
+    } catch(e) {}
+    return {};
+}
+function ipeCastOutfitsSave(o) {
+    try {
+        var root = ipeMetaRoot(); if (!root) return;
+        root[IPE_CAST_META_KEY] = o || {};
+        var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+    } catch(e) {}
+}
+function ipeCastOutfitOf(card, st) {
+    st = st || ipeCastOutfitsRead();
+    return Object.prototype.hasOwnProperty.call(st, card.name) ? String(st[card.name] || "") : card.outfit;
+}
+function ipeCastSetOutfit(st, card, val) {
+    val = String(val || "").trim();
+    if (val === String(card.outfit || "").trim()) delete st[card.name];
+    else st[card.name] = val;
+}
+
+function ipeCastTrimEnd(s) { return String(s || "").trim().replace(/[\s.。;；,，]+$/, ""); }
+/* 贴进提示词的那段：按卡片顺序，每人「名字: 外貌. Wearing 服装.」 */
+function ipeCastBlock(present, st) {
+    return present.map(function(c){
+        var s = c.name + ": " + ipeCastTrimEnd(c.look) + ".";
+        var o = ipeCastTrimEnd(ipeCastOutfitOf(c, st)).replace(/^wearing\s+/i, "");
+        if (o) s += " Wearing " + o + ".";
+        return s;
+    }).join(" ");
+}
+
+/* 附在提取请求末尾的约定 */
+function ipeCastContract(cards) {
+    var st = ipeCastOutfitsRead();
+    var lines = [
+        "【人物锁】",
+        "下列锚点角色的固定外貌（脸、发型发色、瞳色、肤色、体型、年龄感）和当前服装，由插件原样贴进最终提示词。你的输出里不要再写这些，也不要换说法复述；只写他们此刻的表情、视线、动作和临时身体状态（湿发、受伤、脸红、出汗等）。提到他们时直接用下面的名字。",
+        "锚点角色与当前服装："
+    ];
+    cards.forEach(function(c){
+        var o = ipeCastOutfitOf(c, st);
+        lines.push("- " + c.name + (c.aliases.length ? "（又名 " + c.aliases.join(" / ") + "）" : "") + "：" + (o ? o : "（未设定服装）"));
+    });
+    lines.push("在全部输出的最后另起两行附上：");
+    lines.push("<cast>本楼实际入镜的锚点角色名，按上面的名字原样写，英文逗号分隔；没有锚点角色入镜就写 NONE</cast>");
+    lines.push("<outfit>只写本楼换了装、或衣着有持续变化（脱外套、换睡衣、衣服湿透）的锚点角色，每行一个「名字: 新服装的完整英文描述」；都没变就写 " + IPE_IMG_NOCHANGE + "</outfit>");
+    return lines.join("\n");
+}
+
+/* 从副 AI 的输出里摘掉 <cast> / <outfit>，返回剩下的正文和两个标签的值（没写就是 null） */
+function ipeCastTakeTag(s, tag) {
+    var re = new RegExp("<\\s*" + tag + "\\s*>([\\s\\S]*?)(?:<\\s*\\/\\s*" + tag + "\\s*>|" + IPE_CAST_TAG_END + "|$)", "i");
+    var m = s.match(re);
+    if (!m) return { s: s, v: null };
+    return { s: s.slice(0, m.index) + s.slice(m.index + m[0].length), v: String(m[1] || "").trim() };
+}
+function ipeCastStripTags(txt) {
+    var a = ipeCastTakeTag(String(txt || ""), "cast");
+    var b = ipeCastTakeTag(a.s, "outfit");
+    return { text: b.s.replace(/\n{3,}/g, "\n\n").trim(), cast: a.v, outfit: b.v };
+}
+
+/* 谁入镜：以 <cast> 为准；副 AI 没写 <cast> 就看正文里点到了谁 */
+function ipeCastResolve(cards, castVal, fallbackText) {
+    var hit = {};
+    if (castVal != null) {
+        if (!/^\s*(none|无|没有)?\s*$/i.test(castVal)) {
+            castVal.split(/[,，、;；\n]/).forEach(function(n){ var c = ipeCastFind(cards, n); if (c) hit[c.name] = true; });
+        }
+    } else {
+        var low = String(fallbackText || "").toLowerCase();
+        cards.forEach(function(c){
+            [c.name].concat(c.aliases).forEach(function(k){ if (k && low.indexOf(k.toLowerCase()) >= 0) hit[c.name] = true; });
+        });
+    }
+    return cards.filter(function(c){ return hit[c.name]; });
+}
+
+/* 记换装；返回换了装的角色名 */
+function ipeCastApplyOutfits(cards, outfitVal, st) {
+    var changed = [];
+    if (outfitVal == null || ipeImgIsNoChange(outfitVal)) return changed;
+    outfitVal.split("\n").forEach(function(line){
+        var m = line.match(/^\s*[-*•]?\s*([^:：]+?)\s*[:：]\s*(.+)$/);
+        if (!m || ipeImgIsNoChange(m[2])) return;
+        var c = ipeCastFind(cards, m[1]);
+        if (!c) return;
+        ipeCastSetOutfit(st, c, m[2]);
+        if (changed.indexOf(c.name) < 0) changed.push(c.name);
+    });
+    return changed;
+}
+
+/* 提取结果进来先过这一道：摘标签、定入镜、记换装、拼人物段。人物锁没开返回 null，原样放行。 */
+function ipeCastProcess(raw) {
+    if (!ipeCastLockOn()) return null;
+    var cards = ipeCastCards();
+    if (!cards.length) return null;
+    var t = ipeCastStripTags(raw);
+    var present = ipeCastResolve(cards, t.cast, t.text);
+    var st = ipeCastOutfitsRead();
+    var changed = ipeCastApplyOutfits(cards, t.outfit, st);
+    if (changed.length) ipeCastOutfitsSave(st);
+    var note = present.length ? "🧷 人物锁：" + present.map(function(c){ return c.name; }).join("、") : "🧷 本楼没有锚点角色入镜";
+    if (changed.length) note += "；换装：" + changed.join("、");
+    return { text: t.text, block: ipeCastBlock(present, st), names: present.map(function(c){ return c.name; }), changed: changed, note: note };
+}
+
+/* 面板里的「本聊天当前服装」框：每行「名字: 服装」，手改即存 */
+function ipeCastOutfitsText() {
+    var st = ipeCastOutfitsRead();
+    return ipeCastCards().map(function(c){ return c.name + ": " + ipeCastOutfitOf(c, st); }).join("\n");
+}
+function ipeCastOutfitsFromText(txt) {
+    var cards = ipeCastCards(), st = {};
+    String(txt || "").split("\n").forEach(function(line){
+        var m = line.match(/^\s*([^:：]+?)\s*[:：]\s*(.*)$/);
+        if (!m) return;
+        var c = ipeCastFind(cards, m[1]);
+        if (c) ipeCastSetOutfit(st, c, m[2]);
+    });
+    ipeCastOutfitsSave(st);
+}
+function ipeCastTemperature() {
+    var v = cfg().imgTemperature;
+    if (v === "" || v == null) return null;
+    var n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 2 ? n : null;
+}
+function ipeCastRefreshUI() {
+    var cards = ipeCastCards(), on = ipeCastLockOn();
+    ["ipe-cast-lock", "iped-cast-lock"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = on; });
+    ["ipe-cast-outfits", "iped-cast-outfits"].forEach(function(id){
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = ipeCastOutfitsText();
+    });
+    ["ipe-cast-status", "iped-cast-status"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        el.textContent = !on ? "人物锁关着：锚点整段交给副 AI（老办法）"
+            : cards.length ? "已锁定 " + cards.length + " 个人物：" + cards.map(function(c){ return c.name; }).join("、") + "。每楼只贴入镜人物的外貌，写法固定"
+            : "当前锚点没有可锁定的外貌，照旧交给副 AI。点下面「🔍 自动提取人物外貌」就能用上";
+    });
+    ["ipe-img-temp", "iped-img-temp"].forEach(function(id){
+        var el = q("#" + id); if (el && el !== document.activeElement) el.value = cfg().imgTemperature == null ? "" : String(cfg().imgTemperature);
+    });
+}
+/* ============================================================
+   🔍 自动提取人物外貌（2.21.0）
+   用户的锚点怎么写都行，也可以根本不写：一键读当前角色卡（群聊读全部成员，连卡里内嵌的世界书）、
+   user 设定、启用的世界书（全局 / 角色绑定 / 聊天绑定 / 人设绑定），交给副 AI 找出所有有外貌描写的人物
+   （主角、user、NPC），按固定格式整理成短短一行英文外貌，存成一套新的锚点预设并选中。
+   格式是插件自己生成、自己读的，用户不用学；想改就在锚点框里改，想不用就换回自己的预设。
+   资料再长也只在这一次读；之后每楼只贴入镜人物那一行。
+   ============================================================ */
+var IPE_CAST_SCAN_HINT = "一键读取当前角色卡（群聊读全部成员）、user 设定和启用的世界书，副 AI 把每个人物（含 NPC）的外貌整理成一行，存成一套新的锚点预设。之后每楼只贴入镜人物的那一行，写法固定不漂。不想用就不点，自己写的锚点照旧能用。";
+var IPE_CAST_SCAN_ENTRY_MAX = 2400;     // 单条资料最多带多少字
+var IPE_CAST_SCAN_TOTAL_MAX = 60000;    // 一次最多带多少字（世界书动辄几十万字）
+var IPE_CAST_LOOK_RE = /外貌|长相|容貌|相貌|五官|发色|头发|长发|短发|卷发|瞳|眼睛|眸|身高|身材|体型|肤色|皮肤|脸|眉|appearance|hair|eyes?\b|height|build|skin|face|looks?\b/i;
+var ipeCastScanBusy = false;
+
+/* world-info.js 的导出不在 getContext 里（全局启用的书 selected_world_info、charLore）。
+   相对路径按扩展自己的地址解析，酒馆挂在子路径下也对；不行再试绝对路径。 */
+async function ipeCastWorldModule() {
+    try { return await import("../../../world-info.js"); } catch(e) {}
+    try { return await import("/scripts/world-info.js"); } catch(e) {}
+    return null;
+}
+
+function ipeCastSub(text) {
+    var s = String(text || "");
+    try { var c = ctx(); if (c && typeof c.substituteParams === "function") return c.substituteParams(s); } catch(e) {}
+    return s;
+}
+/* 当前要读的角色：单聊一个，群聊全部成员 */
+function ipeCastSourceChars() {
+    var c = ctx(), list = Array.isArray(c.characters) ? c.characters : [], out = [];
+    try {
+        if (c.groupId != null && c.groupId !== "" && Array.isArray(c.groups)) {
+            var g = c.groups.find(function(x){ return x && String(x.id) === String(c.groupId); });
+            (g && Array.isArray(g.members) ? g.members : []).forEach(function(av){
+                var ch = list.find(function(x){ return x && x.avatar === av; });
+                if (ch && out.indexOf(ch) < 0) out.push(ch);
+            });
+        }
+    } catch(e) {}
+    if (!out.length) {
+        var ch0 = list[Number(c.characterId)];
+        if (ch0) out.push(ch0);
+    }
+    return out;
+}
+function ipeCastCharField(ch, k) {
+    var d = ch && ch.data;
+    return String((ch && ch[k]) || (d && d[k]) || "").trim();
+}
+function ipeCastPersona() {
+    var c = ctx(), name = String(c.name1 || "").trim(), desc = "";
+    try { if (typeof c.getCharacterCardFields === "function") desc = String((c.getCharacterCardFields() || {}).persona || ""); } catch(e) {}
+    if (!desc) try { desc = String((c.powerUserSettings && c.powerUserSettings.persona_description) || ""); } catch(e) {}
+    return { name: name, desc: desc.trim() };
+}
+/* 世界书书名：角色绑定、聊天绑定、人设绑定、全局启用 */
+async function ipeCastWorldNames(chars) {
+    var c = ctx(), names = [];
+    function add(n){ n = String(n || "").trim(); if (n && names.indexOf(n) < 0) names.push(n); }
+    chars.forEach(function(ch){ try { add(ch.data && ch.data.extensions && ch.data.extensions.world); } catch(e) {} });
+    try { add((c.chatMetadata || {}).world_info); } catch(e) {}
+    try { add(c.powerUserSettings && c.powerUserSettings.persona_description_lorebook); } catch(e) {}
+    var wi = await ipeCastWorldModule();
+    if (wi) try {
+        (wi.selected_world_info || []).forEach(add);
+        try {
+            var fn = chars.map(function(ch){ return String(ch.avatar || "").replace(/\.[^.]+$/, ""); });
+            ((wi.world_info && wi.world_info.charLore) || []).forEach(function(cl){
+                if (cl && fn.indexOf(String(cl.name || "").replace(/\.[^.]+$/, "")) >= 0) (cl.extraBooks || []).forEach(add);
+            });
+        } catch(e2) {}
+    } catch(e) {}
+    return names;
+}
+async function ipeCastLoadWorld(name) {
+    var c = ctx();
+    try { if (typeof c.loadWorldInfo === "function") return await c.loadWorldInfo(name); } catch(e) {}
+    try { var wi = await ipeCastWorldModule(); if (wi && typeof wi.loadWorldInfo === "function") return await wi.loadWorldInfo(name); } catch(e) {}
+    return null;
+}
+function ipeCastEntryText(title, body) {
+    body = ipeCastSub(body).trim();
+    if (!body) return "";
+    if (body.length > IPE_CAST_SCAN_ENTRY_MAX) body = body.slice(0, IPE_CAST_SCAN_ENTRY_MAX) + "…";
+    return "### " + title + "\n" + body;
+}
+/* 攒资料：角色卡与 user 设定排前面必带；世界书条目按「有外貌字眼」优先，总量封顶 */
+async function ipeCastGatherSources() {
+    /* 酒馆懒加载：角色列表里的卡可能只是「浅」的（没带描述），先让酒馆补全 */
+    try {
+        var cx = ctx();
+        if (cx.groupId != null && cx.groupId !== "" && typeof cx.unshallowGroupMembers === "function") await cx.unshallowGroupMembers(cx.groupId);
+        else if (cx.characterId != null && cx.characterId !== "" && typeof cx.unshallowCharacter === "function") await cx.unshallowCharacter(cx.characterId);
+    } catch(e) {}
+    var chars = ipeCastSourceChars(), head = [], wiParts = [], stat = { chars: [], persona: "", books: [], entries: 0 };
+    chars.forEach(function(ch){
+        var nm = ipeCastCharField(ch, "name") || "角色";
+        stat.chars.push(nm);
+        ["description", "personality", "scenario"].forEach(function(k){
+            var t = ipeCastEntryText("角色卡「" + nm + "」· " + k, ipeCastCharField(ch, k)); if (t) head.push(t);
+        });
+        try {
+            var book = ch.data && ch.data.character_book;
+            ((book && book.entries) || []).forEach(function(e){
+                if (!e || e.enabled === false) return;
+                var t = ipeCastEntryText("「" + nm + "」内嵌世界书 · " + (e.comment || e.name || (e.keys || []).join("/")), e.content);
+                if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) });
+            });
+        } catch(e) {}
+    });
+    var ps = ipeCastPersona();
+    if (ps.desc) { stat.persona = ps.name || "user"; head.push(ipeCastEntryText("user 设定「" + (ps.name || "user") + "」", ps.desc)); }
+    var names = await ipeCastWorldNames(chars);
+    for (var i = 0; i < names.length; i++) {
+        var data = await ipeCastLoadWorld(names[i]);
+        var ents = data && data.entries;
+        if (!ents) continue;
+        stat.books.push(names[i]);
+        Object.keys(ents).forEach(function(k){
+            var e = ents[k];
+            if (!e || e.disable === true) return;
+            var t = ipeCastEntryText("世界书「" + names[i] + "」· " + (e.comment || (e.key || []).join("/") || k), e.content);
+            if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) });
+        });
+    }
+    var out = head.slice(), used = out.join("\n\n").length, seen = {};
+    /* 卡里内嵌的世界书导入后通常又是一本同内容的世界书，按正文去重 */
+    wiParts = wiParts.filter(function(p){ var k = p.t.replace(/^###[^\n]*\n/, "").slice(0, 300); if (seen[k]) return false; seen[k] = true; return true; });
+    wiParts.filter(function(p){ return p.look; }).concat(wiParts.filter(function(p){ return !p.look; })).forEach(function(p){
+        if (used + p.t.length > IPE_CAST_SCAN_TOTAL_MAX) return;
+        out.push(p.t); used += p.t.length + 2; stat.entries++;
+    });
+    return { text: out.join("\n\n"), stat: stat, user: ps.name };
+}
+function ipeCastScanPrompt(userName) {
+    return [
+        "你是角色设定整理员。下面是一个角色扮演的全部设定资料（角色卡、user 设定、世界书）。",
+        "找出资料里所有有外貌信息的人物——主角、user（" + (userName || "user") + "）、NPC 都算——为每个人整理生图用的外貌锚点。",
+        "严格按下面格式输出，人物之间空一行，格式外不要写任何字：",
+        "【人物名】",
+        "外貌: 一行英文，30 到 60 个词，只写稳定不变的外观：性别与年龄感、发型发色与长度、瞳色、脸型与五官特点、肤色、身高体型、显著标记（疤、痣、纹身、眼镜、耳饰等）。不写性格、身份、服装、表情、动作。",
+        "服装: 一行英文，资料里写到的标志性 / 日常服装；没写就留空。",
+        "别名: 资料里的其他称呼（中文名、昵称、称号），逗号分隔；没有就留空。",
+        "规则：",
+        "1. 人物名用资料里的原名；user 用「" + (userName || "user") + "」。",
+        "2. 资料里完全没有外貌描写的人物不要输出。",
+        "3. 资料缺了发色、瞳色这类关键项时，按人物设定补一个具体、合理的值——生图需要确定值才能每次画成同一个人。",
+        "4. 不要解释，不要标题，不要代码块。"
+    ].join("\n");
+}
+async function ipeCastScanCall(sourceText, userName) {
+    var c = cfg();
+    if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
+    if (!c.model) throw new Error("请先加载并选择模型");
+    var headers = { "Content-Type": "application/json" };
+    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    var body = { model: c.model, messages: [
+        { role: "system", content: ipeCastScanPrompt(userName) },
+        { role: "user", content: "【设定资料】\n" + sourceText }
+    ], stream: false };
+    var temp = ipeCastTemperature(); if (temp != null) body.temperature = temp;
+    var res = await ipeFetchWithTimeout(buildChatUrl(c.apiEndpoint), { method: "POST", headers: headers, body: JSON.stringify(body) }, Number(c.requestTimeout || 0));
+    var raw = await res.text();
+    if (!res.ok) throw new Error("API " + res.status + "：" + raw.slice(0, 220));
+    var data; try { data = JSON.parse(raw); } catch(e) { throw new Error("API 返回不是 JSON：" + raw.slice(0, 180)); }
+    var out = parseChatResponse(data);
+    if (!out) throw new Error("无法解析响应：" + raw.slice(0, 220));
+    return out;
+}
+/* 副 AI 的整理结果 → 只留能认出来的人物段，统一成插件自己的写法 */
+function ipeCastNormalizeScan(txt) {
+    var cards = ipeCastParse(String(txt || "").replace(/^\s*```[a-zA-Z]*\s*\n?/, "").replace(/\n?```\s*$/, ""));
+    return {
+        cards: cards,
+        text: cards.map(function(c){
+            return "【" + c.name + "】\n外貌: " + c.look + "\n服装: " + (c.outfit || "") + "\n别名: " + c.aliases.join(", ");
+        }).join("\n\n")
+    };
+}
+/* 存成「🔍 角色名」锚点预设并选中；同名的（上次提取的）直接更新 */
+function ipeCastSaveScanPreset(title, text) {
+    var list = ipeGetAnchorPresets(), name = "🔍 " + title, hit = null;
+    for (var i = 0; i < list.length; i++) if (list[i].name === name) { hit = list[i]; break; }
+    if (hit) hit.value = text;
+    else { hit = { id: ipeMakeId("anchor"), name: name, value: text }; list.push(hit); }
+    ipeSaveAnchorPresets(list);
+    saveCritical("activeAnchorPreset", hit.id);
+    ipeSaveNow();
+    ipeRefreshAnchorEditors();
+    return name;
+}
+async function ipeCastScan() {
+    if (ipeCastScanBusy) return;
+    ipeCastScanBusy = true;
+    ["ipe-cast-scan", "iped-cast-scan"].forEach(function(id){ var el = q("#" + id); if (el) el.disabled = true; });
+    try {
+        setStatus("🔍 正在读取角色卡、user 设定和世界书…", "#6ec577");
+        var src = await ipeCastGatherSources();
+        if (!src.text.trim()) { setStatus("没读到任何设定资料：先打开一个角色的聊天", "#d4726a"); return; }
+        var from = [];
+        if (src.stat.chars.length) from.push("角色卡 " + src.stat.chars.join("、"));
+        if (src.stat.persona) from.push("user 设定");
+        if (src.stat.books.length) from.push("世界书 " + src.stat.books.length + " 本（" + src.stat.entries + " 条）");
+        setStatus("🔍 已读 " + from.join(" + ") + "，副 AI 正在整理人物外貌…", "#6ec577");
+        var raw = await ipeCastScanCall(src.text, src.user);
+        var norm = ipeCastNormalizeScan(raw);
+        if (!norm.cards.length) { setStatus("副 AI 没整理出人物外貌（资料里可能没写外貌），锚点没动。返回开头：" + String(raw).slice(0, 80), "#d4726a"); return; }
+        var title = ipeCharName() || (src.stat.chars[0] || "人物");
+        var pname = ipeCastSaveScanPreset(title, norm.text);
+        ipeCastRefreshUI();
+        setStatus("🔍 整理出 " + norm.cards.length + " 个人物：" + norm.cards.map(function(c){ return c.name; }).join("、") + "。已存为锚点预设「" + pname + "」并选中，可在锚点框里改", "#6ec577");
+    } catch(e) {
+        console.error("[IPE] 自动提取人物外貌", e);
+        setStatus("自动提取人物外貌失败：" + ipeErrorText(e), "#d4726a");
+    } finally {
+        ipeCastScanBusy = false;
+        ["ipe-cast-scan", "iped-cast-scan"].forEach(function(id){ var el = q("#" + id); if (el) el.disabled = false; });
+    }
+}
+function ipeCastBindUI() {
+    ["ipe-cast-lock", "iped-cast-lock"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("imgCastLock", !!el.checked); ipeSaveNow(); ipeCastRefreshUI();
+            setStatus(el.checked ? "人物锁已开：角色卡外貌原样贴入" : "人物锁已关：锚点交回副 AI 校准", "#6ec577");
+        });
+    });
+    ["ipe-cast-outfits", "iped-cast-outfits"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){ ipeCastOutfitsFromText(el.value); ipeCastRefreshUI(); setStatus("本聊天服装已更新", "#6ec577"); });
+    });
+    ["ipe-cast-outfits-reset", "iped-cast-outfits-reset"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("click", function(){ ipeCastOutfitsSave({}); ipeCastRefreshUI(); setStatus("本聊天服装已恢复成角色卡默认", "#6ec577"); });
+    });
+    ["ipe-cast-scan", "iped-cast-scan"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("click", function(){ ipeCastScan(); });
+    });
+    ["ipe-img-temp", "iped-img-temp"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            var v = String(el.value || "").trim();
+            var n = Number(v);
+            save("imgTemperature", v === "" ? "" : (Number.isFinite(n) ? Math.min(2, Math.max(0, n)) : 0.2));
+            ipeSaveNow(); ipeCastRefreshUI();
+        });
+    });
+}
+
 function buildVisionUserPrompt(text, supplement, lockOverride) {
     var c = cfg();
     var user = "";
 
     var activeAnchors = ipeStripBuiltInAnchorGuide(ipeGetAnchorValue());
+    /* 人物锁开着时，锁定人物的外貌段由插件贴，不用再发给副 AI（名字和服装在人物锁约定里）；
+       锚点里其余自由文字照发。锚点再长，每楼的请求也不跟着涨。 */
+    var anchorsForAI = (ipeCastLockOn() && ipeCastCards().length) ? ipeCastStripCards(activeAnchors) : activeAnchors;
     if (activeAnchors) {
         user += "【角色锚点使用规则】\n" + ipeGetAnchorUsageGuide() + "\n\n";
-        user += "【角色外貌锚点】\n" + activeAnchors + "\n\n";
+        if (anchorsForAI) user += "【角色外貌锚点】\n" + anchorsForAI + "\n\n";
     }
     var activeRules = ipeGetRuleValue();
     if (activeRules) user += "【提取规则】\n" + activeRules + "\n\n";
@@ -4462,12 +4941,17 @@ function buildVisionUserPrompt(text, supplement, lockOverride) {
     if (ipeImgLayeredOn()) {
         var locks = ipeImgLocks(lockOverride);
         user += "\n\n" + ipeImgLayerContract(ipeImgPrevLayers(locks), locks);
+        var castCardsL = ipeCastLockOn() ? ipeCastCards() : [];
+        if (castCardsL.length) user += "\n\n" + ipeCastContract(castCardsL);
         return user;
     }
 
     user += "\n\n任务：把正文转成英文生图 Description。\n";
     user += "要求：只输出最终英文 Description；不要解释；不要标题；不要代码块；不要中文；不要复述任务。\n";
     user += "优先写可见画面：人物数量、姿态、表情、服装、环境、光线、氛围、镜头距离。";
+
+    var castCards = ipeCastLockOn() ? ipeCastCards() : [];
+    if (castCards.length) user += "\n\n" + ipeCastContract(castCards);
 
     return user;
 }
@@ -4519,9 +5003,10 @@ async function callAPI(text, supplement, lockOverride) {
             { role: "system", content: systemPrompt },
             { role: "user", content: buildVisionUserPrompt(text, supplement || "", lockOverride) }
         ],
-        temperature: 0.4,
         stream: false
     };
+    var imgTemp = ipeCastTemperature();
+    if (imgTemp != null) body.temperature = imgTemp;
 
     var fetchOptions = {
         method: "POST",
@@ -5410,7 +5895,18 @@ function createPanel() {
             '<textarea id="ipe-anchor-guide-editor" rows="7" placeholder="通用角色锚点调用规则"></textarea>'+
             '<div class="ipe-hint">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</div>'+
         '</div></div>'+
-        '<div class="ipe-hint">当前选中的角色锚点会随提取请求一起发送</div>');
+        '<div class="ipe-hint">当前选中的角色锚点会随提取请求一起发送</div>'+
+        '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">🧷 人物锁 <input type="checkbox" id="ipe-cast-lock"></label></div>'+
+            '<div id="ipe-cast-status" class="ipe-hint"></div>'+
+            '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-cast-scan" class="ipe-btn" type="button">🔍 自动提取人物外貌</button></div>'+
+            '<div class="ipe-hint">'+IPE_CAST_SCAN_HINT+'</div>'+
+            '<details class="ipe-cast-more" style="margin-top:6px"><summary class="ipe-hint" style="cursor:pointer">更多：本聊天服装 / 提取温度</summary>'+
+                '<div class="ipe-hint" style="margin-top:6px">🧥 本聊天当前服装（换装时副 AI 会自动更新，也可以手改）</div>'+
+                '<textarea id="ipe-cast-outfits" rows="3"></textarea>'+
+                '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-cast-outfits-reset" class="ipe-btn" type="button">服装恢复默认</button></div>'+
+                '<label>提取温度（越低措辞越稳；留空 = 不发）<input type="number" id="ipe-img-temp" min="0" max="2" step="0.1" placeholder="0.2"></label>'+
+            '</details>'+
+        '</div>');
 
     h += secHTML("extract-rules","提取规则", true,
         '<label>规则预设<select id="ipe-rule-slot"></select></label>'+
@@ -5796,6 +6292,7 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"><input type="button" id="iped-pack-export-anchors" class="menu_button" value="\u2B07 备份锚点"></div>';
     h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
     h += '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。<div style="display:flex;gap:6px;margin-top:8px"><input type="button" id="iped-anchor-guide-toggle" class="menu_button" value="编辑通用规则"><input type="button" id="iped-anchor-guide-reset" class="menu_button" value="恢复默认"></div><div id="iped-anchor-guide-editor-wrap" class="ipe-anchor-guide-editor-wrap" style="display:none"><textarea id="iped-anchor-guide-editor" class="text_pole" rows="6" placeholder="通用角色锚点调用规则"></textarea><small style="color:#888">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</small></div></div>';
+    h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-scan" class="menu_button" value="🔍 自动提取人物外貌"></div><small style="color:#888;display:block">' + IPE_CAST_SCAN_HINT + '</small><details class="ipe-cast-more" style="margin-top:6px"><summary style="cursor:pointer;color:#888;font-size:12px">更多：本聊天服装 / 提取温度</summary><small style="color:#888;display:block;margin-top:6px">🧥 本聊天当前服装（换装时副 AI 会自动更新，也可以手改）</small><textarea id="iped-cast-outfits" class="text_pole" rows="3"></textarea><div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-cast-outfits-reset" class="menu_button" value="服装恢复默认"></div><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"></details></div>';
     h += '<hr><small><b>提取规则</b></small>';
     h += '<label>规则预设</label><select id="iped-rule-slot" class="text_pole"></select>';
     h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
@@ -6522,6 +7019,7 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetAnchorValue(el.value);
             ipeSaveNow();
+            try { ipeCastRefreshUI(); } catch(eC) {}
         });
     });
 
@@ -7776,12 +8274,23 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
     var layerNote = "";
     try {
         var desc = await callAPI(text, supplement||"", lockOverride);
+        var cast = ipeCastProcess(desc);
+        var castPending = !!(cast && cast.block);
+        if (cast) desc = cast.text;
         if (ipeImgLayeredOn()) {
             var parsed = ipeImgParseLayers(desc);
             if (parsed.found > 0) {
                 var floorNo = (typeof targetIdx === "number" ? targetIdx : currentIdx) + 1;
                 var locks = ipeImgLocks(lockOverride);
                 var merged = ipeImgMergeLayers(parsed, ipeImgPrevLayers(locks), locks, floorNo);
+                if (cast && !(locks && locks.chars)) {
+                    /* 人物锁：人物层 = 原样的外貌段 + 副 AI 写的此刻状态。锁着的人物层原样不动。
+                       副 AI 这层没写，就不拿上一楼的表情顶替（那是上一楼的戏），只留外貌段。 */
+                    var freshChars = String(parsed.chars || "").trim();
+                    if (ipeImgIsNoChange(freshChars)) freshChars = "";
+                    merged.chars = [cast.block, freshChars].filter(Boolean).join(" ");
+                }
+                castPending = false;
                 ipeImgSetLayerBoxes(merged);
                 ipeImgLayersSave(merged, floorNo);
                 desc = ipeImgJoinLayers(merged);
@@ -7792,6 +8301,8 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
                 layerNote = "（副 AI 没分层，按整段收下；层框未更新）";
             }
         }
+        if (castPending) desc = cast.block + " " + desc;
+        if (cast) { layerNote += "（" + cast.note + "）"; try { ipeCastRefreshUI(); } catch(eC) {} }
         currentDesc = desc; setPreview(desc);
 
         if (autoInjectNow) {

@@ -1,12 +1,13 @@
 {
   "name": "ipe-image-prompt-extractor",
-  "version": "2.20.2",
+  "version": "2.21.0",
   "private": true,
   "scripts": {
     "test": "node ledger.test.js",
     "test:ui": "node ui.test.js",
     "test:performance": "node performance.test.js",
-    "test:dedup": "node dedup.test.js"
+    "test:dedup": "node dedup.test.js",
+    "test:cast": "node cast.test.js"
   },
   "devDependencies": {
     "jsdom": "26.1.0"
