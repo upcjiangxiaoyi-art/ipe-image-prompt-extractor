@@ -96,6 +96,21 @@ async function setup(opts) {
         check(box('ipe-layer-chars') === 'Lin Yu: ' + LOOK_LIN + '. Wearing black apron over white shirt.', '副 AI 人物层空着 → 只留外貌段，不拿上一楼的表情', box('ipe-layer-chars'));
         check(w.eval('buildInjectTag(' + JSON.stringify(box('ipe-preview-text')) + ')').indexOf('<draw>') === 0, '注入模板照常');
     }
+    console.log('\n【建卡】给当前角色建空卡，不重复，清掉老版 Lin Yu 示例（2.20.1）');
+    {
+        const OLD = '【Lin Yu】\n外貌: young man, early 20s, short messy black hair, amber eyes, pale skin, slim tall build\n服装: white oversized shirt, black slacks\n别名: 林屿, 小屿';
+        const { w, st } = await setup();
+        st.anchorPresetsJson = JSON.stringify([{ id: 'anchor_1', name: '主角', value: '苑无忧：a woman\n\n' + OLD + '\n\n' + OLD }]);
+        check(w.eval('ipeCastCards()').length === 1, '同名卡只认一张');
+        w.document.querySelector('#ipe-cast-sample').click();
+        w.document.querySelector('#ipe-cast-sample').click();
+        const v = JSON.parse(st.anchorPresetsJson)[0].value;
+        check(v.indexOf('Lin Yu') < 0, '老版 Lin Yu 示例被清掉', v);
+        check(v.split('【苑无忧】').length === 2, '点两下只建一张当前角色的卡', v);
+        check(v.indexOf('苑无忧：a woman') === 0, '原有锚点文字不动');
+        check(w.eval('ipeCastCards()').length === 0 && !w.eval('ipeCastActive()'), '外貌没填的空卡不生效');
+        check(w.document.querySelector('#ipe-char-anchors').value === v, '锚点框同步显示');
+    }
     console.log('\n【开关】人物锁关掉 / 温度留空');
     {
         const { cap, api, box, run } = await setup({ imgCastLock: false, imgTemperature: '' });
