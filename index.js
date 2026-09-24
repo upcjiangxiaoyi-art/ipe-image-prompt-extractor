@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.20.1";
+var IPE_VERSION = "2.20.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4483,14 +4483,7 @@ function ipeCastParse(text) {
         else if (/服装|outfit/.test(k)) cur.outfit = v;
         else cur.aliases = v.split(/[,，、\/]/).map(function(x){ return x.trim(); }).filter(Boolean);
     });
-    var seen = {}, out = [];
-    cards.forEach(function(c){
-        if (!c.name || !c.look) return;
-        var k = ipeCastNorm(c.name);
-        if (seen[k]) return;            // 同名卡只认第一张，不会出现两个 Lin Yu
-        seen[k] = true; out.push(c);
-    });
-    return out;
+    return cards.filter(function(c){ return c.name && c.look; });
 }
 function ipeCastCards() { return ipeCastParse(ipeStripBuiltInAnchorGuide(ipeGetAnchorValue())); }
 function ipeCastLockOn() { return cfg().imgCastLock !== false; }
@@ -4652,46 +4645,21 @@ function ipeCastRefreshUI() {
         var el = q("#" + id); if (!el) return;
         el.textContent = !on ? "人物锁关着：锚点整段交给副 AI 校准（老办法）"
             : cards.length ? "已认出 " + cards.length + " 张角色卡：" + cards.map(function(c){ return c.name; }).join("、") + "。它们的外貌与服装由插件原样贴入"
-            : "当前锚点里没有填了外貌的角色卡，照老办法交给副 AI。点「给当前角色建卡」，把外貌填上人物锁就生效";
+            : "当前锚点里没有角色卡，照老办法交给副 AI。点「插入角色卡模板」按格式写，人物锁就生效";
     });
     ["ipe-img-temp", "iped-img-temp"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = cfg().imgTemperature == null ? "" : String(cfg().imgTemperature);
     });
 }
-/* 2.20.0 的「插入角色卡模板」塞的是固定示例 Lin Yu，还不查重，点两下就两张 Lin Yu。
-   2.20.1 起改成「给当前角色建卡」：拿酒馆当前角色名建一张空卡（外貌空着不生效，填了才生效），
-   已有同名卡就不再加；顺手把老版本塞进去的 Lin Yu 示例清掉。 */
-var IPE_CAST_OLD_SAMPLE = "【Lin Yu】\n外貌: young man, early 20s, short messy black hair, amber eyes, pale skin, slim tall build\n服装: white oversized shirt, black slacks\n别名: 林屿, 小屿";
-function ipeCastRemoveOldSample(text) {
-    var s = String(text || "").replace(/\r\n/g, "\n");
-    while (s.indexOf(IPE_CAST_OLD_SAMPLE) >= 0) s = s.replace(IPE_CAST_OLD_SAMPLE, "");
-    return s.replace(/\n{3,}/g, "\n\n").trim();
-}
-function ipeCastCardSkeleton(name) {
-    return "【" + name + "】\n外貌: \n服装: \n别名: ";
-}
-function ipeCastFocusAnchors() {
-    var el = q("#ipe-char-anchors");
-    if (!el || !ipeElementShown(el)) el = q("#iped-char-anchors");
-    if (!el) return;
-    try { el.scrollIntoView({ block: "center" }); } catch(e) {}
-    try { var at = el.value.lastIndexOf("外貌: "); el.focus(); if (at >= 0) el.setSelectionRange(at + 4, at + 4); } catch(e) {}
-}
+var IPE_CAST_CARD_SAMPLE = "【Lin Yu】\n外貌: young man, early 20s, short messy black hair, amber eyes, pale skin, slim tall build\n服装: white oversized shirt, black slacks\n别名: 林屿, 小屿";
 function ipeCastInsertSample() {
-    var cur = String(ipeGetAnchorValue() || "");
-    var cleaned = ipeCastRemoveOldSample(cur);
-    var name = ipeCharName().trim() || "角色名";
-    var headRe = new RegExp("^\\s*[【\\[]\\s*" + ipeEscRe(name) + "\\s*[】\\]]\\s*$", "m");
-    var has = headRe.test(cleaned);
-    var val = has ? cleaned : (cleaned ? cleaned + "\n\n" : "") + ipeCastCardSkeleton(name);
-    if (val !== cur) {
-        ipeSetAnchorValue(val);
-        ipeSaveNow();
-        ["ipe-char-anchors", "iped-char-anchors"].forEach(function(id){ var el = q("#" + id); if (el) el.value = val; });
-    }
+    var cur = ipeGetAnchorValue();
+    var val = (String(cur || "").trim() ? String(cur).replace(/\s+$/, "") + "\n\n" : "") + IPE_CAST_CARD_SAMPLE;
+    ipeSetAnchorValue(val);
+    ipeSaveNow();
+    ["ipe-char-anchors", "iped-char-anchors"].forEach(function(id){ var el = q("#" + id); if (el) el.value = val; });
     ipeCastRefreshUI();
-    ipeCastFocusAnchors();
-    setStatus(has ? "「" + name + "」已经有卡了，在上面的锚点框里改" : "已给「" + name + "」建卡：在上面锚点框里把外貌、服装填成英文，填了外貌才生效", "#6ec577");
+    setStatus("已插入角色卡模板：把名字和英文外貌换成你的角色", "#6ec577");
 }
 function ipeCastBindUI() {
     ["ipe-cast-lock", "iped-cast-lock"].forEach(function(id){
@@ -5701,9 +5669,8 @@ function createPanel() {
         '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">🧷 人物锁：角色卡外貌原样贴入 <input type="checkbox" id="ipe-cast-lock"></label></div>'+
             '<div id="ipe-cast-status" class="ipe-hint"></div>'+
             '<div class="ipe-hint">角色卡格式：一行【名字】，下面写「外貌: 英文」「服装: 英文」，可选「别名: 中文名, 昵称」。外貌那行每楼一字不差贴进提示词，副 AI 只管谁入镜、表情和动作；服装按聊天记着，换装才更新。</div>'+
-            '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-cast-sample" class="ipe-btn" type="button">给当前角色建卡</button><button id="ipe-cast-outfits-reset" class="ipe-btn" type="button">服装恢复卡片默认</button></div>'+
-            '<div class="ipe-hint" style="margin-top:6px">🧥 本聊天当前服装（每行「名字: 服装」，只改服装；要删改角色卡本身，去上面的锚点框）</div>'+
-            '<textarea id="ipe-cast-outfits" rows="3"></textarea>'+
+            '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-cast-sample" class="ipe-btn" type="button">插入角色卡模板</button><button id="ipe-cast-outfits-reset" class="ipe-btn" type="button">服装恢复卡片默认</button></div>'+
+            '<label>🧥 本聊天当前服装（每行「名字: 服装」，可手改）<textarea id="ipe-cast-outfits" rows="3"></textarea></label>'+
             '<label>提取温度（越低措辞越稳；留空 = 不发）<input type="number" id="ipe-img-temp" min="0" max="2" step="0.1" placeholder="0.2"></label>'+
         '</div>');
 
@@ -6091,7 +6058,7 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"><input type="button" id="iped-pack-export-anchors" class="menu_button" value="\u2B07 备份锚点"></div>';
     h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
     h += '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。<div style="display:flex;gap:6px;margin-top:8px"><input type="button" id="iped-anchor-guide-toggle" class="menu_button" value="编辑通用规则"><input type="button" id="iped-anchor-guide-reset" class="menu_button" value="恢复默认"></div><div id="iped-anchor-guide-editor-wrap" class="ipe-anchor-guide-editor-wrap" style="display:none"><textarea id="iped-anchor-guide-editor" class="text_pole" rows="6" placeholder="通用角色锚点调用规则"></textarea><small style="color:#888">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</small></div></div>';
-    h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁：角色卡外貌原样贴入 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><small style="color:#888;display:block">角色卡格式：一行【名字】，下面写「外貌: 英文」「服装: 英文」，可选「别名: 中文名, 昵称」。外貌每楼一字不差贴进提示词，副 AI 只管谁入镜、表情和动作；服装按聊天记着，换装才更新。</small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-sample" class="menu_button" value="给当前角色建卡"><input type="button" id="iped-cast-outfits-reset" class="menu_button" value="服装恢复卡片默认"></div><small style="color:#888;display:block;margin-top:6px">🧥 本聊天当前服装（每行「名字: 服装」，只改服装；要删改角色卡本身，去上面的锚点框）</small><textarea id="iped-cast-outfits" class="text_pole" rows="3"></textarea><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"></div>';
+    h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁：角色卡外貌原样贴入 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><small style="color:#888;display:block">角色卡格式：一行【名字】，下面写「外貌: 英文」「服装: 英文」，可选「别名: 中文名, 昵称」。外貌每楼一字不差贴进提示词，副 AI 只管谁入镜、表情和动作；服装按聊天记着，换装才更新。</small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-sample" class="menu_button" value="插入角色卡模板"><input type="button" id="iped-cast-outfits-reset" class="menu_button" value="服装恢复卡片默认"></div><label>🧥 本聊天当前服装（每行「名字: 服装」，可手改）</label><textarea id="iped-cast-outfits" class="text_pole" rows="3"></textarea><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"></div>';
     h += '<hr><small><b>提取规则</b></small>';
     h += '<label>规则预设</label><select id="iped-rule-slot" class="text_pole"></select>';
     h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
