@@ -1,4 +1,4 @@
-// 🧷 人物锁（2.20.0）回归：角色卡外貌原样贴入、入镜判断、换装沿用、温度。
+// 🧷 人物锁回归：长相原样贴入、入镜判断、自动提取人物外貌、温度（2.22.0 起只锁长相，服装交给副 AI）。
 const fs = require('fs');
 const assert = require('node:assert/strict');
 const fixture = fs.readFileSync(__dirname + '/ledger.test.js', 'utf8').split('\nconsole.log(')[0];
@@ -40,32 +40,22 @@ async function setup(opts) {
         await run();
         const u = cap.body.messages[1].content;
         check(u.indexOf('【人物锁】') >= 0 && u.indexOf('<cast>') >= 0, '请求里带人物锁约定');
-        check(u.indexOf('Lin Yu（又名 林屿 / 小屿）：white oversized shirt, black slacks') >= 0, '约定里列出角色、别名与当前服装');
+        check(u.indexOf('Lin Yu（又名 林屿 / 小屿）、Su Wan') >= 0, '约定里列出人物与别名');
+        check(u.indexOf(LOOK_LIN) < 0 && u.indexOf('【Lin Yu】') >= 0 && u.indexOf('性格：嘴硬') >= 0 && u.indexOf('服装: white oversized shirt') >= 0, '外貌行不再发给副 AI，人物段里的其他行（性格、手写服装）照发');
+        check(u.indexOf('陆家两位主角') >= 0 && u.indexOf('【路人】') >= 0, '段外自由文字照发');
         check(cap.body.temperature === 0.2, '默认温度 0.2', String(cap.body.temperature));
         const pv = box('ipe-preview-text');
-        check(pv.indexOf('Lin Yu: ' + LOOK_LIN + '. Wearing white oversized shirt, black slacks. Lin Yu leans') === 0, '外貌与服装一字不差贴在最前', pv);
+        check(pv.indexOf('Lin Yu: ' + LOOK_LIN + '. Lin Yu leans') === 0, '长相一字不差贴在最前，不贴服装', pv);
         check(pv.indexOf('<cast>') < 0 && pv.indexOf('<outfit>') < 0 && pv.indexOf('NO_CHANGE') < 0, '标签不漏进提示词');
         check(pv.indexOf(LOOK_SU) < 0, '没入镜的 Su Wan 不贴');
         check(w.document.querySelector('#ipe-status').textContent.indexOf('人物锁：Lin Yu') >= 0, '状态行报入镜角色');
     }
-    console.log('\n【换装】记进本聊天，下一楼沿用；多人按卡片顺序');
+    console.log('\n【多人】按锚点顺序贴，句号不叠');
     {
-        const { w, cap, api, box, run } = await setup();
-        api('They sit on the sofa.\n<cast>Su Wan, Lin Yu</cast>\n<outfit>Su Wan: oversized grey hoodie, pajama shorts</outfit>');
+        const { api, box, run } = await setup();
+        api('They sit on the sofa.\n<cast>Su Wan, Lin Yu</cast>');
         await run();
-        let pv = box('ipe-preview-text');
-        check(pv.indexOf('Lin Yu: ') === 0 && pv.indexOf('Su Wan: ' + LOOK_SU + '. Wearing oversized grey hoodie, pajama shorts.') > 0, '按卡片顺序，换装立刻生效，外貌末尾句号不叠', pv);
-        check(box('ipe-cast-outfits').indexOf('Su Wan: oversized grey hoodie, pajama shorts') >= 0, '服装框显示本聊天服装');
-        api('Su Wan dozes off.\n<cast>Su Wan</cast>\n<outfit>NO_CHANGE</outfit>');
-        await run();
-        pv = box('ipe-preview-text');
-        check(pv.indexOf('Wearing oversized grey hoodie') > 0 && pv.indexOf('Lin Yu') < 0, '下一楼沿用换装，没入镜的不贴', pv);
-        check(cap.body.messages[1].content.indexOf('Su Wan：oversized grey hoodie') >= 0, '请求里告诉副 AI 当前服装');
-        const ta = w.document.querySelector('#ipe-cast-outfits');
-        ta.value = 'Lin Yu: black suit\nSu Wan: navy school uniform'; ta.dispatchEvent(new w.Event('change'));
-        check(JSON.stringify(w.eval('ipeCastOutfitsRead()')) === '{"Lin Yu":"black suit"}', '手改服装：只记跟卡片默认不同的');
-        w.document.querySelector('#ipe-cast-outfits-reset').click();
-        check(JSON.stringify(w.eval('ipeCastOutfitsRead()')) === '{}', '恢复卡片默认');
+        check(box('ipe-preview-text') === 'Lin Yu: ' + LOOK_LIN + '. Su Wan: ' + LOOK_SU + '. They sit on the sofa.', '按锚点顺序，外貌末尾句号不叠', box('ipe-preview-text'));
     }
     console.log('\n【兜底】副 AI 没写 <cast> 就看正文点名；写 NONE 就不贴');
     {
@@ -80,10 +70,11 @@ async function setup(opts) {
     console.log('\n【分层】人物层 = 外貌段 + 此刻状态；锁住的人物层不动');
     {
         const { w, cap, st, api, box, run } = await setup({ imgLayered: true });
-        api('<camera>close-up.</camera>\n<env>kitchen.</env>\n<mood>warm.</mood>\n<chars>Lin Yu, flushed, avoiding eye contact.</chars>\n<pose>he stirs the pot.</pose>\n<cast>Lin Yu</cast>\n<outfit>Lin Yu: black apron over white shirt</outfit>');
+        api('<camera>close-up.</camera>\n<env>kitchen.</env>\n<mood>warm.</mood>\n<chars>Lin Yu, flushed, avoiding eye contact.</chars>\n<pose>he stirs the pot.</pose>\n<cast>Lin Yu</cast>\n<outfit>老版本的换装标签</outfit>');
         await run();
-        check(cap.body.messages[1].content.indexOf('锚点角色的固定外貌与服装由插件贴入') >= 0, '分层约定里人物层改为只写此刻状态');
-        check(box('ipe-layer-chars') === 'Lin Yu: ' + LOOK_LIN + '. Wearing black apron over white shirt. Lin Yu, flushed, avoiding eye contact.', '人物层前面是原样外貌', box('ipe-layer-chars'));
+        check(cap.body.messages[1].content.indexOf('人物锁里人物的固定长相由插件贴入') >= 0, '分层约定里人物层改为只写服装与此刻状态');
+        check(box('ipe-layer-chars') === 'Lin Yu: ' + LOOK_LIN + '. Lin Yu, flushed, avoiding eye contact.', '人物层前面是原样长相', box('ipe-layer-chars'));
+        check(box('ipe-preview-text').indexOf('老版本的换装标签') < 0, '副 AI 照老习惯写的 <outfit> 也摘掉');
         check(box('ipe-layer-pose') === 'he stirs the pot.', '动作层没被 <cast> 吃掉');
         const before = box('ipe-layer-chars');
         st.imgLockChars = true;
@@ -93,7 +84,7 @@ async function setup(opts) {
         st.imgLockChars = false;
         api('<camera>wide.</camera>\n<env>NO_CHANGE</env>\n<mood>NO_CHANGE</mood>\n<chars></chars>\n<pose>he turns.</pose>\n<cast>Lin Yu</cast>');
         await run();
-        check(box('ipe-layer-chars') === 'Lin Yu: ' + LOOK_LIN + '. Wearing black apron over white shirt.', '副 AI 人物层空着 → 只留外貌段，不拿上一楼的表情', box('ipe-layer-chars'));
+        check(box('ipe-layer-chars') === 'Lin Yu: ' + LOOK_LIN + '.', '副 AI 人物层空着 → 只留外貌段，不拿上一楼的表情', box('ipe-layer-chars'));
         check(w.eval('buildInjectTag(' + JSON.stringify(box('ipe-preview-text')) + ')').indexOf('<draw>') === 0, '注入模板照常');
     }
     console.log('\n【自动提取】读角色卡 + user 设定 + 世界书，副 AI 整理外貌，存成新锚点预设（2.21.0）');
@@ -129,12 +120,15 @@ async function setup(opts) {
         const stLine = w.document.querySelector('#ipe-status').textContent;
         check(stLine.indexOf('世界书 3 本（苑家世界书、聊天世界书、全局书）') >= 0 && stLine.indexOf('整理出 2 个人物') >= 0, '成功后状态行仍写明读了哪几本世界书', stLine);
         check(cap.body.messages[0].content.indexOf('小雨') >= 0, '提取提示里点名 user 叫什么');
+        check(cap.body.messages[0].content.indexOf('发色最要紧') >= 0 && cap.body.messages[0].content.indexOf('辨识度') >= 0, '提取提示强调发色与辨识度特征');
+        check(!/服装:|别名:/.test(cap.body.messages[0].content), '提取格式里没有服装、别名字段');
         const list = JSON.parse(st.anchorPresetsJson);
         const auto = list.find(x => x.name === '🔍 苑无忧');
         check(!!auto && st.activeAnchorPreset === auto.id, '存成「🔍 苑无忧」预设并选中');
         check(list.find(x => x.name === '我自己写的').value === '随便写的锚点，没有格式', '自己写的锚点预设原样保留');
         check(w.eval('ipeCastCards().map(c => c.name).join()') === '苑无忧,小雨', '外貌为空的老陈不算，代码块围栏剥掉', w.eval('ipeCastCards().map(c => c.name).join()'));
-        check(w.document.querySelector('#ipe-char-anchors').value.indexOf('【苑无忧】') === 0, '锚点框显示整理结果，可以直接改');
+        check(w.document.querySelector('#ipe-char-anchors').value.indexOf('【苑无忧】\n外貌: tall woman') === 0, '锚点框显示整理结果，可以直接改');
+        check(!/服装|别名/.test(w.document.querySelector('#ipe-char-anchors').value), '副 AI 多写的服装、别名不存');
         check(w.document.querySelector('#ipe-cast-status').textContent.indexOf('已锁定 2 个人物') >= 0, '人物锁状态行报锁定人数');
         w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: '【苑无忧】\n外貌: tall woman, short silver hair\n服装:\n别名:' } }] }) }; };
         await w.eval('ipeCastScan()');
@@ -144,7 +138,7 @@ async function setup(opts) {
         w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: 'x\n<cast>苑无忧</cast>' } }] }) }; };
         await w.eval('runExtract("正文", "", false, 9)');
         const u = cap.body.messages[1].content;
-        check(u.indexOf('short silver hair') < 0 && u.indexOf('苑无忧（又名') < 0 && u.indexOf('- 苑无忧：') >= 0, '每楼请求只带人名和服装，外貌不再重复发', u.slice(0, 300));
+        check(u.indexOf('short silver hair') < 0 && u.indexOf('【人物锁】') >= 0 && u.indexOf('苑无忧') >= 0, '每楼请求只带人名，外貌不再重复发', u.slice(0, 300));
         check(w.document.querySelector('#ipe-preview-text').value.indexOf('苑无忧: tall woman, short silver hair.') === 0, '贴进提示词的是整理好的那一行');
     }
     console.log('\n【开关】人物锁关掉 / 温度留空');
