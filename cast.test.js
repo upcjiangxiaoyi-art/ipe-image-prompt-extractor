@@ -129,6 +129,8 @@ async function setup(opts) {
         check(w.eval('ipeCastCards().map(c => c.name).join()') === '苑无忧,小雨', '外貌为空的老陈不算，代码块围栏剥掉', w.eval('ipeCastCards().map(c => c.name).join()'));
         check(w.document.querySelector('#ipe-char-anchors').value.indexOf('【苑无忧】\n外貌: tall woman') === 0, '锚点框显示整理结果，可以直接改');
         check(!/服装|别名/.test(w.document.querySelector('#ipe-char-anchors').value), '副 AI 多写的服装、别名不存');
+        check(w.document.querySelector('#ipe-char-anchors').value.indexOf('pale complexion') > 0 && !/skin/i.test(w.document.querySelector('#ipe-char-anchors').value), 'skin 换成 complexion（敏感规则禁词）');
+        check(cap.body.messages[0].content.indexOf('complexion') >= 0, '提取提示要求肤色写 complexion');
         check(w.document.querySelector('#ipe-cast-status').textContent.indexOf('已锁定 2 个人物') >= 0, '人物锁状态行报锁定人数');
         w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: '【苑无忧】\n外貌: tall woman, short silver hair\n服装:\n别名:' } }] }) }; };
         await w.eval('ipeCastScan()');

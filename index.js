@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.22.0";
+var IPE_VERSION = "2.22.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4743,7 +4743,7 @@ function ipeCastScanPrompt(userName) {
         "找出资料里所有有外貌信息的人物——主角、user（" + (userName || "user") + "）、NPC 都算——为每个人整理生图用的外貌锚点。",
         "严格按下面格式输出，人物之间空一行，格式外不要写任何字：",
         "【人物名】",
-        "外貌: 一行英文，25 到 50 个词，只写长相：性别、年龄（写具体岁数或年龄段）、发色与发型（颜色写具体：jet-black / ash-blonde / chestnut brown，带上深浅、挑染、渐变；再写长度和样式）、瞳色、脸型与五官、肤色、身高体型，以及最有辨识度的特征（痣、疤、纹身、眼镜、耳钉、异色瞳、雀斑等）。",
+        "外貌: 一行英文，25 到 50 个词，只写长相：性别、年龄（写具体岁数或年龄段）、发色与发型（颜色写具体：jet-black / ash-blonde / chestnut brown，带上深浅、挑染、渐变；再写长度和样式）、瞳色、脸型与五官、肤色、身高体型，以及最有辨识度的特征（痣、疤、纹身、眼镜、耳钉、异色瞳、雀斑等）。肤色用 complexion 写（fair complexion / warm olive complexion），不要出现 skin、bare、naked 这类词。",
         "不写服装、性格、身份、表情、动作；不要别的字段。",
         "规则：",
         "1. 人物名用资料里的原名；user 用「" + (userName || "user") + "」。",
@@ -4772,13 +4772,17 @@ async function ipeCastScanCall(sourceText, userName) {
     if (!out) throw new Error("无法解析响应：" + raw.slice(0, 220));
     return out;
 }
+/* 这一行会原样贴进每楼提示词，敏感规则管不到它：skin 一律换成 complexion，免得撞生图接口的审核词 */
+function ipeCastSafeLook(look) {
+    return String(look || "").replace(/\bskin(?:[\s-]+(?:tone|color|colour))?\b/gi, "complexion");
+}
 /* 副 AI 的整理结果 → 只留能认出来的人物段，统一成插件自己的写法 */
 function ipeCastNormalizeScan(txt) {
     var cards = ipeCastParse(String(txt || "").replace(/^\s*```[a-zA-Z]*\s*\n?/, "").replace(/\n?```\s*$/, ""));
     return {
         cards: cards,
         text: cards.map(function(c){
-            return "【" + c.name + "】\n外貌: " + c.look;
+            return "【" + c.name + "】\n外貌: " + ipeCastSafeLook(c.look);
         }).join("\n\n")
     };
 }
