@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.22.1";
+var IPE_VERSION = "2.22.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4750,7 +4750,10 @@ function ipeCastScanPrompt(userName) {
         "2. 资料里完全没有外貌描写的人物不要输出。",
         "3. 发色最要紧：资料写了就照写，写具体色号式的颜色；资料里有辨识度特征一定写进去，放在靠前的位置。",
         "4. 资料缺了发色、瞳色这类关键项时，按人物设定补一个具体、合理的值——生图需要确定值才能每次画成同一个人。",
-        "5. 不要解释，不要标题，不要代码块。"
+        "5. 主角、user 和重要人物默认男帅女美：男性写 strikingly handsome，女性写 strikingly beautiful，五官往好看里写具体。只有资料明确写了这个人丑、相貌平平或毁容，才照资料写。",
+        "6. 眼睛：资料没有特别写眼型（单眼皮、细长眼、狐狸眼、丹凤眼等）时，一律写 large, bright, expressive eyes with double eyelids——生图模型画东亚人容易默认成单眼皮小眼睛，必须锚住；资料写了特定眼型就照资料写。",
+        "7. 只写稳定的长相，不写也不放大肮脏、邋遢、贫穷、落魄、疲惫、憔悴、狼狈这类状态或气质；资料里的这类描写是剧情状态，不进外貌锚点。",
+        "8. 不要解释，不要标题，不要代码块。"
     ].join("\n");
 }
 async function ipeCastScanCall(sourceText, userName) {
