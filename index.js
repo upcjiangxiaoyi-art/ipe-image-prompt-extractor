@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.21.0";
+var IPE_VERSION = "2.21.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4678,7 +4678,8 @@ function ipeCastRefreshUI() {
    资料再长也只在这一次读；之后每楼只贴入镜人物那一行。
    ============================================================ */
 var IPE_CAST_SCAN_HINT = "一键读取当前角色卡（群聊读全部成员）、user 设定和启用的世界书，副 AI 把每个人物（含 NPC）的外貌整理成一行，存成一套新的锚点预设。之后每楼只贴入镜人物的那一行，写法固定不漂。不想用就不点，自己写的锚点照旧能用。";
-var IPE_CAST_SCAN_ENTRY_MAX = 2400;     // 单条资料最多带多少字
+var IPE_CAST_SCAN_ENTRY_MAX = 4000;     // 单条世界书条目最多带多少字
+var IPE_CAST_SCAN_HEAD_MAX = 30000;     // 角色卡描述 / user 设定单项最多带多少字（外貌常写在长描述的中后段）
 var IPE_CAST_SCAN_TOTAL_MAX = 60000;    // 一次最多带多少字（世界书动辄几十万字）
 var IPE_CAST_LOOK_RE = /外貌|长相|容貌|相貌|五官|发色|头发|长发|短发|卷发|瞳|眼睛|眸|身高|身材|体型|肤色|皮肤|脸|眉|appearance|hair|eyes?\b|height|build|skin|face|looks?\b/i;
 var ipeCastScanBusy = false;
@@ -4725,7 +4726,7 @@ function ipeCastPersona() {
     return { name: name, desc: desc.trim() };
 }
 /* 世界书书名：角色绑定、聊天绑定、人设绑定、全局启用 */
-async function ipeCastWorldNames(chars) {
+async function ipeCastWorldNames(chars, stat) {
     var c = ctx(), names = [];
     function add(n){ n = String(n || "").trim(); if (n && names.indexOf(n) < 0) names.push(n); }
     chars.forEach(function(ch){ try { add(ch.data && ch.data.extensions && ch.data.extensions.world); } catch(e) {} });
@@ -4741,6 +4742,12 @@ async function ipeCastWorldNames(chars) {
             });
         } catch(e2) {}
     } catch(e) {}
+    if (stat) stat.wiModule = !!wi;
+    /* 全局启用的书兜底：读酒馆世界书面板里那个多选框（#world_info）的选中项 */
+    try {
+        var sel = ipeRootDocument().querySelector("#world_info");
+        if (sel && sel.options) for (var i = 0; i < sel.options.length; i++) if (sel.options[i].selected) add(sel.options[i].textContent);
+    } catch(e) {}
     return names;
 }
 async function ipeCastLoadWorld(name) {
@@ -4749,10 +4756,11 @@ async function ipeCastLoadWorld(name) {
     try { var wi = await ipeCastWorldModule(); if (wi && typeof wi.loadWorldInfo === "function") return await wi.loadWorldInfo(name); } catch(e) {}
     return null;
 }
-function ipeCastEntryText(title, body) {
+function ipeCastEntryText(title, body, max) {
     body = ipeCastSub(body).trim();
     if (!body) return "";
-    if (body.length > IPE_CAST_SCAN_ENTRY_MAX) body = body.slice(0, IPE_CAST_SCAN_ENTRY_MAX) + "…";
+    max = max || IPE_CAST_SCAN_ENTRY_MAX;
+    if (body.length > max) body = body.slice(0, max) + "…";
     return "### " + title + "\n" + body;
 }
 /* 攒资料：角色卡与 user 设定排前面必带；世界书条目按「有外貌字眼」优先，总量封顶 */
@@ -4763,29 +4771,29 @@ async function ipeCastGatherSources() {
         if (cx.groupId != null && cx.groupId !== "" && typeof cx.unshallowGroupMembers === "function") await cx.unshallowGroupMembers(cx.groupId);
         else if (cx.characterId != null && cx.characterId !== "" && typeof cx.unshallowCharacter === "function") await cx.unshallowCharacter(cx.characterId);
     } catch(e) {}
-    var chars = ipeCastSourceChars(), head = [], wiParts = [], stat = { chars: [], persona: "", books: [], entries: 0 };
+    var chars = ipeCastSourceChars(), head = [], wiParts = [], stat = { chars: [], persona: "", books: [], booksMissing: [], embedded: 0, entries: 0, entriesAll: 0, wiModule: false };
     chars.forEach(function(ch){
         var nm = ipeCastCharField(ch, "name") || "角色";
         stat.chars.push(nm);
         ["description", "personality", "scenario"].forEach(function(k){
-            var t = ipeCastEntryText("角色卡「" + nm + "」· " + k, ipeCastCharField(ch, k)); if (t) head.push(t);
+            var t = ipeCastEntryText("角色卡「" + nm + "」· " + k, ipeCastCharField(ch, k), IPE_CAST_SCAN_HEAD_MAX); if (t) head.push(t);
         });
         try {
             var book = ch.data && ch.data.character_book;
             ((book && book.entries) || []).forEach(function(e){
                 if (!e || e.enabled === false) return;
                 var t = ipeCastEntryText("「" + nm + "」内嵌世界书 · " + (e.comment || e.name || (e.keys || []).join("/")), e.content);
-                if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) });
+                if (t) { wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) }); stat.embedded++; }
             });
         } catch(e) {}
     });
     var ps = ipeCastPersona();
-    if (ps.desc) { stat.persona = ps.name || "user"; head.push(ipeCastEntryText("user 设定「" + (ps.name || "user") + "」", ps.desc)); }
-    var names = await ipeCastWorldNames(chars);
+    if (ps.desc) { stat.persona = ps.name || "user"; head.push(ipeCastEntryText("user 设定「" + (ps.name || "user") + "」", ps.desc, IPE_CAST_SCAN_HEAD_MAX)); }
+    var names = await ipeCastWorldNames(chars, stat);
     for (var i = 0; i < names.length; i++) {
         var data = await ipeCastLoadWorld(names[i]);
         var ents = data && data.entries;
-        if (!ents) continue;
+        if (!ents) { stat.booksMissing.push(names[i]); continue; }
         stat.books.push(names[i]);
         Object.keys(ents).forEach(function(k){
             var e = ents[k];
@@ -4797,10 +4805,12 @@ async function ipeCastGatherSources() {
     var out = head.slice(), used = out.join("\n\n").length, seen = {};
     /* 卡里内嵌的世界书导入后通常又是一本同内容的世界书，按正文去重 */
     wiParts = wiParts.filter(function(p){ var k = p.t.replace(/^###[^\n]*\n/, "").slice(0, 300); if (seen[k]) return false; seen[k] = true; return true; });
+    stat.entriesAll = wiParts.length;
     wiParts.filter(function(p){ return p.look; }).concat(wiParts.filter(function(p){ return !p.look; })).forEach(function(p){
         if (used + p.t.length > IPE_CAST_SCAN_TOTAL_MAX) return;
         out.push(p.t); used += p.t.length + 2; stat.entries++;
     });
+    try { console.log("[IPE] 🔍 自动提取人物外貌 · 资料来源", JSON.stringify(stat)); } catch(e) {}
     return { text: out.join("\n\n"), stat: stat, user: ps.name };
 }
 function ipeCastScanPrompt(userName) {
@@ -4860,6 +4870,19 @@ function ipeCastSaveScanPreset(title, text) {
     ipeRefreshAnchorEditors();
     return name;
 }
+/* 读到了什么，一句话说清；成功后也留在状态行里，方便核对有没有读到世界书 */
+function ipeCastSourceSummary(st) {
+    var from = [];
+    if (st.chars.length) from.push("角色卡 " + st.chars.join("、"));
+    if (st.persona) from.push("user 设定");
+    if (st.books.length) from.push("世界书 " + st.books.length + " 本（" + st.books.join("、") + "）");
+    if (st.embedded) from.push("卡内世界书 " + st.embedded + " 条");
+    var s = "读了 " + (from.join(" + ") || "（什么都没读到）");
+    if (st.entriesAll) s += "；世界书条目带了 " + st.entries + " / " + st.entriesAll + " 条" + (st.entries < st.entriesAll ? "（太多，优先带写了外貌的）" : "");
+    if (!st.books.length && !st.embedded) s += "；没找到启用的世界书" + (st.wiModule ? "" : "（也读不到全局世界书设置）");
+    if (st.booksMissing.length) s += "；这几本打不开：" + st.booksMissing.join("、");
+    return s;
+}
 async function ipeCastScan() {
     if (ipeCastScanBusy) return;
     ipeCastScanBusy = true;
@@ -4868,18 +4891,15 @@ async function ipeCastScan() {
         setStatus("🔍 正在读取角色卡、user 设定和世界书…", "#6ec577");
         var src = await ipeCastGatherSources();
         if (!src.text.trim()) { setStatus("没读到任何设定资料：先打开一个角色的聊天", "#d4726a"); return; }
-        var from = [];
-        if (src.stat.chars.length) from.push("角色卡 " + src.stat.chars.join("、"));
-        if (src.stat.persona) from.push("user 设定");
-        if (src.stat.books.length) from.push("世界书 " + src.stat.books.length + " 本（" + src.stat.entries + " 条）");
-        setStatus("🔍 已读 " + from.join(" + ") + "，副 AI 正在整理人物外貌…", "#6ec577");
+        var summary = ipeCastSourceSummary(src.stat);
+        setStatus("🔍 " + summary + "。副 AI 正在整理人物外貌…", "#6ec577");
         var raw = await ipeCastScanCall(src.text, src.user);
         var norm = ipeCastNormalizeScan(raw);
-        if (!norm.cards.length) { setStatus("副 AI 没整理出人物外貌（资料里可能没写外貌），锚点没动。返回开头：" + String(raw).slice(0, 80), "#d4726a"); return; }
+        if (!norm.cards.length) { setStatus("副 AI 没整理出人物外貌（资料里可能没写外貌），锚点没动。" + summary + "。返回开头：" + String(raw).slice(0, 80), "#d4726a"); return; }
         var title = ipeCharName() || (src.stat.chars[0] || "人物");
         var pname = ipeCastSaveScanPreset(title, norm.text);
         ipeCastRefreshUI();
-        setStatus("🔍 整理出 " + norm.cards.length + " 个人物：" + norm.cards.map(function(c){ return c.name; }).join("、") + "。已存为锚点预设「" + pname + "」并选中，可在锚点框里改", "#6ec577");
+        setStatus("🔍 整理出 " + norm.cards.length + " 个人物：" + norm.cards.map(function(c){ return c.name; }).join("、") + "。已存为锚点预设「" + pname + "」并选中，可在锚点框里改。（" + summary + "）", "#6ec577");
     } catch(e) {
         console.error("[IPE] 自动提取人物外貌", e);
         setStatus("自动提取人物外貌失败：" + ipeErrorText(e), "#d4726a");

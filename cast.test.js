@@ -112,7 +112,9 @@ async function setup(opts) {
             '苑家世界书': { entries: { 1: { comment: '管家', content: '老陈，六十岁，白发，驼背，总穿灰色长衫。', key: ['老陈'] }, 2: { comment: '关了的', content: '不该出现的条目', disable: true } } },
             '聊天世界书': { entries: { 5: { comment: '城市', content: '一座常年下雨的港口城市。', key: ['港口'] } } }
         };
+        books['全局书'] = { entries: { 9: { comment: '邻居', content: '邻居阿福，圆脸，红头发。', key: ['阿福'] } } };
         tavern.loadWorldInfo = async n => books[n] || null;
+        w.document.body.insertAdjacentHTML('beforeend', '<select id="world_info" multiple><option selected>全局书</option><option>没开的书</option></select>');
         const reply = '```\n【苑无忧】\n外貌: tall woman, late 20s, long straight black hair, grey eyes, pale skin, slender build\n服装: dark trench coat\n别名: 苑老师\n\n【小雨】\n外貌: 18-year-old girl, short black bob, round glasses, petite\n服装:\n别名:\n\n【老陈】\n外貌: \n```';
         w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: reply } }] }) }; };
         await w.eval('ipeCastScan()');
@@ -123,6 +125,9 @@ async function setup(opts) {
         check(sent.indexOf('一座常年下雨的港口城市') >= 0, '聊天绑定的世界书读到了');
         check(sent.split('老陈，六十岁').length === 2, '内嵌世界书与导入后的世界书同内容只带一次');
         check(sent.indexOf('不该出现的条目') < 0, '关掉的世界书条目不带');
+        check(sent.indexOf('邻居阿福，圆脸，红头发') >= 0, '全局启用的世界书读到了（面板多选框兜底）');
+        const stLine = w.document.querySelector('#ipe-status').textContent;
+        check(stLine.indexOf('世界书 3 本（苑家世界书、聊天世界书、全局书）') >= 0 && stLine.indexOf('整理出 2 个人物') >= 0, '成功后状态行仍写明读了哪几本世界书', stLine);
         check(cap.body.messages[0].content.indexOf('小雨') >= 0, '提取提示里点名 user 叫什么');
         const list = JSON.parse(st.anchorPresetsJson);
         const auto = list.find(x => x.name === '🔍 苑无忧');
