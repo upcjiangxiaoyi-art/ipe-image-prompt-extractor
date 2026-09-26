@@ -752,15 +752,15 @@ console.log("\n【31c】 公共块（2.23.0）：拼接顺序、{Common} 占位�
     const five = { camera: "C.", env: "E.", mood: "M.", chars: "CH.", pose: "P." };
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE, common: "c1" }]);
     st.activeBaseTemplate = "tpl_1";
-    eq(F("buildInjectTag")("ignored", five), "<draw>\nC.\nE.\nM.\nCH.\nP.\nSTYLE BODY.\nCOMMON RULES.\nClosing line.\n</draw>", "场景五段 → 画风正文 → 公共块（含收尾句）→ </draw>");
-    eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\nCOMMON RULES.\nClosing line.\n</draw>", "没分层：整段 → 画风正文 → 公共块");
+    eq(F("buildInjectTag")("ignored", five), "<draw>\nC.\nE.\nM.\nCH.\nP.\nSTYLE BODY.\n\nCOMMON RULES.\nClosing line.\n</draw>", "场景五段 → 画风正文 → 空一行 → 公共块（含收尾句）→ </draw>");
+    eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n\nCOMMON RULES.\nClosing line.\n</draw>", "没分层：整段 → 画风正文 → 公共块");
     eq(F("buildInjectTag")("d", null).split("COMMON RULES.").length, 2, "只拼一份");
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]);
     eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n</draw>", "不挂：跟以前一模一样");
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE, common: "gone" }]);
     eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n</draw>", "挂的公共块不存在：当不挂");
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "单行", value: "<draw>{Description}</draw>", common: "c2" }]);
-    eq(F("buildInjectTag")("d", null), "<draw>d\nANCIENT RULES.</draw>", "单行包裹：插在 </draw> 前一行");
+    eq(F("buildInjectTag")("d", null), "<draw>d\n\nANCIENT RULES.</draw>", "单行包裹：插在 </draw> 前一行");
     // {Common} 占位符
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "占位", value: "<draw>{Description}\n{Common}\nSPECIAL TAIL.\n</draw>", common: "c2" }]);
     eq(F("buildInjectTag")("d", null), "<draw>d\nANCIENT RULES.\nSPECIAL TAIL.\n</draw>", "写了 {Common}：就放在那里，不再自动追加");
@@ -774,7 +774,7 @@ console.log("\n【31c】 公共块（2.23.0）：拼接顺序、{Common} 占位�
     // 非包裹型：追加在末尾；剥标签照样剥得掉，公共块改过后老楼也剥得掉
     st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "非包裹", value: "IMG START\n{Description}\nIMG END", common: "c2" }]);
     const t1 = F("buildInjectTag")("d", null);
-    eq(t1, "IMG START\nd\nIMG END\nANCIENT RULES.", "非包裹型：公共块追加在末尾");
+    eq(t1, "IMG START\nd\nIMG END\n\nANCIENT RULES.", "非包裹型：公共块追加在末尾");
     eq(strip("正文。\n\n" + t1), "正文。", "非包裹型挂公共块：挂账剥得掉");
     st.commonBlocksJson = JSON.stringify([{ id: "c2", name: "古风", value: "ANCIENT RULES v2." }]);
     eq(strip("正文。\n\n" + t1), "正文。", "公共块改过之后，旧文本注入的老楼照样剥得掉（后缀对不上退回按前缀剥到楼尾）");
@@ -852,7 +852,7 @@ console.log("\n【31e】 画风包 _v 2：带公共块导出导入；旧版包�
     eq(sum.templates.replaced, 1, "改挂计入覆盖");
     eq(bt.find(t => t.name === "厚涂").common, "mine", "新模板按名字挂到本地「通用」");
     sb.activeBaseTemplate = bt.find(t => t.name === "水墨").id;
-    eq(b.F("buildInjectTag")("d", null), "<draw>d\nANCIENT.</draw>", "导入后直接能拼");
+    eq(b.F("buildInjectTag")("d", null), "<draw>d\n\nANCIENT.</draw>", "导入后直接能拼");
     eq(b.F("ipeImgPackImportText")(JSON.stringify(all)) && b.F("ipeGetBaseTemplates")().length, 3, "再导一次：没有重复");
 
     // 旧版包：没有 commons

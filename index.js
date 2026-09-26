@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.23.0";
+var IPE_VERSION = "2.23.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -3518,15 +3518,16 @@ function ipeApplyCommonPlaceholder(tpl, common) {
     return out.join("\n");
 }
 
-/* 没写 {Common}：插到最后一个 </env> 的前一行；不是包裹型的追加在末尾 */
+/* 没写 {Common}：插到最后一个 </env> 的前一行；不是包裹型的追加在末尾。
+   2.23.1 和画风正文之间空一行，公共块自成一段 */
 function ipeInsertCommonAuto(text, common, env) {
     text = String(text == null ? "" : text);
     if (!common) return text;
     var k = env ? text.lastIndexOf("</" + env) : -1;
-    if (k < 0) return text.replace(/\s+$/, "") + "\n" + common;
+    if (k < 0) return text.replace(/\s+$/, "") + "\n\n" + common;
     var before = text.slice(0, k);
     var ws = before.match(/\s*$/)[0];
-    return before.slice(0, before.length - ws.length) + "\n" + common + (ws.indexOf("\n") >= 0 ? ws : "") + text.slice(k);
+    return before.slice(0, before.length - ws.length) + "\n\n" + common + (ws.indexOf("\n") >= 0 ? ws : "") + text.slice(k);
 }
 
 /* 模板展开公共块后的原文（剥标签推前后缀用）。withCommon=false 得到不挂时的样子 */
