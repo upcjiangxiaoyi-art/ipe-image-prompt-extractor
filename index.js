@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.23.1";
+var IPE_VERSION = "2.24.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -68,6 +68,7 @@ const DEFAULTS = {
     activeCommonBlock: "",
     anchorPresetsJson: "",
     activeAnchorPreset: "anchor_1",
+    anchorCardBindJson: "{}",      // 2.24.0 角色卡 / 群聊 → 上次用的锚点预设 id
     rulePresetsJson: "",
     activeRulePreset: "rule_1",
     systemPromptPresetsJson: "",
@@ -3647,6 +3648,57 @@ function ipeRefreshTemplateCommonSelect() {
     ["ipe-template-common", "iped-template-common"].forEach(function(id){ ipeFillSelect(id, opts, cur); });
 }
 
+/* ============================================================
+   🧷 锚点跟着聊天走（2.24.0）
+   在哪个聊天里选了哪套锚点，就记在这个聊天（chat_metadata）上，同时记给这张角色卡（群聊记给这个群）。
+   换聊天时：先认本聊天自己的记录；没有（同一张卡开的新聊天）就认这张卡上次用的；都没有就不动。
+   记的是预设 id，预设删了就当没记过。
+   ============================================================ */
+var IPE_ANCHOR_META_KEY = "ipe_anchor_preset";
+function ipeAnchorCardKey() {
+    try {
+        var c = ctx();
+        if (c.groupId != null && c.groupId !== "") return "group:" + c.groupId;
+        var ch = c.characters && c.characters[c.characterId];
+        return (ch && ch.avatar) ? "char:" + ch.avatar : "";
+    } catch(e) { return ""; }
+}
+function ipeAnchorCardBinds() {
+    var m = ipeSafeJsonParse(cfg().anchorCardBindJson, null);
+    return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
+}
+/* 选了哪套就记下（本聊天 + 本卡）。没打开聊天时不记。 */
+function ipeAnchorBindRemember(id) {
+    id = String(id || ""); if (!id || !ipeChatKeyReady()) return;
+    try {
+        var root = ipeMetaRoot();
+        if (root && root[IPE_ANCHOR_META_KEY] !== id) {
+            root[IPE_ANCHOR_META_KEY] = id;
+            var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+        }
+    } catch(e) {}
+    var k = ipeAnchorCardKey();
+    if (k) {
+        var m = ipeAnchorCardBinds();
+        if (m[k] !== id) { m[k] = id; save("anchorCardBindJson", JSON.stringify(m)); }
+    }
+}
+/* 换聊天时切回这个聊天 / 这张卡的锚点。切了返回 { name, from }，没切返回 null */
+function ipeAnchorBindApply() {
+    if (!ipeChatKeyReady()) return null;
+    var list = ipeGetAnchorPresets(), byId = {};
+    list.forEach(function(a){ byId[a.id] = a; });
+    var id = "", from = "";
+    try { var root = ipeMetaRoot(); var v = root && root[IPE_ANCHOR_META_KEY]; if (v && byId[v]) { id = v; from = "chat"; } } catch(e) {}
+    if (!id) { var k = ipeAnchorCardKey(), v2 = k ? ipeAnchorCardBinds()[k] : ""; if (v2 && byId[v2]) { id = v2; from = "card"; } }
+    if (!id) return null;
+    if (from === "card") ipeAnchorBindRemember(id);            // 新聊天沿用了卡上的，顺手记到本聊天
+    if (cfg().activeAnchorPreset === id) return null;
+    saveCritical("activeAnchorPreset", id);
+    try { ipeRefreshAnchorEditors(); } catch(e) {}
+    return { name: byId[id].name, from: from };
+}
+
 function ipeGetAnchorPresets() {
     var c = cfg();
     var list = ipeSafeJsonParse(c.anchorPresetsJson, null);
@@ -3726,6 +3778,7 @@ function ipeAddAnchorPreset() {
     list.push({ id: id, name: "新角色锚点" + (list.length + 1), value: "" });
     ipeSaveAnchorPresets(list);
     saveCritical("activeAnchorPreset", id);
+    ipeAnchorBindRemember(id);
     ipeRefreshAnchorEditors();
     ipeSaveNow();
 }
@@ -3743,6 +3796,7 @@ function ipeDeleteAnchorPreset() {
     }
     ipeSaveAnchorPresets(next);
     saveCritical("activeAnchorPreset", next[0].id);
+    ipeAnchorBindRemember(next[0].id);
     ipeRefreshAnchorEditors();
     ipeSaveNow();
 }
@@ -5023,6 +5077,7 @@ function ipeCastSaveScanPreset(title, text) {
     else { hit = { id: ipeMakeId("anchor"), name: name, value: text }; list.push(hit); }
     ipeSaveAnchorPresets(list);
     saveCritical("activeAnchorPreset", hit.id);
+    ipeAnchorBindRemember(hit.id);
     ipeSaveNow();
     ipeRefreshAnchorEditors();
     return name;
@@ -6070,6 +6125,7 @@ function createPanel() {
             '<button id="ipe-anchor-delete" class="ipe-btn" type="button">删除当前</button>'+
             '<button id="ipe-pack-export-anchors" class="ipe-btn" type="button" title="只导出角色锚点，给自己备份换设备用">\u2B07 备份锚点</button>'+
         '</div>'+
+        '<div class="ipe-hint">锚点跟着聊天走：在哪个聊天选了哪套会自动记住，回到这个聊天、或同一张角色卡开新聊天时自动切回。</div>'+
         '<textarea id="ipe-char-anchors" rows="5" placeholder="陆星河：a man, 28 years old, tall..."></textarea>'+
         '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>'+
         '会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。'+
@@ -6483,6 +6539,7 @@ function createDrawer() {
     h += '<label>锚点预设</label><select id="iped-anchor-slot" class="text_pole"></select>';
     h += '<label>锚点名称</label><input type="text" id="iped-anchor-name" class="text_pole" value="" placeholder="例如：陆星河 / 苑无忧">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-anchor-add" class="menu_button" value="新增锚点"><input type="button" id="iped-anchor-delete" class="menu_button" value="删除当前"><input type="button" id="iped-pack-export-anchors" class="menu_button" value="\u2B07 备份锚点"></div>';
+    h += '<small style="color:#888">锚点跟着聊天走：选了哪套自动记住，回到这个聊天或同卡新聊天时自动切回。</small>';
     h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
     h += '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。<div style="display:flex;gap:6px;margin-top:8px"><input type="button" id="iped-anchor-guide-toggle" class="menu_button" value="编辑通用规则"><input type="button" id="iped-anchor-guide-reset" class="menu_button" value="恢复默认"></div><div id="iped-anchor-guide-editor-wrap" class="ipe-anchor-guide-editor-wrap" style="display:none"><textarea id="iped-anchor-guide-editor" class="text_pole" rows="6" placeholder="通用角色锚点调用规则"></textarea><small style="color:#888">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</small></div></div>';
     h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-scan" class="menu_button" value="🔍 自动提取人物外貌"></div><small style="color:#888;display:block">' + IPE_CAST_SCAN_HINT + '</small><details class="ipe-cast-more" style="margin-top:6px"><summary style="cursor:pointer;color:#888;font-size:12px">更多：提取温度</summary><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"></details></div>';
@@ -7308,6 +7365,7 @@ function bindAll() {
         var el=q("#"+id); if(!el) return;
         el.addEventListener("change", function(){
             saveCritical("activeAnchorPreset", el.value);
+            ipeAnchorBindRemember(el.value);
             ipeRefreshAnchorEditors();
         });
     });
@@ -8053,6 +8111,10 @@ function bindAll() {
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
                     try { ipeLedgerModeRefresh(); } catch(eS) {}   // 卡槽显示换成这张卡的
                     try { ipeImgRefreshLayerUI(); } catch(eL) {}   // 四个层框换成本聊天的
+                    try {                                            // 锚点换成这个聊天 / 这张卡上次用的
+                        var ab = ipeAnchorBindApply();
+                        if (ab) setStatus("🧷 锚点已切到「" + ab.name + "」（" + (ab.from === "chat" ? "本聊天上次用的" : "这张角色卡上次用的") + "）", "#6ec577");
+                    } catch(eA) {}
                     try { ipeInstallMesButtonsObserver(); ipeInstallMesButtons(); } catch(eM) {}   // 楼层 🎨 按钮换成本聊天的
                 }, 200);
             });

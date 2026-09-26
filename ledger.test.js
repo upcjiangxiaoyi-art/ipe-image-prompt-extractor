@@ -65,7 +65,7 @@ function boot(floors) {
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
         "runExtract", "ipeImgParseLayers", "buildInjectTag", "reinjectDescToMessage", "injectDescToMessage", "ipeInstallMesButtons", "ipeGetSuppPresets", "ipeRefreshSuppPresets", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
-        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
+        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
         "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
         "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
@@ -875,6 +875,59 @@ console.log("\n【31e】 画风包 _v 2：带公共块导出导入；旧版包�
     eq(c.F("ipeGetBaseTemplates")().find(t => t.name === "要挂").common, "c1", "开关打开：旧包模板挂到指定公共块");
     eq(c.F("ipeGetCommonBlocks")().length, 1, "旧包不动公共块");
 }
+
+console.log("\n【31f】 锚点跟着聊天走（2.24.0）：记在聊天和角色卡上，换聊天自动切回");
+await (async () => {
+    const { w, tavern, F } = boot(4);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "x" }, { id: "a2", name: "陆籍北", value: "lu" }, { id: "a3", name: "顾寒", value: "gu" }]);
+    st.activeAnchorPreset = "a1";
+    F("ipeRefreshAnchorEditors")();
+    const d = w.document, sel = d.querySelector("#ipe-anchor-slot");
+    const pick = id => { sel.value = id; sel.dispatchEvent(new w.Event("change", { bubbles: true })); };
+    const switchTo = async (chatId, charIdx, meta) => {
+        tavern.getCurrentChatId = () => chatId; tavern.characterId = charIdx; tavern.chatMetadata = meta || {};
+        await tavern.eventSource.emit("CHAT_CHANGED");
+        await new Promise(r => setTimeout(r, 260));
+    };
+    // 卡 0（苑无忧）的聊天 A 选陆籍北
+    await switchTo("A", 0, {});
+    pick("a2");
+    eq(tavern.chatMetadata.ipe_anchor_preset, "a2", "选了就记在本聊天上");
+    eq(JSON.parse(st.anchorCardBindJson)["char:yuan.png"], "a2", "同时记给这张角色卡");
+    const metaA = tavern.chatMetadata;
+    // 卡 1（顾寒）的聊天 B 选顾寒
+    await switchTo("B", 1, {});
+    eq(st.activeAnchorPreset, "a2", "新卡没记录：不动");
+    pick("a3");
+    const metaB = tavern.chatMetadata;
+    // 回到聊天 A
+    await switchTo("A", 0, metaA);
+    eq(st.activeAnchorPreset, "a2", "回到聊天 A：自动切回陆籍北");
+    const stEl = d.querySelector("#ipe-status");
+    ok(!stEl || (stEl.textContent.indexOf("陆籍北") >= 0 && stEl.textContent.indexOf("本聊天上次用的") >= 0), "状态行说明切到了哪套、为什么", stEl && stEl.textContent);
+    eq(sel.value, "a2", "下拉跟着变");
+    // 卡 0 开新聊天 C：沿用这张卡上次的
+    await switchTo("C", 0, {});
+    eq(st.activeAnchorPreset, "a2", "同卡新聊天：用这张卡上次的锚点");
+    eq(tavern.chatMetadata.ipe_anchor_preset, "a2", "顺手记到新聊天上");
+    // 聊天自己的记录优先于卡：在 C 里改成默认，再回 A 还是陆籍北
+    pick("a1");
+    await switchTo("B", 1, metaB);
+    eq(st.activeAnchorPreset, "a3", "回聊天 B：顾寒");
+    await switchTo("A", 0, metaA);
+    eq(st.activeAnchorPreset, "a2", "聊天 A 自己记的陆籍北优先于卡上最近的「默认」");
+    // 预设删了：不切到不存在的
+    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "x" }, { id: "a2", name: "陆籍北", value: "lu" }]);
+    await switchTo("B", 1, metaB);
+    eq(st.activeAnchorPreset, "a2", "聊天 B 记的顾寒被删了：不动，也不报错");
+    // 群聊按群记
+    tavern.groupId = "g1";
+    await switchTo("G", 0, {});
+    pick("a1");
+    eq(JSON.parse(st.anchorCardBindJson)["group:g1"], "a1", "群聊记给这个群");
+    tavern.groupId = null;
+})();
 
 console.log("\n【32】 通知卡：挂账失败常驻带「知道了」；生图失败带进度线自动收起；样式内联、层级最高；不再碰 toastr");
 await (async () => {
