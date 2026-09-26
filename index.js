@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.22.4";
+var IPE_VERSION = "2.23.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -64,6 +64,8 @@ const DEFAULTS = {
     quickEntryLeft: "",
     quickEntryTop: "",
     baseTemplatesJson: "",
+    commonBlocksJson: "[]",        // 2.23.0 公共块：[{id,name,value}]，模板的 common 字段指向其中一份
+    activeCommonBlock: "",
     anchorPresetsJson: "",
     activeAnchorPreset: "anchor_1",
     rulePresetsJson: "",
@@ -989,8 +991,13 @@ function ipeLedgerStripImageTag(text) {
     var out = String(text || "");
     var tpls = [];
     try {
-        var list = ipeGetBaseTemplates();
-        if (Array.isArray(list)) list.forEach(function(x){ if (x && x.value) tpls.push(String(x.value)); });
+        var list = ipeGetBaseTemplates(), blocks = ipeGetCommonBlocks();
+        // 2.23.0 按展开公共块后的原文推前后缀；挂之前注入的老楼按不挂的样子也认一遍
+        if (Array.isArray(list)) list.forEach(function(x){
+            if (!x || !x.value) return;
+            if (x.common) tpls.push(ipeExpandTemplateCommon(x, true, blocks));
+            tpls.push(ipeExpandTemplateCommon(x, false));
+        });
     } catch(e) {}
     try { if (cfg().baseTemplate) tpls.push(String(cfg().baseTemplate)); } catch(e) {}
     tpls.push(IPE_DEFAULT_IMAGE_TEMPLATE);
@@ -1033,7 +1040,10 @@ function ipeLedgerStripImageTag(text) {
         }
         if (!pre && !suf) continue;
         if (pre && suf) {
+            var was = out;
             try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
+            // 2.23.0 后缀对不上（模板后半段或公共块改过，老楼是旧文本注入的）：注入永远在楼尾，退回按前缀剥到楼尾
+            if (out === was) out = stripTail(out, pre);
         } else if (pre) {
             out = stripTail(out, pre);
         } else {
@@ -3352,10 +3362,10 @@ function ipeGetBaseTemplates() {
         var id = String(item.id || ("tpl_" + (j + 1)));
         var name = String(item.name || ("模板" + (j + 1)));
         var value = String(item.value || "");
-        out.push({ id: id, name: name, value: value });
+        out.push({ id: id, name: name, value: value, common: String(item.common || "") });
     }
 
-    if (out.length === 0) out.push({ id: "tpl_1", name: "预设1", value: "" });
+    if (out.length === 0) out.push({ id: "tpl_1", name: "预设1", value: "", common: "" });
     return out;
 }
 
@@ -3441,6 +3451,199 @@ function ipeDeleteTemplatePreset() {
     saveCritical("activeBaseTemplate", next[0].id);
     ipeRefreshTemplateEditors();
     ipeSaveNow();
+}
+
+/* ============================================================
+   🧩 公共块（2.23.0）
+   画风模板各自内嵌的通用规则（族裔 / 年龄 / 性别、人物区分、解剖与手、视线、无文字水印、收尾句）
+   抽成公共块，可以有多份（通用 / 古风…）。每个模板的 common 字段挂一份，空串 = 不挂。
+   拼接：模板写了 {Common} 就放在那里；没写就插到 </draw> 这类包裹标签的前一行，不是包裹型的追加在末尾。
+   防重复：模板正文里已经原样带着这段公共文本（空白压平后比对），就不再叠一份。
+   ============================================================ */
+var IPE_COMMON_PH = "{Common}";
+
+function ipeGetCommonBlocks() {
+    var list = ipeSafeJsonParse(cfg().commonBlocksJson, null);
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    for (var i = 0; i < list.length; i++) {
+        var it = list[i]; if (!it || typeof it !== "object") continue;
+        out.push({ id: String(it.id || ("common_" + (i + 1))), name: String(it.name || ("公共块" + (i + 1))), value: String(it.value || "") });
+    }
+    return out;
+}
+function ipeSaveCommonBlocks(list) {
+    save("commonBlocksJson", JSON.stringify(list || []));
+}
+function ipeGetCommonBlock(id, list) {
+    if (!id) return null;
+    list = list || ipeGetCommonBlocks();
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+}
+/* 编辑器里当前选中的公共块；一份都没有时是空串 */
+function ipeGetActiveCommonId() {
+    var list = ipeGetCommonBlocks();
+    if (!list.length) return "";
+    var a = cfg().activeCommonBlock || "";
+    for (var i = 0; i < list.length; i++) if (list[i].id === a) return a;
+    return list[0].id;
+}
+
+function ipeNormWs(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
+
+/* 这张模板实际要拼进去的公共文本：没挂 / 挂的那份删了或是空的 / 正文里已原样带着 → 空串 */
+function ipeTemplateCommonText(item, rawTpl, blocks) {
+    var blk = ipeGetCommonBlock(item && item.common, blocks);
+    var txt = blk ? String(blk.value || "").replace(/^\s*\n|\s+$/g, "") : "";
+    if (!txt.trim()) return "";
+    var body = ipeNormWs(String(rawTpl == null ? (item && item.value) || "" : rawTpl).split(IPE_COMMON_PH).join(" "));
+    if (body.indexOf(ipeNormWs(txt)) >= 0) return "";
+    return txt;
+}
+
+/* 模板里的 {Common}：有公共文本就替换；没有就去掉，独占一行的连行一起去掉 */
+function ipeApplyCommonPlaceholder(tpl, common) {
+    tpl = String(tpl == null ? "" : tpl);
+    if (tpl.indexOf(IPE_COMMON_PH) < 0) return tpl;
+    if (common) return tpl.split(IPE_COMMON_PH).join(common);
+    var lines = tpl.split("\n"), out = [];
+    for (var i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf(IPE_COMMON_PH) >= 0) {
+            var rest = lines[i].split(IPE_COMMON_PH).join("");
+            if (!rest.trim() && lines.length > 1) continue;
+            out.push(rest);
+        } else out.push(lines[i]);
+    }
+    return out.join("\n");
+}
+
+/* 没写 {Common}：插到最后一个 </env> 的前一行；不是包裹型的追加在末尾 */
+function ipeInsertCommonAuto(text, common, env) {
+    text = String(text == null ? "" : text);
+    if (!common) return text;
+    var k = env ? text.lastIndexOf("</" + env) : -1;
+    if (k < 0) return text.replace(/\s+$/, "") + "\n" + common;
+    var before = text.slice(0, k);
+    var ws = before.match(/\s*$/)[0];
+    return before.slice(0, before.length - ws.length) + "\n" + common + (ws.indexOf("\n") >= 0 ? ws : "") + text.slice(k);
+}
+
+/* 模板展开公共块后的原文（剥标签推前后缀用）。withCommon=false 得到不挂时的样子 */
+function ipeExpandTemplateCommon(item, withCommon, blocks) {
+    var raw = String((item && item.value) || "");
+    if (!raw) return "";
+    var common = withCommon === false ? "" : ipeTemplateCommonText(item, raw, blocks);
+    var t = ipeApplyCommonPlaceholder(raw, common);
+    if (common && raw.indexOf(IPE_COMMON_PH) < 0) t = ipeInsertCommonAuto(t, common, ipeImgTemplateEnvelope(raw));
+    return t;
+}
+
+function ipeSetTemplateCommon(tplId, commonId) {
+    var list = ipeGetBaseTemplates();
+    for (var i = 0; i < list.length; i++) if (list[i].id === tplId) { list[i].common = String(commonId || ""); break; }
+    ipeSaveBaseTemplates(list);
+}
+
+function ipeSetCommonValue(val) {
+    var list = ipeGetCommonBlocks(), a = ipeGetActiveCommonId();
+    for (var i = 0; i < list.length; i++) if (list[i].id === a) { list[i].value = String(val || ""); break; }
+    ipeSaveCommonBlocks(list);
+}
+function ipeSetCommonName(val) {
+    var list = ipeGetCommonBlocks(), a = ipeGetActiveCommonId();
+    for (var i = 0; i < list.length; i++) if (list[i].id === a) { list[i].name = val || ("公共块" + (i + 1)); break; }
+    ipeSaveCommonBlocks(list);
+}
+function ipeAddCommonBlock() {
+    var list = ipeGetCommonBlocks();
+    var id = ipeMakeId("common");
+    list.push({ id: id, name: "公共块" + (list.length + 1), value: "" });
+    ipeSaveCommonBlocks(list);
+    saveCritical("activeCommonBlock", id);
+    ipeRefreshCommonEditors();
+    ipeSaveNow();
+    return id;
+}
+/* 删公共块：挂着它的模板回落为「不挂」，并说出是哪些 */
+function ipeDeleteCommonBlock(id) {
+    id = id || ipeGetActiveCommonId();
+    var list = ipeGetCommonBlocks(), blk = ipeGetCommonBlock(id);
+    if (!blk) return null;
+    var tpls = ipeGetBaseTemplates(), hit = [];
+    tpls.forEach(function(t){ if (t.common === id) hit.push(t); });
+    var msg = "删除公共块「" + blk.name + "」？"
+        + (hit.length ? "\n\n挂着它的 " + hit.length + " 个模板会改为「不挂」：\n" + ipeNameListText(hit) : "\n\n没有模板挂着它。");
+    var okc = true;
+    try { var rw = ipeRootWindow(); if (rw && typeof rw.confirm === "function") okc = !!rw.confirm(msg); } catch(e) {}
+    if (!okc) return null;
+    hit.forEach(function(t){ t.common = ""; });
+    ipeSaveBaseTemplates(tpls);
+    ipeSaveCommonBlocks(list.filter(function(x){ return x.id !== id; }));
+    saveCritical("activeCommonBlock", "");
+    ipeSaveNow();
+    ipeRefreshTemplateEditors();
+    var names = hit.map(function(t){ return t.name; });
+    ipeToast("已删除公共块「" + blk.name + "」" + (names.length ? "；" + names.length + " 个模板改为不挂：" + names.slice(0, 20).join("、") + (names.length > 20 ? " 等" : "") : ""), true);
+    return { removed: blk.name, affected: names };
+}
+
+function ipeNameListText(items) {
+    var names = ipeSortByName(items).map(function(t){ return "· " + t.name; });
+    return names.length > 40 ? names.slice(0, 40).join("\n") + "\n…另 " + (names.length - 40) + " 个" : names.join("\n");
+}
+
+/* 批量挂接：关键词空 = 全部模板；commonId 空 = 批量改为不挂。执行前列出名单确认。 */
+function ipeBatchSetTemplateCommon(keyword, commonId, opts) {
+    opts = opts || {};
+    keyword = String(keyword || "").trim();
+    commonId = String(commonId || "");
+    var blk = commonId ? ipeGetCommonBlock(commonId) : null;
+    if (commonId && !blk) { ipeToast("批量挂接：公共块不存在", false); return null; }
+    var tpls = ipeGetBaseTemplates();
+    var hit = tpls.filter(function(t){ return (!keyword || String(t.name).indexOf(keyword) >= 0) && t.common !== commonId; });
+    var target = blk ? "挂到公共块「" + blk.name + "」" : "改为「不挂」";
+    if (!hit.length) { ipeToast("没有需要改的模板" + (keyword ? "（名字含「" + keyword + "」）" : ""), true); return { changed: [] }; }
+    if (!opts.force) {
+        var okc = true;
+        try { var rw = ipeRootWindow(); if (rw && typeof rw.confirm === "function") okc = !!rw.confirm("下面 " + hit.length + " 个模板将" + target + "：\n" + ipeNameListText(hit) + "\n\n继续吗？"); } catch(e) {}
+        if (!okc) { ipeToast("已取消批量挂接，什么都没动", false); return null; }
+    }
+    hit.forEach(function(t){ t.common = commonId; });
+    ipeSaveBaseTemplates(tpls);
+    ipeSaveNow();
+    ipeRefreshTemplateEditors();
+    ipeToast("已把 " + hit.length + " 个模板" + target, true);
+    return { changed: hit.map(function(t){ return t.name; }) };
+}
+
+function ipeRefreshCommonEditors() {
+    var list = ipeGetCommonBlocks(), active = ipeGetActiveCommonId(), item = ipeGetCommonBlock(active);
+    var shown = ipeSortByName(list);
+    ["ipe-common-slot", "iped-common-slot"].forEach(function(id){ ipeFillSelect(id, shown, active); });
+    var withNone = [{ id: "", name: "（不挂）" }].concat(shown);
+    ["ipe-common-batch-target", "iped-common-batch-target"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var keep = el.value;
+        ipeFillSelect(id, withNone, keep && ipeGetCommonBlock(keep) ? keep : (active || ""));
+    });
+    ["ipe-common-name", "iped-common-name"].forEach(function(id){
+        var el = q("#" + id); if (!el || el === document.activeElement) return;
+        el.value = item ? item.name : ""; el.disabled = !item;
+    });
+    ["ipe-common-text", "iped-common-text"].forEach(function(id){
+        var el = q("#" + id); if (!el || el === document.activeElement) return;
+        el.value = item ? item.value : ""; el.disabled = !item;
+    });
+    ["ipe-common-delete", "iped-common-delete"].forEach(function(id){ var el = q("#" + id); if (el) el.disabled = !item; });
+    ipeRefreshTemplateCommonSelect();
+}
+/* 模板区的「挂公共块」下拉 */
+function ipeRefreshTemplateCommonSelect() {
+    var item = ipeGetActiveTemplateItem();
+    var cur = item && item.common && ipeGetCommonBlock(item.common) ? item.common : "";
+    var opts = [{ id: "", name: "（不挂）" }].concat(ipeSortByName(ipeGetCommonBlocks()));
+    ["ipe-template-common", "iped-template-common"].forEach(function(id){ ipeFillSelect(id, opts, cur); });
 }
 
 function ipeGetAnchorPresets() {
@@ -3828,7 +4031,7 @@ function ipeRefreshTemplateEditors() {
     });
     ["ipe-base-template","iped-base-template"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
-    });
+    });    try { ipeRefreshCommonEditors(); } catch(eC) {}   // 公共块编辑区 + 本模板「挂公共块」下拉
 }
 
 function ipeRefreshAnchorEditors() {
@@ -5827,12 +6030,13 @@ function createPanel() {
     h += secHTML("base-template","基础模板", true,
         '<label>模板预设<select id="ipe-template-slot"></select></label>'+
         '<label>模板名称<input type="text" id="ipe-template-name" value="" placeholder="例如：乙游CG"></label>'+
+        '<label>挂公共块<select id="ipe-template-common"></select></label>'+
         '<div class="ipe-preview-actions" style="margin-top:2px">'+
             '<button id="ipe-template-add" class="ipe-btn" type="button">新增模板</button>'+
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-base-template" rows="6" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>'+
-        '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净。两种都写也行：哪一行的占位符全空，那一整行连标签一起不输出，分层与整段共用一张模板</div>'+
+        '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净。两种都写也行：哪一行的占位符全空，那一整行连标签一起不输出，分层与整段共用一张模板。挂了公共块时，写 {Common} 就放在那里；不写就自动插到 &lt;/draw&gt; 前一行</div>'+
         '<div class="ipe-preview-actions" style="margin-top:8px">'+
             '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
             '<button id="ipe-pack-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
@@ -5840,6 +6044,22 @@ function createPanel() {
         '</div>'+
         '<input type="file" id="ipe-pack-file" accept=".json,application/json" style="display:none">'+
         '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 通用锚点规则，不含角色锚点（那是各人自己卡的）、不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示各一份，发给别人用这个。角色锚点要备份的话，去锚点区点「备份锚点」。</div>');
+
+    h += secHTML("common-blocks","公共块", true,
+        '<label>公共块<select id="ipe-common-slot"></select></label>'+
+        '<label>公共块名称<input type="text" id="ipe-common-name" value="" placeholder="例如：通用 / 古风"></label>'+
+        '<div class="ipe-preview-actions" style="margin-top:2px">'+
+            '<button id="ipe-common-add" class="ipe-btn" type="button">新增公共块</button>'+
+            '<button id="ipe-common-delete" class="ipe-btn" type="button">删除当前</button>'+
+        '</div>'+
+        '<textarea id="ipe-common-text" rows="6" placeholder="人物族裔 / 年龄 / 性别、人物区分、解剖与手、视线不看观众、无文字水印……收尾句也放这里的末尾"></textarea>'+
+        '<div class="ipe-hint">画风模板共用的通用规则写在这里，画风正文只写画风本身。模板在「基础模板」里选挂哪一份；顺序是 场景五段 → 画风正文 → 公共块。模板正文里已经原样带着这段文字的，不会再叠一份。删除公共块时，挂着它的模板改为不挂。</div>'+
+        '<label style="margin-top:8px">批量挂接：名字含<input type="text" id="ipe-common-batch-kw" value="" placeholder="留空 = 全部模板"></label>'+
+        '<label>挂到<select id="ipe-common-batch-target"></select></label>'+
+        '<div class="ipe-preview-actions" style="margin-top:2px">'+
+            '<button id="ipe-common-batch-run" class="ipe-btn" type="button">批量挂接</button>'+
+        '</div>'+
+        '<div class="ipe-hint">「挂到」选（不挂）= 批量改为不挂。执行前会列出要改的模板名单。</div>');
 
     h += secHTML("char-anchors","角色锚点", true,
         '<label>锚点预设<select id="ipe-anchor-slot"></select></label>'+
@@ -6242,12 +6462,22 @@ function createDrawer() {
     h += '<hr><small><b>基础模板</b></small>';
     h += '<label>模板预设</label><select id="iped-template-slot" class="text_pole"></select>';
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
+    h += '<label>挂公共块</label><select id="iped-template-common" class="text_pole"></select>';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>';
-    h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住。两种都写也行：占位符全空的行整行不输出</small>';
+    h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住。两种都写也行：占位符全空的行整行不输出。挂了公共块时写 {Common} 就放那里，不写就插到 &lt;/draw&gt; 前一行</small>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
     h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
     h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。</small>';
+    h += '<hr><small><b>公共块</b></small>';
+    h += '<label>公共块</label><select id="iped-common-slot" class="text_pole"></select>';
+    h += '<label>公共块名称</label><input type="text" id="iped-common-name" class="text_pole" value="" placeholder="例如：通用 / 古风">';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-common-add" class="menu_button" value="新增公共块"><input type="button" id="iped-common-delete" class="menu_button" value="删除当前"></div>';
+    h += '<textarea id="iped-common-text" class="text_pole" rows="5" placeholder="通用规则……收尾句也放这里的末尾"></textarea>';
+    h += '<small style="color:#888">画风模板共用的通用规则；模板在上面选挂哪一份。正文里已原样带着的不再叠一份；删除时挂着它的模板改为不挂。</small>';
+    h += '<label>批量挂接：名字含</label><input type="text" id="iped-common-batch-kw" class="text_pole" value="" placeholder="留空 = 全部模板">';
+    h += '<label>挂到</label><select id="iped-common-batch-target" class="text_pole"></select>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-common-batch-run" class="menu_button" value="批量挂接"></div>';
     h += '<hr><small><b>角色锚点</b></small>';
     h += '<label>锚点预设</label><select id="iped-anchor-slot" class="text_pole"></select>';
     h += '<label>锚点名称</label><input type="text" id="iped-anchor-name" class="text_pole" value="" placeholder="例如：陆星河 / 苑无忧">';
@@ -6463,6 +6693,9 @@ function ipeForceSaveFromEditors() {
    系统提示固定两槽（情感 / 剧情），按 id 对位，对不上再按名字。
    ============================================================ */
 var IPE_IMG_PACK_FMT = "ipe-image-pack";
+/* 2.23.0 _v 2：多了 commons（公共块）与模板的 common / commonName。
+   _v 1 的旧包照常导入：没有公共块，导进来的模板默认不挂（旧正文里多半还带着通用段落）。 */
+var IPE_IMG_PACK_VER = 2;
 
 function ipeImgPackBuild(scope) {
     /* 角色锚点是每个人自己卡的东西，跟画风包不混：all / current 都不带锚点；
@@ -6470,8 +6703,8 @@ function ipeImgPackBuild(scope) {
     if (scope === "anchors") {
         var al = ipeGetAnchorPresets(), ao = [];
         for (var k = 0; k < al.length; k++) if (al[k]) ao.push({ id: al[k].id, name: al[k].name, value: String(al[k].value || "") });
-        return { _fmt: IPE_IMG_PACK_FMT, _v: 1, exportedAt: new Date().toISOString(), pluginVersion: IPE_VERSION, scope: "anchors",
-                 templates: [], rules: [], systemPrompts: [], anchors: ao, anchorGuide: "" };
+        return { _fmt: IPE_IMG_PACK_FMT, _v: IPE_IMG_PACK_VER, exportedAt: new Date().toISOString(), pluginVersion: IPE_VERSION, scope: "anchors",
+                 templates: [], commons: [], rules: [], systemPrompts: [], anchors: ao, anchorGuide: "" };
     }
     var onlyCur = scope === "current";
     function pick(list, activeId) {
@@ -6484,12 +6717,26 @@ function ipeImgPackBuild(scope) {
         return out;
     }
     var guide = String(cfg().anchorUsageGuide || "").trim();   // 只导出用户自己改过的；没改过就不带，导入方保留自己的默认
+    /* 2.23.0 模板带 common（包内公共块 id）+ commonName（对不上 id 时按名字认）；
+       全部 = 所有公共块，当前 = 只带当前模板挂的那一份 */
+    var blocks = ipeGetCommonBlocks();
+    var tplOut = pick(ipeGetBaseTemplates(), ipeGetActiveTemplateId());
+    var tplSrc = {}; ipeGetBaseTemplates().forEach(function(t){ tplSrc[t.id] = t; });
+    var used = {};
+    tplOut.forEach(function(t){
+        var blk = ipeGetCommonBlock((tplSrc[t.id] || {}).common, blocks);
+        t.common = blk ? blk.id : ""; t.commonName = blk ? blk.name : "";
+        if (blk) used[blk.id] = true;
+    });
+    var commonsOut = [];
+    blocks.forEach(function(b){ if (!onlyCur || used[b.id]) commonsOut.push({ id: b.id, name: b.name, value: String(b.value || "") }); });
     return {
-        _fmt: IPE_IMG_PACK_FMT, _v: 1,
+        _fmt: IPE_IMG_PACK_FMT, _v: IPE_IMG_PACK_VER,
         exportedAt: new Date().toISOString(),
         pluginVersion: IPE_VERSION,
         scope: onlyCur ? "current" : "all",
-        templates:     pick(ipeGetBaseTemplates(),      ipeGetActiveTemplateId()),
+        templates:     tplOut,
+        commons:       commonsOut,
         rules:         pick(ipeGetRulePresets(),        ipeGetActiveRuleId()),
         systemPrompts: pick(ipeGetSystemPromptPresets(), ipeGetActiveSystemPromptId()),
         anchors:       [],
@@ -6515,7 +6762,7 @@ function ipeImgPackExport(scope) {
         setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 200);
         ipeToast(pack.scope === "anchors"
             ? "已导出 " + name + "：角色锚点 " + pack.anchors.length + " 套（只给自己备份用，别分享）"
-            : "已导出 " + name + "：模板 " + pack.templates.length + " / 规则 " + pack.rules.length
+            : "已导出 " + name + "：模板 " + pack.templates.length + (pack.commons.length ? " / 公共块 " + pack.commons.length : "") + " / 规则 " + pack.rules.length
               + " / 系统提示 " + pack.systemPrompts.length + (pack.anchorGuide ? " / 通用锚点规则" : "") + "（不含角色锚点、API 与密钥）", true);
         return true;
     } catch(e) {
@@ -6537,15 +6784,42 @@ function ipeImgPackMergeList(cur, incoming, prefix, opts) {
         if (opts && opts.matchIdFirst && it.id && byId[it.id]) hit = byId[it.id];
         if (!hit && name && byName[name]) hit = byName[name];
         if (hit) {
-            if (String(hit.value || "") !== value) { hit.value = value; replaced++; }
+            if (String(hit.value || "") !== value || (opts && opts.differs && opts.differs(hit, it))) {
+                hit.value = value; if (opts && opts.apply) opts.apply(hit, it); replaced++;
+            }
         } else if (opts && opts.fixedSlots) {
             continue;                                   // 系统提示只有两槽，对不上号就不硬塞
         } else {
             var nu = { id: ipeMakeId(prefix), name: name || (prefix + "_" + (cur.length + 1)), value: value };
+            if (opts && opts.apply) opts.apply(nu, it);
             cur.push(nu); byName[nu.name] = nu; byId[nu.id] = nu; added++;
         }
     }
     return { added: added, replaced: replaced };
+}
+
+/* 包里模板的 common 字段 → 本地公共块 id。dry = 预演：包里新增的公共块还没落地，用 "new:名字" 占位。
+   旧包（没有 commons）：模板一律按 legacyCommon 挂，默认空 = 不挂；预演不算它为「覆盖」。 */
+function ipeImgPackTplCommonOpts(pack, dry, legacyCommon) {
+    var legacy = !Array.isArray(pack.commons);
+    if (legacy) return { apply: function(local){ local.common = String(legacyCommon || ""); } };
+    var local = {};
+    ipeGetCommonBlocks().forEach(function(b){ local[String(b.name || "").trim()] = b.id; });
+    var inPack = {};
+    pack.commons.forEach(function(c){
+        if (!c || typeof c !== "object") return;
+        var nm = String(c.name || "").trim(); if (!nm) return;
+        if (c.id) inPack[c.id] = nm;
+        if (dry && !local[nm]) local[nm] = "new:" + nm;
+    });
+    function resolve(it) {
+        var nm = (it.common && inPack[it.common]) || String(it.commonName || "").trim();
+        return (nm && local[nm]) || "";
+    }
+    return {
+        differs: function(hit, it){ return String(hit.common || "") !== resolve(it); },
+        apply: function(target, it){ target.common = resolve(it); }
+    };
 }
 
 /* 先干跑数一数要覆盖多少，再决定问不问 */
@@ -6558,13 +6832,14 @@ function ipeImgPackPreview(pack) {
             var name = String(it.name || "").trim(); var value = String(it.value == null ? "" : it.value);
             if (!name && !value) return;
             var hit = (opts && opts.matchIdFirst && it.id && byId[it.id]) || (name && byName[name]) || null;
-            if (hit) { if (String(hit.value || "") !== value) rep++; }
+            if (hit) { if (String(hit.value || "") !== value || (opts && opts.differs && opts.differs(hit, it))) rep++; }
             else if (!(opts && opts.fixedSlots)) add++;
         });
         return { added: add, replaced: rep };
     }
     return {
-        templates: count(ipeGetBaseTemplates(), pack.templates),
+        templates: count(ipeGetBaseTemplates(), pack.templates, ipeImgPackTplCommonOpts(pack, true)),
+        commons: count(ipeGetCommonBlocks(), pack.commons),
         rules: count(ipeGetRulePresets(), pack.rules),
         systemPrompts: count(ipeGetSystemPromptPresets(), pack.systemPrompts, { matchIdFirst: true, fixedSlots: true }),
         anchors: count(ipeGetAnchorPresets(), pack.anchors)
@@ -6575,7 +6850,7 @@ function ipeImgPackNormalize(parsed) {
     if (Array.isArray(parsed)) return { _fmt: IPE_IMG_PACK_FMT, templates: parsed };     // 裸数组当模板表
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed._fmt && parsed._fmt !== IPE_IMG_PACK_FMT) return null;
-    var has = ["templates", "rules", "systemPrompts", "anchors", "anchorGuide"].some(function(k){ return k in parsed; });
+    var has = ["templates", "commons", "rules", "systemPrompts", "anchors", "anchorGuide"].some(function(k){ return k in parsed; });
     return has ? parsed : null;
 }
 
@@ -6588,13 +6863,14 @@ function ipeImgPackImportText(txt, opts) {
     if (!pack) { ipeToast("导入失败：这不是小海螺的生图预设包（也不是模板数组）", false); return null; }
 
     var pv = ipeImgPackPreview(pack);
-    var totalRep = pv.templates.replaced + pv.rules.replaced + pv.systemPrompts.replaced + (pack.scope === "anchors" ? pv.anchors.replaced : 0);
-    var totalAdd = pv.templates.added + pv.rules.added + pv.systemPrompts.added + (pack.scope === "anchors" ? pv.anchors.added : 0);
+    var totalRep = pv.templates.replaced + pv.commons.replaced + pv.rules.replaced + pv.systemPrompts.replaced + (pack.scope === "anchors" ? pv.anchors.replaced : 0);
+    var totalAdd = pv.templates.added + pv.commons.added + pv.rules.added + pv.systemPrompts.added + (pack.scope === "anchors" ? pv.anchors.added : 0);
     var guideIn = String(pack.anchorGuide || "").trim();
     var guideChange = !!guideIn && guideIn !== String(cfg().anchorUsageGuide || "").trim();
     if (!opts.force && (totalRep > 0 || guideChange)) {
         var msg = "这个包会覆盖你 " + totalRep + " 个同名预设"
             + (pv.templates.replaced ? "（模板 " + pv.templates.replaced + "）" : "")
+            + (pv.commons.replaced ? "（公共块 " + pv.commons.replaced + "）" : "")
             + (pv.rules.replaced ? "（规则 " + pv.rules.replaced + "）" : "")
             + (pv.systemPrompts.replaced ? "（系统提示 " + pv.systemPrompts.replaced + "）" : "")
             + (pv.anchors.replaced ? "（锚点 " + pv.anchors.replaced + "）" : "")
@@ -6615,8 +6891,23 @@ function ipeImgPackImportText(txt, opts) {
             try { var rw2 = ipeRootWindow(); if (rw2 && typeof rw2.confirm === "function") wantAnchors = !!rw2.confirm("这个包里还带了 " + anchorsN + " 套角色锚点。\n分享来的画风包一般不要（那是别人卡的角色）；只有你自己备份的才要。\n\n要一起导入锚点吗？（取消 = 只导其他内容）"); } catch(e) {}
         }
     }
+    /* 旧包（没有公共块）：导进来的模板默认不挂。本地有公共块、且确实有模板要进来时问一句，默认不挂。 */
+    var legacyCommon = "";
+    if (!Array.isArray(pack.commons)) {
+        var lcBlk = ipeGetCommonBlock(ipeGetActiveCommonId());
+        if (typeof opts.legacyCommon === "string") legacyCommon = ipeGetCommonBlock(opts.legacyCommon) ? opts.legacyCommon : "";
+        else if (lcBlk && (pv.templates.added + pv.templates.replaced) > 0) {
+            try {
+                var rw3 = ipeRootWindow();
+                if (rw3 && typeof rw3.confirm === "function" && rw3.confirm("这是旧版画风包（没有公共块）。\n旧模板正文里多半还带着通用段落，再挂公共块会叠两份。\n\n要把导入的 " + (pv.templates.added + pv.templates.replaced) + " 个模板挂到公共块「" + lcBlk.name + "」吗？\n（取消 = 不挂，推荐）")) legacyCommon = lcBlk.id;
+            } catch(e) {}
+        }
+    }
     var tpl = ipeGetBaseTemplates(), rul = ipeGetRulePresets(), sys = ipeGetSystemPromptPresets(), anc = ipeGetAnchorPresets();
-    var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl");
+    var cmn = ipeGetCommonBlocks();
+    var r5 = ipeImgPackMergeList(cmn, pack.commons, "common");
+    ipeSaveCommonBlocks(cmn);                 // 先落公共块，模板的 common 才对得上本地 id
+    var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl", ipeImgPackTplCommonOpts(pack, false, legacyCommon));
     var r2 = ipeImgPackMergeList(rul, pack.rules, "rule");
     var r3 = ipeImgPackMergeList(sys, pack.systemPrompts, "sys", { matchIdFirst: true, fixedSlots: true });
     var r4 = wantAnchors ? ipeImgPackMergeList(anc, pack.anchors, "anchor") : { added: 0, replaced: 0, skipped: anchorsN };
@@ -6628,9 +6919,9 @@ function ipeImgPackImportText(txt, opts) {
     try { ipeSaveNow(); } catch(e) {}
     try { ipeRefreshTemplateEditors(); ipeRefreshRuleEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshAnchorEditors(); } catch(e) {}
 
-    var sum = { templates: r1, rules: r2, systemPrompts: r3, anchors: r4, guide: guideChange };
+    var sum = { templates: r1, commons: r5, legacy: !Array.isArray(pack.commons), legacyCommon: legacyCommon, rules: r2, systemPrompts: r3, anchors: r4, guide: guideChange };
     function fmt(label, r) { return (r.added || r.replaced) ? label + " +" + r.added + "/覆盖" + r.replaced : ""; }
-    var parts = [fmt("模板", r1), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : "", (r4.skipped ? "角色锚点 " + r4.skipped + " 套已跳过" : "")].filter(Boolean);
+    var parts = [fmt("模板", r1), fmt("公共块", r5), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : "", (r4.skipped ? "角色锚点 " + r4.skipped + " 套已跳过" : "")].filter(Boolean);
     ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") : "包是空的或与现有内容完全一致，什么都没变", true);
     return sum;
 }
@@ -6642,7 +6933,7 @@ function ipeImgPackImportText(txt, opts) {
    完成、点遮罩、Esc 都关；关的时候补发一次 change。
    ============================================================ */
 var IPE_ZOOM_TITLES = {
-    "ipe-system-prompt": "系统提示", "ipe-base-template": "基础模板", "ipe-char-anchors": "角色锚点",
+    "ipe-system-prompt": "系统提示", "ipe-base-template": "基础模板", "ipe-common-text": "公共块", "ipe-char-anchors": "角色锚点",
     "ipe-anchor-guide-editor": "通用锚点规则", "ipe-extract-rules": "提取规则", "ipe-preview-text": "生图描述（整段）",
     "ipe-layer-camera": "📷 镜头层", "ipe-layer-env": "🌆 环境层", "ipe-layer-mood": "🎞️ 氛围层",
     "ipe-layer-chars": "🧍 人物层", "ipe-layer-pose": "🤝 动作层",
@@ -6935,6 +7226,70 @@ function bindAll() {
         el.addEventListener("change", function(){
             ipeSetTemplateValue(el.value);
             ipeSaveNow();
+        });
+    });
+
+    ["ipe-template-common","iped-template-common"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("change", function(){
+            ipeSetTemplateCommon(ipeGetActiveTemplateId(), el.value);
+            ipeSaveNow();
+            ipeRefreshTemplateCommonSelect();
+        });
+    });
+
+    ["ipe-common-slot","iped-common-slot"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("change", function(){
+            saveCritical("activeCommonBlock", el.value);
+            ipeRefreshCommonEditors();
+        });
+    });
+
+    ["ipe-common-name","iped-common-name"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("input", function(){
+            ipeSetCommonName(el.value);
+            ipeRefreshCommonEditors();
+        });
+        el.addEventListener("change", function(){
+            ipeSetCommonName(el.value);
+            ipeSaveNow();
+            var it = ipeGetCommonBlock(ipeGetActiveCommonId());
+            if (it && el.value !== it.name) el.value = it.name;
+            ipeRefreshCommonEditors();
+        });
+    });
+
+    ["ipe-common-text","iped-common-text"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("input", function(){
+            ipeSetCommonValue(el.value);
+            var other=q("#"+(id==="ipe-common-text"?"iped-common-text":"ipe-common-text"));
+            if(other&&other!==el) other.value=el.value;
+        });
+        el.addEventListener("change", function(){
+            ipeSetCommonValue(el.value);
+            ipeSaveNow();
+        });
+    });
+
+    ["ipe-common-add","iped-common-add"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("click", function(){ ipeAddCommonBlock(); });
+    });
+
+    ["ipe-common-delete","iped-common-delete"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("click", function(){ ipeDeleteCommonBlock(); });
+    });
+
+    [["ipe-common-batch-run","ipe-common-batch-kw","ipe-common-batch-target"],
+     ["iped-common-batch-run","iped-common-batch-kw","iped-common-batch-target"]].forEach(function(ids){
+        var b=q("#"+ids[0]); if(!b) return;
+        b.addEventListener("click", function(){
+            var kw=q("#"+ids[1]), tg=q("#"+ids[2]);
+            ipeBatchSetTemplateCommon(kw ? kw.value : "", tg ? tg.value : "");
         });
     });
 
@@ -7804,8 +8159,16 @@ function bindAll() {
     ipeLedgerInstallUIObserver();
 }
 
+/* 2.23.0 顺序：场景五段 → 画风正文 → 公共块 → 收尾句（收尾句放在公共块末尾）。
+   模板写了 {Common} 就放那里；没写就插到包裹标签前一行，不是包裹型的追加在末尾。 */
 function buildInjectTag(desc, layers) {
-    var tpl = ipeGetTemplateValue() || cfg().baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;
+    var raw = ipeGetTemplateValue() || cfg().baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;
+    var common = ipeTemplateCommonText(ipeGetActiveTemplateItem(), raw);
+    var tag = ipeBuildInjectTagCore(ipeApplyCommonPlaceholder(raw, common), desc, layers);
+    if (common && raw.indexOf(IPE_COMMON_PH) < 0) tag = ipeInsertCommonAuto(tag, common, ipeImgTemplateEnvelope(raw));
+    return tag;
+}
+function ipeBuildInjectTagCore(tpl, desc, layers) {
     desc = String(desc == null ? "" : desc);
     var vals = {}, any = false;
     var hasDesc = tpl.indexOf("{Description}") >= 0;
