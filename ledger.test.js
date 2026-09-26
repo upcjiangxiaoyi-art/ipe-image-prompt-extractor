@@ -65,7 +65,7 @@ function boot(floors) {
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
         "runExtract", "ipeImgParseLayers", "buildInjectTag", "reinjectDescToMessage", "injectDescToMessage", "ipeInstallMesButtons", "ipeGetSuppPresets", "ipeRefreshSuppPresets", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
-        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
+        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeGetAnchorValue", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
         "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
         "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
@@ -876,56 +876,61 @@ console.log("\n【31e】 画风包 _v 2：带公共块导出导入；旧版包�
     eq(c.F("ipeGetCommonBlocks")().length, 1, "旧包不动公共块");
 }
 
-console.log("\n【31f】 锚点跟着聊天走（2.24.0）：记在聊天和角色卡上，换聊天自动切回");
+console.log("\n【31f】 锚点锁到角色卡（2.24.1）：手动锁，按卡认，提取一律用锁定的那套");
 await (async () => {
     const { w, tavern, F } = boot(4);
     const st = tavern.extensionSettings[F("EXT_NAME")];
-    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "x" }, { id: "a2", name: "陆籍北", value: "lu" }, { id: "a3", name: "顾寒", value: "gu" }]);
+    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "DEFAULT" }, { id: "a2", name: "阿絮", value: "AXU" }, { id: "a3", name: "顾寒", value: "GUHAN" }]);
     st.activeAnchorPreset = "a1";
     F("ipeRefreshAnchorEditors")();
     const d = w.document, sel = d.querySelector("#ipe-anchor-slot");
     const pick = id => { sel.value = id; sel.dispatchEvent(new w.Event("change", { bubbles: true })); };
-    const switchTo = async (chatId, charIdx, meta) => {
-        tavern.getCurrentChatId = () => chatId; tavern.characterId = charIdx; tavern.chatMetadata = meta || {};
+    const click = id => d.querySelector("#" + id).click();
+    const info = () => d.querySelector("#ipe-anchor-lock-info").textContent;
+    const switchTo = async (charIdx, group) => {
+        tavern.characterId = charIdx; tavern.groupId = group || null; tavern.chatMetadata = {};
         await tavern.eventSource.emit("CHAT_CHANGED");
         await new Promise(r => setTimeout(r, 260));
     };
-    // 卡 0（苑无忧）的聊天 A 选陆籍北
-    await switchTo("A", 0, {});
-    pick("a2");
-    eq(tavern.chatMetadata.ipe_anchor_preset, "a2", "选了就记在本聊天上");
-    eq(JSON.parse(st.anchorCardBindJson)["char:yuan.png"], "a2", "同时记给这张角色卡");
-    const metaA = tavern.chatMetadata;
-    // 卡 1（顾寒）的聊天 B 选顾寒
-    await switchTo("B", 1, {});
-    eq(st.activeAnchorPreset, "a2", "新卡没记录：不动");
+    tavern.characters[0].name = "天虎";
+    await switchTo(0);
+    ok(info().indexOf("还没锁") >= 0, "没锁时说明用下拉当前的", info());
+    eq(F("ipeGetAnchorValue")(), "DEFAULT", "没锁：用下拉当前选中的");
+    pick("a2"); click("ipe-anchor-lock");
+    eq(JSON.parse(st.anchorCardLockJson)["char:yuan.png"], "a2", "锁记在这张卡的头像文件名上");
+    ok(info().indexOf("天虎") >= 0 && info().indexOf("阿絮") >= 0, "状态行：天虎 已锁定 阿絮（卡名和锚点名对不上也行）", info());
+    ok(d.querySelector("#ipe-anchor-unlock").style.display !== "none", "锁了之后出现解锁按钮");
     pick("a3");
-    const metaB = tavern.chatMetadata;
-    // 回到聊天 A
-    await switchTo("A", 0, metaA);
-    eq(st.activeAnchorPreset, "a2", "回到聊天 A：自动切回陆籍北");
-    const stEl = d.querySelector("#ipe-status");
-    ok(!stEl || (stEl.textContent.indexOf("陆籍北") >= 0 && stEl.textContent.indexOf("本聊天上次用的") >= 0), "状态行说明切到了哪套、为什么", stEl && stEl.textContent);
-    eq(sel.value, "a2", "下拉跟着变");
-    // 卡 0 开新聊天 C：沿用这张卡上次的
-    await switchTo("C", 0, {});
-    eq(st.activeAnchorPreset, "a2", "同卡新聊天：用这张卡上次的锚点");
-    eq(tavern.chatMetadata.ipe_anchor_preset, "a2", "顺手记到新聊天上");
-    // 聊天自己的记录优先于卡：在 C 里改成默认，再回 A 还是陆籍北
-    pick("a1");
-    await switchTo("B", 1, metaB);
-    eq(st.activeAnchorPreset, "a3", "回聊天 B：顾寒");
-    await switchTo("A", 0, metaA);
-    eq(st.activeAnchorPreset, "a2", "聊天 A 自己记的陆籍北优先于卡上最近的「默认」");
-    // 预设删了：不切到不存在的
-    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "x" }, { id: "a2", name: "陆籍北", value: "lu" }]);
-    await switchTo("B", 1, metaB);
-    eq(st.activeAnchorPreset, "a2", "聊天 B 记的顾寒被删了：不动，也不报错");
-    // 群聊按群记
+    eq(F("ipeGetAnchorValue")(), "AXU", "锁了之后下拉切去编辑别的，提取照样用阿絮");
+    ok(info().indexOf("正在编辑的是「顾寒」") >= 0, "状态行说明编辑的不影响出图", info());
+    eq(d.querySelector("#ipe-anchor-lock").textContent, "🔒 改锁成当前这套", "按钮变成改锁");
+    // 换到另一张没锁的卡：用下拉当前的
+    await switchTo(1);
+    eq(F("ipeGetAnchorValue")(), "GUHAN", "没锁的卡：用下拉当前选中的");
+    // 回到天虎：下拉切回阿絮
+    await switchTo(0);
+    eq(st.activeAnchorPreset, "a2", "回到锁了的卡：下拉自动切回阿絮");
+    eq(sel.value, "a2", "下拉显示阿絮");
+    // 不靠换聊天事件：直接把 characterId 改了也用对的
+    tavern.characterId = 0; st.activeAnchorPreset = "a1";
+    eq(F("ipeGetAnchorValue")(), "AXU", "就算换卡事件没触发，提取读锚点时照样认这张卡的锁");
+    // 同名卡：按头像文件名各算各的
+    tavern.characters.push({ name: "天虎", avatar: "tianhu2.png" });
+    tavern.characterId = 2;
+    eq(F("ipeGetAnchorValue")(), "DEFAULT", "另一张同名「天虎」卡（头像文件不同）不受影响");
+    // 解锁
+    tavern.characterId = 0; F("ipeRefreshAnchorEditors")();
+    click("ipe-anchor-unlock");
+    ok(!("char:yuan.png" in JSON.parse(st.anchorCardLockJson)), "解锁：锁删掉");
+    // 锁的预设被删
+    pick("a3"); click("ipe-anchor-lock");
+    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "默认", value: "DEFAULT" }, { id: "a2", name: "阿絮", value: "AXU" }]);
+    st.activeAnchorPreset = "a1";
+    eq(F("ipeGetAnchorValue")(), "DEFAULT", "锁的那套被删：当没锁，不报错");
+    // 群聊按群锁
     tavern.groupId = "g1";
-    await switchTo("G", 0, {});
-    pick("a1");
-    eq(JSON.parse(st.anchorCardBindJson)["group:g1"], "a1", "群聊记给这个群");
+    F("ipeRefreshAnchorEditors")(); pick("a2"); click("ipe-anchor-lock");
+    eq(JSON.parse(st.anchorCardLockJson)["group:g1"], "a2", "群聊锁在这个群上");
     tavern.groupId = null;
 })();
 
