@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.24.1";
+var IPE_VERSION = "2.25.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1950,6 +1950,69 @@ function ipeLedgerInspectEP() {
    ============================================================ */
 var IPE_LEDGER_INLINE_CLASS = "ipe-ledger-inline";
 
+/* ============================================================
+   2.25.0 视线不跳：往聊天区里加 / 摘 / 改自己的块（🐚 账本块、楼尾那段生图 tag）时，正在读的字钉在原处。
+   做法同浏览器的「滚动锚定」：改之前记下一条锚点楼离视口顶多远，改完再量一次，差多少就把 #chat 的 scrollTop 补多少。
+   锚点 = 视口里第一条在视口内开头的楼；一条楼比一屏还长、没有楼在视口里开头时，用盖住视口顶的那条。
+   · 改动在锚点下面（正在看的楼楼尾长出一块）：量出来差 0，什么都不动，内容照常往下长；
+   · 改动在锚点上面（新楼到了，上一楼的 🐚 摘掉）：上面少了多高就往回补多高，眼前的字不上窜。
+   Chrome / Firefox 自带滚动锚定，强制排版那一下已经补过，这里量出来是 0，不会补两遍；iOS Safari 没有滚动锚定，全靠这里。
+   只动 scrollTop，不碰任何楼的内容；#chat 不满一屏滚不动时直接改，不量。
+   ============================================================ */
+function ipeChatViewAnchor(chatEl) {
+    var rows = chatEl.querySelectorAll(":scope > .mes");
+    if (!rows.length) rows = chatEl.querySelectorAll(".mes");
+    var n = rows.length;
+    if (!n) return null;
+    var view = chatEl.getBoundingClientRect();
+    var lo = 0, hi = n - 1, first = -1, firstRect = null;
+    while (lo <= hi) {                                   // 二分：第一条底边在视口顶之下的楼
+        var mid = (lo + hi) >> 1, j = mid, r = null;
+        while (j <= hi) { r = rows[j].getBoundingClientRect(); if (r.height > 0) break; j++; }   // 藏起来的楼没有盒子，跳过
+        if (j > hi) { hi = mid - 1; continue; }
+        if (r.bottom > view.top) { first = j; firstRect = r; hi = mid - 1; }
+        else lo = j + 1;
+    }
+    if (first < 0) return null;
+    if (firstRect.top < view.top) {                     // 这条楼的头在视口上面：下一条若在视口里开头，就用下一条
+        for (var k = first + 1; k < n; k++) {
+            var r2 = rows[k].getBoundingClientRect();
+            if (r2.height <= 0) continue;
+            if (r2.top < view.bottom) return rows[k];
+            break;
+        }
+    }
+    return rows[first];
+}
+function ipeChatScrollBy(chatEl, delta) {
+    var top = chatEl.scrollTop + delta;
+    if (typeof chatEl.scrollTo === "function") {
+        try { chatEl.scrollTo({ top: top, behavior: "instant" }); return; } catch(e) {}   // 主题给 #chat 开了平滑滚动也要瞬间补，不能让人看见它滑
+    }
+    chatEl.scrollTop = top;
+}
+function ipeKeepChatView(mutate) {
+    var chatEl = null, anchor = null, before = 0;
+    try {
+        chatEl = ipeRootDocument().querySelector("#chat");
+        if (chatEl && chatEl.scrollHeight > chatEl.clientHeight) {
+            anchor = ipeChatViewAnchor(chatEl);
+            if (anchor) before = anchor.getBoundingClientRect().top;
+        }
+    } catch(e) { anchor = null; }
+    try { return mutate(); }
+    finally {
+        if (anchor) {
+            try {
+                if (anchor.isConnected) {
+                    var delta = anchor.getBoundingClientRect().top - before;
+                    if (Math.abs(delta) >= 0.5) ipeChatScrollBy(chatEl, delta);
+                }
+            } catch(e2) {}
+        }
+    }
+}
+
 /* 2.19.5 观察器防乒乓：楼内块和楼层 🎨 都是「看到 #chat 变动就补回来」。
    要是别的扩展也是「看到变动就整楼重画」，两边会互相触发到内存爆掉。
    这里给「补回来」记次数：窗口内超过上限就停手一段时间，只在控制台说一声。
@@ -2009,40 +2072,77 @@ function ipeMutationsRemovedOurs(records, cls) {
 var ipeLedgerInlineGuard = ipeMakeRepairGuard("楼内展示", 6, 30000, 120000);
 var ipeMesBtnGuard = ipeMakeRepairGuard("楼层 🎨 按钮", 8, 30000, 120000);
 
-function ipeLedgerRenderInline() {
+/* 2.25.0 🐚 块挂在那一楼 .mes_text 的后面（兄弟节点），不再塞进 .mes_text 里。
+   .mes_text 是酒馆和别的扩展反复整块重写的地方：流式每一帧、滑动、改楼、updateMessageBlock、变量框架刷新都是 innerHTML 一把换掉。
+   以前块在里面，换一次就没了，250ms 后才补回来，楼尾一缩一伸；补的时候又动了 .mes_text，盯着它的美化还会再重画一次。
+   挪到外面：重写正文碰不到它，滑动 / 续写时它一直在楼尾当页脚；正文 → 楼尾生图段 → 🐚 的先后也不会重画一次换一次位置。 */
+function ipeLedgerInlineTarget() {
+    var cur = cfg().ledgerInlineShow === false ? "" : String(ipeLedgerRead().current || "").trim();
+    if (!cur) return { text: "", host: null };
+    // 找最后一条可见的 AI 楼
+    var chat = ctx().chat || [];
+    var idx = -1;
+    for (var k = chat.length - 1; k >= 0; k--) {
+        var m = chat[k];
+        if (m && !m.is_user && m.is_system !== true) { idx = k; break; }
+    }
+    if (idx < 0) return { text: cur, host: null };
+    var d = ipeRootDocument();
+    var host = d.querySelector('#chat .mes[mesid="' + idx + '"] .mes_text')
+            || d.querySelector('#chat .mes[data-mesid="' + idx + '"] .mes_text');
+    return { text: cur, host: host };
+}
+/* 在 .mes_text 后面就算在位；中间夹了别的扩展挂的东西也不去抢那个「紧挨着」的位置，免得和它来回挪 */
+function ipeLedgerInlineInPlace(box, host) {
+    return !!(box && host && box.parentNode === host.parentNode && (host.compareDocumentPosition(box) & 4));
+}
+/* 该显示、目标楼已经画出来了、块却不在那楼 .mes_text 后面 → 要放 */
+function ipeLedgerInlineNeedsPlace() {
+    var tg = ipeLedgerInlineTarget();
+    if (!tg.text || !tg.host) return false;
+    var row = tg.host.closest ? tg.host.closest(".mes") : tg.host.parentNode;
+    return !ipeLedgerInlineInPlace(row && row.querySelector("." + IPE_LEDGER_INLINE_CLASS), tg.host);
+}
+/* opts.soft：目标楼还没画出来（非流式时 MESSAGE_RECEIVED 比画楼早）就先别摘旧块，等画出来再一次挪好 */
+function ipeLedgerRenderInline(opts) {
+    opts = opts || {};
     var d = ipeRootDocument();
     try {
         var olds = d.querySelectorAll("." + IPE_LEDGER_INLINE_CLASS);
-        function clearOlds(keep) {
+        var clearOlds = function(keep) {
             for (var i = 0; i < olds.length; i++) {
                 if (olds[i] !== keep && olds[i].parentNode) olds[i].parentNode.removeChild(olds[i]);
             }
+        };
+        var tg = ipeLedgerInlineTarget();
+        if (!tg.text || !tg.host) {
+            if (tg.text && opts.soft) return false;
+            if (olds.length) ipeKeepChatView(function(){ clearOlds(null); });
+            return false;
         }
-        var cur = cfg().ledgerInlineShow === false ? "" : String(ipeLedgerRead().current || "").trim();
-        if (!cur) { clearOlds(); return; }
-
-        // 找最后一条可见的 AI 楼
-        var chat = ctx().chat || [];
-        var idx = -1;
-        for (var k = chat.length - 1; k >= 0; k--) {
-            var m = chat[k];
-            if (m && !m.is_user && m.is_system !== true) { idx = k; break; }
-        }
-        if (idx < 0) { clearOlds(); return; }
-
-        var host = d.querySelector('#chat .mes[mesid="' + idx + '"] .mes_text')
-                || d.querySelector('#chat .mes[data-mesid="' + idx + '"] .mes_text');
-        if (!host) { clearOlds(); return; }
+        var host = tg.host, cur = tg.text;
+        var row = host.closest ? host.closest(".mes") : host.parentNode;
 
         // 同楼同内容不改 DOM；更新内容时保留折叠状态，避免每次同步都触发其他扩展重绘。
-        var existing = host.querySelector("." + IPE_LEDGER_INLINE_CLASS);
-        var existingBody = existing && existing.querySelector("." + IPE_LEDGER_INLINE_CLASS + "-body");
-        if (existingBody) {
-            clearOlds(existing);
-            if (existingBody.textContent !== cur) existingBody.textContent = cur;
-            return;
+        var existing = null;
+        for (var j = 0; j < olds.length && !existing; j++) {
+            if (row && row.contains(olds[j]) && olds[j].querySelector("." + IPE_LEDGER_INLINE_CLASS + "-body")) existing = olds[j];
         }
-        clearOlds();
+        if (existing) {
+            var existingBody = existing.querySelector("." + IPE_LEDGER_INLINE_CLASS + "-body");
+            var inPlace = ipeLedgerInlineInPlace(existing, host);
+            var changed = existingBody.textContent !== cur;
+            if (inPlace && olds.length === 1 && !changed) return true;
+            var apply = function(){
+                clearOlds(existing);
+                if (!inPlace) host.insertAdjacentElement("afterend", existing);   // 同一个节点挪过去，展开状态跟着走
+                if (changed) existingBody.textContent = cur;
+            };
+            // 只是折着的块换字：高度不变、没挪、也没有别处的旧块要摘，不用量，省一次强制排版
+            if (inPlace && olds.length === 1 && !existing.open) apply();
+            else ipeKeepChatView(apply);
+            return true;
+        }
 
         // 纯文字 + 折叠壳：正文用 textContent 原样印字（换行靠 CSS pre-wrap），绝不当 HTML 解释
         var box = d.createElement("details");
@@ -2055,8 +2155,12 @@ function ipeLedgerRenderInline() {
         body.className = IPE_LEDGER_INLINE_CLASS + "-body";
         body.textContent = cur;
         box.appendChild(sum); box.appendChild(body);
-        host.appendChild(box);
-    } catch(e) {}
+        ipeKeepChatView(function(){
+            clearOlds(null);
+            host.insertAdjacentElement("afterend", box);
+        });
+        return true;
+    } catch(e) { return false; }
 }
 
 /* 2.19.15：#chat 只挂一个 MutationObserver。
@@ -2102,29 +2206,43 @@ function ipeChatObsResume(why) {
         var target = window.__ipeChatObsTarget;
         if (window.__ipeChatObs && target && target.isConnected) window.__ipeChatObs.observe(target, { childList: true, subtree: true });
     } catch(e) {}
-    // 撤哨期间漏掉的变动一次补齐：账本块没了就补，🎨 按钮全楼查一遍
-    try {
-        var d = ipeRootDocument();
-        if (cfg().ledgerInlineShow !== false && String(ipeLedgerRead().current || "").trim() && !d.querySelector("." + IPE_LEDGER_INLINE_CLASS)) ipeLedgerRenderInline();
-    } catch(e) {}
+    /* 撤哨期间漏掉的变动一次补齐：🐚 块没了就补、新楼到了就挪过去（2.25.0 和酒馆画完最后一帧同一轮，
+       不再等 500ms 后的同步；酒馆紧跟着的「滚到底」会把它一起带进视口），🎨 按钮全楼查一遍 */
+    try { ipeLedgerRenderInline({ soft: true }); } catch(e) {}
     try { ipeInstallMesButtons(); } catch(e) {}
+}
+
+/* 变动里有没有新画出来的楼（整楼新增、整段聊天重画）。正文里的字怎么变都不算 */
+function ipeMutationsAddedRows(records) {
+    try {
+        for (var i = 0; i < records.length; i++) {
+            var r = records[i], an = r.addedNodes;
+            if (!an || !an.length) continue;
+            if (r.target && r.target.closest && r.target.closest(".mes_text")) continue;
+            for (var k = 0; k < an.length; k++) {
+                var n = an[k];
+                if (!n || n.nodeType !== 1) continue;
+                if ((n.classList && n.classList.contains("mes")) || (n.querySelector && n.querySelector(".mes"))) return true;
+            }
+        }
+    } catch(e) {}
+    return false;
 }
 
 function ipeLedgerInstallInlineObserver() {
     try {
-        var d = ipeRootDocument();
-        var t = null;
         ipeChatObserve("ledger-inline", function(records){
             if (cfg().ledgerInlineShow === false) return;
             if (ipeMutationsOnlyOurAdds(records, IPE_LEDGER_INLINE_CLASS)) return;   // 自己刚补的块，别自己触发自己
-            // 酒馆重绘会抹掉 DOM 块，防抖后补回来
-            if (t) clearTimeout(t);
-            t = setTimeout(function(){
-                if (cfg().ledgerInlineShow === false || !String(ipeLedgerRead().current || "").trim()) return;
-                if (d.querySelector("." + IPE_LEDGER_INLINE_CLASS)) return;
-                if (!ipeLedgerInlineGuard.allow()) return;                       // 2.19.5 被反复抹掉就停手
-                ipeLedgerRenderInline();
-            }, 250);
+            /* 2.25.0 当场补，不再等 250ms：观察器回调在浏览器画下一帧之前跑，整楼被换掉、整段聊天重画、新楼刚画出来，
+               就在这一轮把块放好，看不到「块没了、隔一下又冒出来」那一缩一伸。
+               只看两种变动：我们的块被摘了、有新楼画出来；正文里的字怎么变都不理。 */
+            var removed = ipeMutationsRemovedOurs(records, IPE_LEDGER_INLINE_CLASS);
+            if (!removed && !ipeMutationsAddedRows(records)) return;
+            if (!removed && ipeLedgerInlineGuard.cooling()) return;
+            if (!ipeLedgerInlineNeedsPlace()) return;
+            if (removed && !ipeLedgerInlineGuard.allow()) return;   // 2.19.5 被反复抹掉就停手；只有被别人摘掉才记次数
+            ipeLedgerRenderInline({ soft: true });
         });
     } catch(e) {}
 }
@@ -8218,6 +8336,8 @@ function bindAll() {
                             ipeLedgerReconcile(Math.max(0, ipeFloorNo() - 1), { silent: true });
                             ipeLedgerApplyEP();          // 无条件重贴，不赌 reconcile 的返回值
                         } catch(eSw) {}
+                        // 2.25.0 🐚 块挂在正文外面，流式重写正文不再把它抹掉：这里就把块里的字换成对账后的那份，别在重 roll 期间挂着被撕掉的账
+                        try { ipeLedgerRenderInline({ soft: true }); } catch(eIl) {}
                     } else {
                         // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
                         try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true })) ipeLedgerApplyEP(); } catch(eR) {}
@@ -8253,6 +8373,8 @@ function bindAll() {
         var cm = ctx();
         if (cm.eventSource && cm.event_types && cm.event_types.MESSAGE_RECEIVED) {
             cm.eventSource.on(cm.event_types.MESSAGE_RECEIVED, function(){
+                // 2.25.0 🐚 块先挪到新楼：没撤哨的情形（开场白、非流式）也和酒馆画楼同一轮挪好；楼还没画出来就等观察器看到它再挪
+                try { ipeLedgerRenderInline({ soft: true }); } catch(eP) {}
                 setTimeout(function(){
                     ipeLedgerSync();
                     if (cfg().ledgerAutoRun === true) ipeLedgerRun(null, true);
@@ -8367,7 +8489,8 @@ function injectDescToMessage(desc, targetIdx) {
     if (typeof c.saveChat === "function") c.saveChat();
 
     var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');
-    if(el && el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>"+esc(tag)+"</p>");
+    // 2.25.0 贴的还是原来那串文字，只多个类名（换行照原样分行）；贴前贴后钉住视线，楼尾长出一段不把眼前的字顶走
+    if (el && String(el.textContent || "").indexOf(tag) < 0) ipeKeepChatView(function(){ el.appendChild(ipeDrawMakeParagraph(el.ownerDocument, tag)); });
     try { ipeInstallMesButtons([q('#chat .mes[mesid="' + idx + '"]')]); } catch(eB) {}   // 只检查刚写入记录的这一楼
 
     return { injected: true, tag: tag };
@@ -8424,6 +8547,7 @@ function reinjectDescToMessage(targetIdx, opts) {
         if (prevEnv) stripped = ipeStripEnvelope(stripped, prevEnv);   // 记的是标签名：按标签对剥，模板改了删了都认
     } catch(ePT) {}
     stripped = ipeLedgerStripImageTag(stripped);
+    var oldTail = ipeDrawTailOf(before, stripped);   // 2.25.0 被剥掉的那截旧块：楼里显示的是酒馆重画过的样子时，按它认
     var tag = buildInjectTag(p.desc, p.layers);
     var next = stripped.replace(/\s+$/, "") + "\n\n" + tag;
     if (next === before) return { injected: false, reason: "same", tag: tag, idx: idx, replaced: false };
@@ -8436,7 +8560,7 @@ function reinjectDescToMessage(targetIdx, opts) {
         }
     } catch(eSw) {}
     if (typeof c.saveChat === "function") c.saveChat();
-    ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv);
+    ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv, oldTail);
     try { ipeInstallMesButtons([q('#chat .mes[mesid="' + idx + '"]')]); } catch(eB) {}
     return { injected: true, tag: tag, idx: idx, replaced: stripped !== before };
 }
@@ -8451,18 +8575,86 @@ function ipeStripEnvelope(text, name) {
 /* 楼里的 DOM 只换我们自己那一段，绝不整楼重排（2.15.1）。
    2.15.0 走了酒馆 updateMessageBlock 整楼重画：楼里把 html 代码块渲染成前端卡的扩展只在自己的事件里干活，
    重画之后它们不再跑一遍，整楼就成了一屏源码。照老注入的做法：
-   把上次注入追加的那个 <p>（文字等于记录的原文，或剥掉 tag 后什么都不剩）摘掉，再追加新的 <p>，其余节点一概不碰。 */
-function ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv) {
+   把上次注入追加的那个 <p>（文字等于记录的原文，或剥掉 tag 后什么都不剩）摘掉，再追加新的 <p>，其余节点一概不碰。
+   2.25.0 原地换：新段放在旧段原来的位置，不再摘掉后追加到楼尾；换前换后钉住视线。
+   这楼被酒馆重画过（刷新后翻回去点 🎨 最常见），旧段已经不是我们贴的原文，按 ipeDrawRenderedTail 认出楼尾那几段一起换，
+   不再旧的留着、新的又叠一段、楼一下子长一截。认不准就一个都不摘，照老样子追加。 */
+function ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv, oldTail) {
     var el = q('#chat .mes[mesid="' + idx + '"] .mes_text'); if (!el) return;
     var prev = String(prevTag || "").trim(), env = String(prevEnv || "");
+    var olds = [];
     try {
         Array.prototype.slice.call(el.children).forEach(function(ch){
             var t = String(ch.textContent || "").trim();
             if (!t) return;
-            if ((prev && t === prev) || (env && !ipeStripEnvelope(t, env).trim()) || !ipeLedgerStripImageTag(t).trim()) ch.remove();
+            if ((prev && t === prev) || (env && !ipeStripEnvelope(t, env).trim()) || !ipeLedgerStripImageTag(t).trim()) olds.push(ch);
         });
+        if (!olds.length) olds = ipeDrawRenderedTail(el, oldTail);
     } catch(e) {}
-    if (el.innerHTML.indexOf(esc(tag)) < 0) el.insertAdjacentHTML("beforeend", "<p>" + esc(tag) + "</p>");
+    ipeKeepChatView(function(){
+        var parent = el, ref = null;
+        if (olds.length) {
+            var last = olds[olds.length - 1];
+            parent = last.parentNode || el; ref = last.nextSibling;
+            olds.forEach(function(o){ if (o.parentNode) o.parentNode.removeChild(o); });
+        }
+        if (String(el.textContent || "").indexOf(tag) >= 0) return;   // 楼里已经原样贴着这段
+        var p = ipeDrawMakeParagraph(el.ownerDocument, tag);
+        if (ref && ref.parentNode === parent) parent.insertBefore(p, ref); else parent.appendChild(p);
+    });
+}
+
+/* 2.25.0 楼里那段生图 tag：文字还是那串原文，一字不改；带个类名，让换行照原样分行（white-space: pre-line）。
+   酒馆下次重画这楼时换行会变成 <br>，现在就一行一行地排，重画前后高度差不多，不会重画一次就长一截 / 缩一截。 */
+var IPE_DRAW_INLINE_CLASS = "ipe-draw-inline";
+function ipeDrawMakeParagraph(d, tag) {
+    var p = d.createElement("p");
+    p.className = IPE_DRAW_INLINE_CLASS;
+    p.textContent = String(tag || "");
+    return p;
+}
+/* 剥之前是 before，剥掉楼尾生图块之后是 stripped。stripped 原样是 before 的开头，多出来的那截才是被剥掉的旧块；
+   中间也被剥过东西（正文里还夹着别的生图标签）就不认，免得把正文当成旧块。 */
+function ipeDrawTailOf(before, stripped) {
+    var a = String(before || ""), b = String(stripped || "").replace(/\s+$/, "");
+    return a.slice(0, b.length) === b ? a.slice(b.length) : "";
+}
+/* 去标签、去 markdown 记号、压空白：酒馆重画时 <draw> 这类不认识的标签被净化掉只剩里面的字（<lora:…> 也一样），
+   换行成了 <br> 或分段，引号包成 <q>，*粗体* _斜体_ 记号被吃掉。两边都这么洗一遍再比。 */
+function ipeDrawNorm(s) {
+    return String(s || "").replace(/<\/?[A-Za-z][^<>]*>/g, " ").replace(/[*_~`#>]/g, "").replace(/\s+/g, " ").trim();
+}
+/* 元素里的字；<br> 算一个空格（textContent 会把 <br> 两边的行直接粘在一起） */
+function ipeDrawText(node) {
+    var out = [];
+    (function walk(x){
+        for (var c = x.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) out.push(c.data);
+            else if (c.nodeType === 1) { if (c.tagName === "BR") out.push(" "); else walk(c); }
+        }
+    })(node);
+    return out.join("");
+}
+var IPE_DRAW_MEDIA_SEL = "img, video, audio, iframe, canvas, svg, object, embed, picture";
+/* 从 .mes_text 末尾往回认酒馆重画过的旧生图段：每一段的字都得正好接在那截旧块的尾巴上（一段段从后往前拼回去），
+   拼回来的够旧块的大半（≥ 60%）才算；旧块拼完就停，不会多吃一段正文。
+   碰到图、前端卡这类没字的东西，或者拼不上的一段，立刻停；夹在中间的空段一起换，挨着正文的空段不动。 */
+function ipeDrawRenderedTail(el, oldTail) {
+    var rest = ipeDrawNorm(oldTail), full = rest.length;
+    if (full < 8) return [];
+    var kids = el.children, picked = [], pending = [];
+    for (var i = kids.length - 1; i >= 0 && rest; i--) {
+        var ch = kids[i];
+        if (ch.classList && ch.classList.contains(IPE_LEDGER_INLINE_CLASS)) continue;
+        if ((ch.matches && ch.matches(IPE_DRAW_MEDIA_SEL)) || (ch.querySelector && ch.querySelector(IPE_DRAW_MEDIA_SEL))) break;
+        var t = ipeDrawNorm(ipeDrawText(ch));
+        if (!t) { pending.push(ch); continue; }
+        if (rest.slice(-t.length) !== t) break;
+        rest = rest.slice(0, rest.length - t.length).trim();
+        picked = picked.concat(pending); pending = [];
+        picked.push(ch);
+    }
+    return full - rest.length >= full * 0.6 ? picked.reverse() : [];
 }
 
 /* ============================================================
@@ -8474,7 +8666,7 @@ function ipeInstallMesButtons(rows) {
     var d = ipeRootDocument();
     var chatEl = d.querySelector("#chat"); if (!chatEl) return 0;
     var chat = (ctx() && ctx().chat) || [];
-    var n = 0;
+    var todo = [];
     Array.prototype.slice.call(rows || chatEl.querySelectorAll(".mes")).forEach(function(m){
         if (!m || !m.isConnected || !chatEl.contains(m)) return;
         var idx = Number(m.getAttribute("mesid"));
@@ -8482,7 +8674,16 @@ function ipeInstallMesButtons(rows) {
         var msg = chat[idx];
         var has = m.querySelector("." + IPE_MES_BTN_CLASS);
         var want = !!(msg && !msg.is_user && ipeInjectRecord(msg));
-        if (want && !has) {
+        if (want !== !!has) todo.push({ m: m, has: has });
+    });
+    if (!todo.length) return 0;
+    var n = 0;
+    /* 2.25.0 窄屏上操作栏多一颗按钮，可能把挤满的楼头顶成两行：换聊天时一口气给视口上面的楼挂一串，也照样钉住视线。
+       只有真的要加 / 摘时才量，全都挂好了的一趟扫描不碰排版 */
+    ipeKeepChatView(function(){
+        todo.forEach(function(t){
+            var m = t.m;
+            if (t.has) { try { t.has.remove(); } catch(e) {} return; }
             /* 2.16.1 放在「…」旁边常驻可见：手机上 .extraMesButtons 默认折叠，塞进去就得先点「…」才看得到 */
             var html = '<div title="🐚 换画风：按当前模板重新注入这楼" class="mes_button ' + IPE_MES_BTN_CLASS + ' fa-solid fa-palette interactable" tabindex="0"></div>';
             var hint = m.querySelector(".mes_buttons .extraMesButtonsHint");
@@ -8491,9 +8692,7 @@ function ipeInstallMesButtons(rows) {
             else if (bar) bar.insertAdjacentHTML("afterbegin", html);
             else return;
             n++;
-        } else if (!want && has) {
-            try { has.remove(); } catch(e) {}
-        }
+        });
     });
     return n;
 }
@@ -8507,7 +8706,7 @@ function ipeMesButtonRows(records) {
     }
     for (var i = 0; i < records.length; i++) {
         var r = records[i], target = r.target;
-        if (target && target.closest && target.closest(".mes_text")) continue;
+        if (target && target.closest && target.closest(".mes_text, ." + IPE_LEDGER_INLINE_CLASS)) continue;   // 正文 / 🐚 块里换字不牵动按钮
         if (target && target.closest && target.closest(".mes_buttons, .extraMesButtons")) addRow(target);
         Array.prototype.forEach.call(r.addedNodes || [], function(n){
             if (!n || n.nodeType !== 1) return;
