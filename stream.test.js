@@ -1,4 +1,4 @@
-// 生图流式回归（2.26.0）：边收边看思考与输出、状态行按阶段走、实况框、看门狗、打断、整包兜底、开关。
+// 生图流式回归（2.26.0 / 2.26.1）：边收边看思考与输出、状态行按阶段走、实况框、开口时限、断流看门狗、打断、整包兜底、开关。
 // 用可控时序的假 SSE 响应，不连真 API。
 const fs = require('fs');
 const assert = require('node:assert/strict');
@@ -79,7 +79,7 @@ async function setup() {
             const s = statuses();
             check(s.some(t => t.startsWith('正在提取…连接中')), '状态行先报「连接中」');
             check(s.some(t => t.startsWith('正在提取…已连上，等模型开口')), '响应头一到就报「已连上，等模型开口」——连没连上一眼就知道');
-            check(s.some(t => /^正在提取…模型思考中，已想 \d+ 字 · \d+ 秒$/.test(t)), '思考阶段报想了多少字、几秒', s.join(' | '));
+            check(s.some(t => /^正在提取…模型思考中，已想 \d+ 字 · \d+ \/ 120 秒$/.test(t)), '思考阶段报想了多少字、几秒；还没开口，秒数带着 120 秒时限', s.join(' | '));
             check(s.some(t => /^正在提取…模型输出中，已写 \d+ 字 · \d+ 秒$/.test(t)), '输出阶段报写了多少字、几秒');
             check(s[s.length - 1].startsWith('提取完成'), '收完照旧写「提取完成」', s[s.length - 1]);
             check(snaps.some(x => x.think.includes('先看这段是') && x.out === ''), '还没开始写时，实况框里已经看得到它在想什么');
@@ -118,34 +118,97 @@ async function setup() {
             await run();
             check(sent[1].stream === false && $('ipe-preview-text').value === 'Old way desc.', '关了就发 stream:false，整包解析');
             check(statuses().some(t => t.startsWith('正在提取…已连上，等整包回来（流式接收关着）')), '整包等待时状态行也按秒走，并说明流式关着');
-            const idle = $('iped-img-idle');
-            check($('ipe-img-idle').value === '120' && idle.value === '120', '空闲超时默认 120 秒，两处都显示');
-            idle.value = '45'; idle.dispatchEvent(new w.Event('change', { bubbles: true }));
-            check(st.imgIdleTimeout === 45 && $('ipe-img-idle').value === '45', '改空闲超时存进设置，另一处同步');
+            const open = $('iped-img-open');
+            check($('ipe-img-open').value === '120' && open.value === '120', '开口时限默认 120 秒，两处都显示');
+            open.value = '45'; open.dispatchEvent(new w.Event('change', { bubbles: true }));
+            check(st.imgOpenTimeout === 45 && $('ipe-img-open').value === '45', '改开口时限存进设置，另一处同步');
         } finally { w.close(); }
     }
 
-    // ── 4. 看门狗：连响应头都不回 / 收到一半卡住 → 连续没字节就判死，算一次失败、照常自动重试 ──
+    // ── 4. 开口时限（2.26.1）：从发请求起算 N 秒还没写出正文就掐——没响应、光思考、光心跳都算没开口；开口之后只防断流 ──
     {
         const { w, $, st, serve, statuses, lastFail, run } = await setup();
+        const cards = () => [...w.document.querySelectorAll('#ipe-notice-stack .ipe-notice')];
         try {
-            st.imgIdleTimeout = 1;
+            st.imgOpenTimeout = 1;
             serve(['HEADERS_HANG']);
             let t0 = Date.now();
             await run();
             let last = lastFail();
-            check(Date.now() - t0 < 1900 && /^失败: 提取超时：连续 1 秒没收到模型任何字节，已主动断开/.test(last), '连响应头都不回：1 秒没字节就断开，报「提取超时」', last);
-            check(statuses().pop() === 'API 请求失败，10 秒后自动重试一次…', '判死算一次失败，照老规矩排了自动重试');
-            check($('ipe-live-meta').textContent.startsWith('✗ 失败'), '实况框标「✗ 失败」');
+            check(Date.now() - t0 < 1900 && last === '失败: 「gpt-4.1」1 秒没开口（连响应都没等到），已掐断', '连响应都没有：1 秒到点就掐，说清卡在哪', last);
+            check(statuses().pop() === '「gpt-4.1」1 秒没开口（连响应都没等到），已掐断，10 秒后自动重来一次…', '第一次没开口：状态行说一声，排自动重来');
+            check(cards().length === 0, '第一次没开口不弹窗');
+            check($('ipe-live-meta').textContent.startsWith('✗ 1 秒没开口'), '实况框标「✗ 1 秒没开口」');
             w.eval('ipeClearApiRetry()');
-            serve([think('想到一半'), HANG]);
+
+            serve([think('想到一半'), 300, think('，还在想'), HANG]);
+            t0 = Date.now();
+            await run();
+            last = lastFail();
+            check(Date.now() - t0 < 1900 && /1 秒没开口（一直在想，已想 8 字，正文一个字没写）/.test(last), '光思考不算开口：到点照样掐', last);
+            check($('ipe-live-think').textContent === '想到一半，还在想', '掐之前想的那些还留在实况框里');
+            w.eval('ipeClearApiRetry()');
+
+            serve([': keepalive\n\n', 300, ': keepalive\n\n', 300, ': keepalive\n\n', 300, ': keepalive\n\n', 300, ': keepalive\n\n', HANG]);
+            t0 = Date.now();
+            await run();
+            last = lastFail();
+            check(Date.now() - t0 < 1900 && /1 秒没开口（连上了，但一个字都没写）/.test(last), '中转一直发心跳、就是不出字：只看字节的看门狗判不死，开口时限照样掐', last);
+            w.eval('ipeClearApiRetry()');
+
+            w.__st.length = 0;
+            serve([say('Two '), HANG]);
             t0 = Date.now();
             await run();
             last = lastFail();
             const took = Date.now() - t0;
-            check(took >= 1900 && /提取超时：连续 2 秒/.test(last), '首字到了阈值放宽一倍：卡住 2 秒才判死（' + took + 'ms）', last);
-            check($('ipe-live-think').textContent === '想到一半', '判死前收到的思考还留在实况框里');
+            check(took >= 1900 && /^失败: 提取超时：连续 2 秒没收到模型任何字节/.test(last), '开口之后不卡时限，只防断流：卡住 2 倍时长才断（' + took + 'ms）', last);
+            check(statuses().pop() === 'API 请求失败，10 秒后自动重试一次…' && cards().length === 1, '断流按普通失败走：照旧弹卡、照旧重试');
             w.eval('ipeClearApiRetry()');
+            cards().forEach(c => c.remove());
+
+            w.__st.length = 0;
+            serve([500, say('Quick '), 600, say('answer.'), stop()]);
+            await run();
+            check($('ipe-preview-text').value === 'Quick answer.', '半秒就开口：写得慢也不掐（总共 1.1 秒 > 时限 1 秒）');
+            const s = statuses();
+            check(s.some(t => / · 0 \/ 1 秒$/.test(t)) && s.some(t => /^正在提取…模型输出中，已写 \d+ 字 · \d+ 秒$/.test(t)), '没开口时秒数带时限「0 / 1 秒」，开口后只报秒数', s.join(' | '));
+        } finally { w.close(); }
+    }
+
+    // ── 4b. 重来一次还不开口：弹常驻窗点名这个模型，劝换一个 ──
+    {
+        const { w, tavern, F, st, serve, statuses } = await setup();
+        const cards = () => [...w.document.querySelectorAll('#ipe-notice-stack .ipe-notice')];
+        try {
+            st.imgOpenTimeout = 1;
+            serve(['HEADERS_HANG']);
+            await F('runExtract')(tavern.chat[9].mes, '', false, 9, 1);   // retryAttempt = 1：这是自动重来的那一次
+            const card = cards().pop();
+            check(!!card && card.getAttribute('data-ipe-sticky') === '1' && !!card.querySelector('.ipe-notice-ok'), '重来还不开口：弹常驻卡（要点「知道了」才关）');
+            check(card.querySelector('.ipe-notice-title').textContent === '🐚 这个模型这会儿 gg 了', '卡片标题直说这个模型 gg 了');
+            const body = card.querySelector('.ipe-notice-body').textContent;
+            check(body.includes('「gpt-4.1」1 秒没开口') && body.includes('先换个 API 预设或模型') && body.includes('开口时限'), '卡片点名模型、劝换一个，也说了时限在哪调', body);
+            check(!statuses().some(t => t.includes('10 秒后自动重')), '不再排第三次');
+        } finally { w.close(); }
+    }
+
+    // ── 4c. 自动提取人物外貌不卡开口：资料多要想得久，只要字节在流就不掐；2.26.0 改过的「空闲超时」带进「开口时限」 ──
+    {
+        const { w, st, serve, statuses } = await setup();
+        try {
+            st.imgOpenTimeout = 1;
+            serve([think('读资料'), 700, think('，比对'), 700, think('，整理'), 700, say('【X】\n外貌: y'), stop()]);
+            const t0 = Date.now();
+            const out = await w.eval('ipeCastScanCall')('资料', 'user', '🔍 ');
+            check(out === '【X】\n外貌: y' && Date.now() - t0 >= 2000, '想了 2 秒多才开口也不掐（只防断流）');
+            check(!statuses().some(t => / \/ 1 秒/.test(t)), '外貌整理的秒数不带时限');
+            delete st.imgOpenTimeout; st.imgIdleTimeout = 45; w.eval('loadSettings()');
+            check(st.imgOpenTimeout === 45, '2.26.0 里把空闲超时改成 45：升级后开口时限也是 45');
+            delete st.imgOpenTimeout; st.imgIdleTimeout = 0; w.eval('loadSettings()');
+            check(st.imgOpenTimeout === 0, '改成 0（不限）的也带过来');
+            delete st.imgOpenTimeout; st.imgIdleTimeout = 120; w.eval('loadSettings()');
+            check(st.imgOpenTimeout === 120, '没改过的用新默认 120');
         } finally { w.close(); }
     }
 

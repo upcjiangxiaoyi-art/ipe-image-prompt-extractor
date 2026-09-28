@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.26.0";
+var IPE_VERSION = "2.26.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -58,7 +58,7 @@ const DEFAULTS = {
     supplementPresetsJson: "[]",   // 2.16.0 补充指令常用短语
     requestTimeout: 0,
     imgStream: true,       // 2.26.0 生图提取流式接收：边收边看思考与输出，状态行按秒走；关 = 老的整包干等
-    imgIdleTimeout: 120,   // 秒。生图请求连续多少秒一个字节都没收到才判死（首字到了放宽一倍），判死算一次失败；0 = 永不
+    imgOpenTimeout: 120,   // 2.26.1 秒。开口时限：生图提取发出后这么多秒还没写出正文第一个字（思考不算）就掐断、自动重来一次，重来还不开口就弹窗劝换模型；开口后只防断流（连续 2 倍没字节）；0 = 不限
     apiEndpoint: "", apiKey: "", model: "",
     apiProfilesJson: "", activeApiProfile: "api_1",
     systemPrompt: "", baseTemplate: "", characterAnchors: "", extractionRules: "", anchorUsageGuide: "",
@@ -270,6 +270,9 @@ function loadSettings() {
     try {
         const es = ctx().extensionSettings;
         if (!es[EXT_NAME]) es[EXT_NAME] = {};
+        // 2.26.1「空闲超时」改成「开口时限」：2.26.0 里自己改过的数（含 0 = 不限）带过来
+        var oldIdle = es[EXT_NAME].imgIdleTimeout;
+        if (es[EXT_NAME].imgOpenTimeout === undefined && oldIdle !== undefined && Number(oldIdle) !== 120) es[EXT_NAME].imgOpenTimeout = Math.max(0, Math.floor(Number(oldIdle) || 0));
         for (const [k, v] of Object.entries(DEFAULTS)) {
             if (es[EXT_NAME][k] === undefined) es[EXT_NAME][k] = v;
         }
@@ -4836,13 +4839,13 @@ function ipeImgRefreshLayerUI() {
     try { ipeCastRefreshUI(); } catch(eC) {}
 }
 
-/* 2.26.0 生图 API 区的「流式接收」「空闲超时」 */
+/* 2.26.0 生图 API 区的「流式接收」「开口时限」（2.26.1 由空闲超时改来） */
 function ipeImgStreamRefreshUI() {
     var doc = ipeRootDocument();
     ["ipe-img-stream", "iped-img-stream"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().imgStream !== false; });
-    ["ipe-img-idle", "iped-img-idle"].forEach(function(id){
+    ["ipe-img-open", "iped-img-open"].forEach(function(id){
         var el = q("#" + id); if (!el || doc.activeElement === el) return;
-        var v = String(Math.max(0, Math.floor(Number(cfg().imgIdleTimeout) || 0)));
+        var v = String(Math.max(0, Math.floor(Number(cfg().imgOpenTimeout) || 0)));
         if (el.value !== v) el.value = v;
     });
 }
@@ -4854,12 +4857,12 @@ function ipeImgStreamBindUI() {
             setStatus(el.checked ? "生图提取改为流式接收：边收边看思考与输出" : "生图提取改为整包等待：看不到过程，思考模型容易被中转掐断", el.checked ? "#6ec577" : "#c9a227");
         });
     });
-    ["ipe-img-idle", "iped-img-idle"].forEach(function(id){
+    ["ipe-img-open", "iped-img-open"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
             var n = Math.max(0, Math.floor(Number(el.value) || 0));
-            save("imgIdleTimeout", n); ipeImgStreamRefreshUI();
-            setStatus(n > 0 ? "生图空闲超时 " + n + " 秒（连续这么久一个字节都没有才判死）" : "已关闭生图空闲超时：卡死只能手点「打断请求」", n > 0 ? "#6ec577" : "#c9a227");
+            save("imgOpenTimeout", n); ipeImgStreamRefreshUI();
+            setStatus(n > 0 ? "开口时限 " + n + " 秒：提取发出后这么久还没写出字就掐断重来" : "已关闭开口时限：只防断流，卡住了可以手点「打断请求」", n > 0 ? "#6ec577" : "#c9a227");
         });
     });
     ipeImgStreamRefreshUI();
@@ -5393,11 +5396,11 @@ function ipeAbortCurrentRequest() {
    有的中转见连接闲着还会半路掐断。现在 stream:true 边收边拼（读流、看门狗跟挂账是同一套）：
    · 状态行按阶段走字、秒数每秒跳：连接中 → 已连上，等模型开口 → 模型思考中，已想 N 字 → 模型输出中，已写 N 字；
    · 预览区的「实况」框边收边显示思考和输出原文，跑完也留着，想看它想了啥随时翻；
-   · 空闲看门狗：连续 N 秒一个字节都没有才判死（首字到了放宽一倍），判死算一次失败，照老规矩自动重试一次；
+   · 开口时限（2.26.1）：N 秒还没写出正文第一个字就掐，自动重来一次，重来还不开口就弹窗劝换模型；开口后只防断流；
    · 中转不认流式、整包 JSON 回来，照整包解析；「流式接收」可以关，关了就是老的整包干等（秒数照跳）。
    ============================================================ */
-function ipeImgIdleMs() {
-    var sec = Number(cfg().imgIdleTimeout);
+function ipeImgOpenMs() {
+    var sec = Number(cfg().imgOpenTimeout);
     if (!Number.isFinite(sec) || sec <= 0) return 0;
     return Math.max(1, Math.floor(sec)) * 1000;
 }
@@ -5452,11 +5455,30 @@ async function ipeImgChat(body, opts) {
     var headers = { "Content-Type": "application/json" };
     if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
     var controller = opts.controller || (typeof AbortController !== "undefined" ? new AbortController() : null);
-    var dog = ipeLedgerWatchdog(controller, ipeImgIdleMs());
+    /* 2.26.1 开口时限（opts.openLimit，提取用）：从发请求起算 N 秒还没写出正文第一个字就掐——思考、中转心跳都不算数，
+       这类「连接活着、就是不出字」的，只看字节的看门狗永远判不死。开口之后不再卡时限，只防中途断流：连续 2N 秒没字节才掐。
+       外貌整理不传 openLimit：资料多、要想得久，照 2.26.0 只防断流（N 秒没字节，首字之后放宽到 2N）。 */
+    var limitMs = ipeImgOpenMs();
+    var deadline = opts.openLimit === true && limitMs > 0 && !!controller;
+    var dog = ipeLedgerWatchdog(controller, deadline ? limitMs * 2 : limitMs);
+    var opened = false, openFired = false, openTimer = null;
+    if (deadline) openTimer = setTimeout(function(){
+        if (opened) return;
+        openFired = true;
+        try { controller.abort(); } catch(e) {}
+    }, limitMs);
+    function markOpened() {
+        if (opened) return;
+        opened = true;
+        if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+        if (deadline) dog.kick();   // 开口了：改成防断流
+    }
     var live = ipeImgLiveBegin(opts.title || "🛰 实况");
     var t0 = Date.now(), connected = false, content = "", reasoning = "";
     var REASON_KEEP = 65536, lastPaint = 0, lastStatus = 0;
     function secs() { return Math.max(0, Math.round((Date.now() - t0) / 1000)); }
+    /* 还没开口时秒数带上时限：「35 / 120 秒」，看得出还剩多久就掐 */
+    function clock() { return secs() + (deadline && !opened ? " / " + Math.round(limitMs / 1000) : "") + " 秒"; }
     function view() {
         var sp = ipeSplitThink(content);
         return { think: reasoning + (reasoning && sp.think ? "\n" : "") + sp.think, out: sp.out,
@@ -5481,18 +5503,18 @@ async function ipeImgChat(body, opts) {
         if (!force && now - lastPaint < 120) return;
         lastPaint = now;
         var v = view(), ph = phase(v);
-        if (opts.status && (force || now - lastStatus >= 400)) { lastStatus = now; setStatus(opts.status + ph + " · " + secs() + " 秒", "#6ec577"); }
-        live.update({ think: v.think, out: v.out, meta: ph + " · " + secs() + " 秒" });
+        if (opts.status && (force || now - lastStatus >= 400)) { lastStatus = now; setStatus(opts.status + ph + " · " + clock(), "#6ec577"); }
+        live.update({ think: v.think, out: v.out, meta: ph + " · " + clock() });
     }
     var ticker = setInterval(function(){ paint(true); }, 1000);
     paint(true);
     try {
-        dog.kick();
+        if (!deadline) dog.kick();
         var res = await ipeFetchWithTimeout(buildChatUrl(c.apiEndpoint), {
             method: "POST", headers: headers, body: JSON.stringify(body),
             signal: controller ? controller.signal : undefined
         }, Number(c.requestTimeout || 0));
-        dog.kick();
+        if (!deadline) dog.kick();
         connected = true; paint(true);
         if (!res.ok) {
             var errRaw = await res.text();
@@ -5500,9 +5522,13 @@ async function ipeImgChat(body, opts) {
         }
         var text = "", finish = "";
         if (useStream) {
-            var got = await ipeLedgerReadStream(res, function(){ dog.relax(); dog.kick(); }, null, function(piece, rpiece){
+            var got = await ipeLedgerReadStream(res, function(){
+                if (!deadline) { dog.relax(); dog.kick(); }
+                else if (opened) dog.kick();
+            }, null, function(piece, rpiece){
                 if (piece) content += piece;
                 if (rpiece && reasoning.length < REASON_KEEP) reasoning += rpiece;
+                if (!opened && piece && ipeSplitThink(content).out.trim()) markOpened();
                 paint(false);
             });
             text = got.text; finish = got.finish;
@@ -5515,6 +5541,7 @@ async function ipeImgChat(body, opts) {
             content = text;
             try { var rc = data.choices[0].message.reasoning_content; if (typeof rc === "string" && rc.trim() !== text) reasoning = rc.slice(0, REASON_KEEP); } catch(eR) {}
         }
+        markOpened();   // 收完了：不管开没开口都不能再掐
         var sp = ipeSplitThink(text);
         var out = sp.out.trim();
         var f = String(finish || "").toLowerCase();
@@ -5530,16 +5557,22 @@ async function ipeImgChat(body, opts) {
         live.end({ think: v.think, out: v.out.trim() ? v.out : out, meta: "✓ 完成 · " + counts(v), done: true });
         return out;
     } catch(e) {
-        var err = e;
-        if (dog.fired()) {
+        var err = e, v2 = view(), headline = "✗ 失败";
+        if (openFired) {
+            var why = !connected ? "连响应都没等到"
+                : (v2.thinkLen ? "一直在想，已想 " + v2.thinkLen + " 字，正文一个字没写" : (useStream ? "连上了，但一个字都没写" : "流式接收关着，整包一直没回来"));
+            err = new Error("「" + (c.model || "模型") + "」" + Math.round(limitMs / 1000) + " 秒没开口（" + why + "），已掐断");
+            err.ipeNoOpen = true;
+            headline = "✗ " + Math.round(limitMs / 1000) + " 秒没开口";
+        } else if (dog.fired()) {
             err = new Error("提取超时：连续 " + Math.round(dog.currentMs() / 1000) + " 秒没收到模型任何字节，已主动断开。"
                 + (useStream ? "连接大概率卡在中转那头，换套 API 预设试试。" : "「流式接收」关着时思考模型整包干等很容易被判死，把它打开。"));
         }
-        var userStop = e && e.name === "AbortError" && !dog.fired();
-        var v2 = view();
-        live.end({ think: v2.think, out: v2.out, meta: (userStop ? "⏹ 已中止 · " : "✗ 失败 · ") + counts(v2), fail: !userStop });
+        var userStop = e && e.name === "AbortError" && !dog.fired() && !openFired;
+        live.end({ think: v2.think, out: v2.out, meta: (userStop ? "⏹ 已中止" : headline) + " · " + counts(v2), fail: !userStop });
         throw err;
     } finally {
+        if (openTimer) { clearTimeout(openTimer); openTimer = null; }
         dog.clear();
         clearInterval(ticker);
     }
@@ -5571,7 +5604,7 @@ async function callAPI(text, supplement, lockOverride, statusText) {
     if (imgTemp != null) body.temperature = imgTemp;
 
     // 2.26.0 走流式（stream 由 ipeImgChat 按「流式接收」开关填）：连没连上、在想什么、写了什么，状态行和实况框边收边显示
-    return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "" });
+    return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "", openLimit: true });
 }
 
 function setStatus(t, color) {
@@ -5869,16 +5902,26 @@ function ipeShowApiFailurePopup(msg, willRetry, opts) {
     }
 }
 
-function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAttempt, msg, lockOverride) {
+/* 2.26.1 err.ipeNoOpen = 超过开口时限一个字没写：第一次不弹窗，状态行说一声就重来；重来还不开口，弹常驻窗点名这个模型、劝换一个 */
+function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAttempt, msg, lockOverride, err) {
     ipeClearApiRetry();
     retryAttempt = Number(retryAttempt || 0);
+    var noOpen = !!(err && err.ipeNoOpen);
     if (retryAttempt >= 1) {
+        if (noOpen) {
+            ipeShowApiFailurePopup(msg + "。\n自动重来了一次，还是一个字不写：这个模型 / 中转这会儿基本不可用，先换个 API 预设或模型吧。\n真想多等：API 配置里把「开口时限」调大（0 = 不限）。", false, { title: "🐚 这个模型这会儿 gg 了", sticky: true });
+            return;
+        }
         ipeShowApiFailurePopup(msg + "\n自动重试仍失败，请检查 API 预设、余额、模型或中转状态。", false);
         return;
     }
 
-    ipeShowApiFailurePopup(msg, true);
-    setStatus("API 请求失败，10 秒后自动重试一次…", "#d4726a");
+    if (noOpen) {
+        setStatus(msg + "，10 秒后自动重来一次…", "#c9a227");
+    } else {
+        ipeShowApiFailurePopup(msg, true);
+        setStatus("API 请求失败，10 秒后自动重试一次…", "#d4726a");
+    }
 
     ipeRetryTimer = setTimeout(function(){
         ipeRetryTimer = null;
@@ -6383,8 +6426,8 @@ function createPanel() {
         '<div id="ipe-models-status" class="ipe-hint" style="display:none;white-space:pre-wrap;word-break:break-all"></div>'+
         '<div class="ipe-hint">可保存多个 API 预设；切换预设会同步地址、key 和模型。</div>'+
         '<div style="color:#888;font-size:12px;margin-top:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">流式接收（边收边看思考与输出） <input type="checkbox" id="ipe-img-stream"></label></div>'+
-        '<label>空闲超时（秒，0 = 永不）<input type="text" id="ipe-img-idle" placeholder="120"></label>'+
-        '<div class="ipe-hint">默认开。模型边想边把字流回来：状态行按秒走，预览区「实况」框里看得到它在想什么、写了什么，连没连上一眼就知道；中转也不会因为半天没动静掐断连接。关了就是老的整包干等。空闲超时不是总时长，是连续多少秒一个字节都没收到才判死，判死算一次失败，照常自动重试一次。</div>');
+        '<label>开口时限（秒，0 = 不限）<input type="text" id="ipe-img-open" placeholder="120"></label>'+
+        '<div class="ipe-hint">流式默认开：模型边想边把字流回来，状态行按秒走，预览区「实况」框里看得到它在想什么、写了什么，连没连上一眼就知道；关了就是老的整包干等。开口时限：提取请求发出后这么多秒还没写出正文第一个字（光思考不算）就掐断，自动重来一次；重来还不开口就弹窗提醒换模型。开口之后不再卡时限，只防中途断流（连续两倍时长一个字节都没有才断）。自动提取人物外貌资料多，不卡开口，只防断流。</div>');
 
     h += secHTML("system-prompt","系统提示", true,
         '<label>系统提示预设<select id="ipe-system-slot"></select></label>'+
@@ -6835,8 +6878,8 @@ function createDrawer() {
     h += '<div id="iped-models-status" style="display:none;color:#888;font-size:12px;margin:4px 0;white-space:pre-wrap;word-break:break-all"></div>';
     h += '<small style="color:#888">可保存多个 API 预设；切换预设会同步地址、key 和模型。</small>';
     h += '<div style="margin-top:6px"><label>流式接收（边收边看思考与输出） <input type="checkbox" id="iped-img-stream"></label></div>';
-    h += '<label>空闲超时（秒，0 = 永不）</label><input type="text" id="iped-img-idle" class="text_pole" placeholder="120">';
-    h += '<small style="color:#888">默认开。状态行按秒走，预览区「实况」框边收边显示思考与输出，连没连上一眼就知道；关了就是老的整包干等。空闲超时 = 连续多少秒一个字节都没收到才判死，判死算一次失败，照常自动重试一次。</small>';
+    h += '<label>开口时限（秒，0 = 不限）</label><input type="text" id="iped-img-open" class="text_pole" placeholder="120">';
+    h += '<small style="color:#888">流式默认开：状态行按秒走，预览区「实况」框边收边显示思考与输出；关了就是老的整包干等。开口时限 = 提取发出后这么多秒还没写出正文第一个字（思考不算）就掐断、自动重来一次，重来还不开口就弹窗提醒换模型；开口后只防断流。</small>';
     h += '<hr><small><b>系统提示</b></small>';
     h += '<label>系统提示预设</label><select id="iped-system-slot" class="text_pole"></select>';
     h += '<textarea id="iped-system-prompt" class="text_pole" rows="4" placeholder="系统提示词"></textarea>';
@@ -9141,7 +9184,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         setBtns(true,false); if(ball)ball.classList.remove("processing");
 
         if (ipeShouldRetryApiError(e, userAbort)) {
-            ipeScheduleApiRetry(text, supplement || "", !!autoInjectNow, targetIdx, retryAttempt, msg, lockOverride);
+            ipeScheduleApiRetry(text, supplement || "", !!autoInjectNow, targetIdx, retryAttempt, msg, lockOverride, e);
         }
     }
     ipeAbortController = null;
