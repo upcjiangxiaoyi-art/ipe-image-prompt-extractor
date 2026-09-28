@@ -1,6 +1,8 @@
 // 顺滑回归（2.25.0）：🐚 块挂在 .mes_text 外、被抹掉当场补、新楼同帧挪、改动前后钉住视线、换画风原地换。
+// 2.26.3：美化把楼里的块重新排座（flex + order / grid 格子）时 🐚 仍在正文底下。
 // jsdom 不排版：这里自己按「楼头 100 + .mes_text 里每个元素 60 + 🐚 块 40」算盒子，#chat 视口 600 高，
 // scrollTop 越界会被夹住；不带滚动锚定，等于 iOS Safari（最容易跳的那种）。
+// 楼里各块按 flex 排（读主题样式算出来的 order），也能换成模仿 grid 美化的摆法。
 const fs = require('fs');
 const assert = require('node:assert/strict');
 const fixture = fs.readFileSync(__dirname + '/ledger.test.js', 'utf8').split('\nconsole.log(')[0];
@@ -22,13 +24,44 @@ function setup(floors, opts) {
     opts = opts || {};
     const { w, tavern, F } = boot(floors);
     const d = w.document;
+    if (opts.css) d.head.insertAdjacentHTML('beforeend', '<style>' + opts.css + '</style>');   // 美化主题的样式
     d.body.insertAdjacentHTML('beforeend', '<div id="chat">' + tavern.chat.map((m, i) => rowHtml(i, m)).join('') + '</div>');
     const chat = d.querySelector('#chat');
     const rows = () => Array.from(chat.querySelectorAll(':scope > .mes'));
+    const isShell = el => el.classList.contains('ipe-ledger-inline');
+    // 楼里每块多高：楼头 100（窄屏操作栏多一颗按钮挤成两行再 +20）、正文里每段 60、🐚 40（挂在正文外、住在正文里都一样）
+    const partHeight = el => isShell(el) ? 40
+        : el.classList.contains('ch_name') ? 100 + (opts.headerWrap && el.querySelectorAll('.mes_buttons > *').length >= 2 ? 20 : 0)
+        : el.classList.contains('mes_text') ? Array.from(el.children).reduce((s, c) => s + partHeight(c), 0)
+        : 60;
     const height = row => row.style.display === 'none' ? 0
-        : 100 + 60 * row.querySelector('.mes_text').children.length + (row.querySelector('.ipe-ledger-inline') ? 40 : 0)
-          + (opts.headerWrap && row.querySelectorAll('.mes_buttons > *').length >= 2 ? 20 : 0);   // 窄屏：操作栏多一颗按钮，楼头挤成两行
+        : Array.from(row.querySelector('.mes_block').children).reduce((s, c) => s + partHeight(c), 0);
     const total = () => rows().reduce((s, r) => s + height(r), 0);
+    /* 楼里各块排在哪：默认按 flex 排（order 小的在前、一样的按 DOM 先后；没有美化样式时就是 DOM 顺序）。
+       layout: 'grid-hole' 模仿 grid 美化：名字、正文各占一个命名格子，没格子的 🐚 自动落进名字和正文之间空着的那格（思维链那格没东西），order 管不着 */
+    const place = row => {
+        const kids = Array.from(row.querySelector('.mes_block').children);
+        let seq;
+        if (opts.layout === 'grid-hole') {
+            seq = kids.filter(k => !isShell(k));
+            const shell = kids.find(isShell);
+            if (shell) seq.splice(seq.findIndex(k => k.classList.contains('mes_text')), 0, shell);
+        } else {
+            const ord = el => Number(w.getComputedStyle(el).order) || 0;
+            seq = kids.map((k, i) => [k, i]).sort((a, b) => ord(a[0]) - ord(b[0]) || a[1] - b[1]).map(x => x[0]);
+        }
+        const pos = new Map();
+        let y = 0;
+        for (const k of seq) {
+            pos.set(k, [y, partHeight(k)]);
+            if (k.classList.contains('mes_text')) {
+                let ty = y;
+                for (const c of k.children) { pos.set(c, [ty, partHeight(c)]); ty += partHeight(c); }
+            }
+            y += partHeight(k);
+        }
+        return pos;
+    };
     let top = 0;
     const clamp = v => Math.max(0, Math.min(v, Math.max(0, total() - VIEW)));
     Object.defineProperty(chat, 'scrollTop', { configurable: true, get: () => top, set: v => { top = clamp(Number(v) || 0); } });
@@ -42,6 +75,11 @@ function setup(floors, opts) {
             let y = 0;
             for (const r of rows()) { if (r === this) break; y += height(r); }
             return box(y - top, height(this));
+        }
+        const row = this.closest && this.closest('#chat > .mes');
+        if (row && row.style.display !== 'none') {                    // 楼里的块：楼的位置 + 在楼里排到哪
+            const p = place(row).get(this);
+            if (p) return box(row.getBoundingClientRect().top + p[0], p[1]);
         }
         return orig.call(this);
     };
@@ -75,6 +113,7 @@ function addTurn(env, text, paras) {
             const blk = row(11).querySelector('.ipe-ledger-inline');
             check(!!blk && inline().length === 1, '账本块挂在最后一条 AI 楼');
             check(!blk.closest('.mes_text') && blk.previousElementSibling === row(11).querySelector('.mes_text'), '块是 .mes_text 的下一个兄弟，不在正文里面');
+            check(!blk.getAttribute('style') && w.eval('ipeLedgerInlineInside') === false, '没重排楼内块的美化：量过也不加任何行内样式，和 2.25.0 一样挂在正文外');
             check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('.ipe-ledger-inline{margin:5px var(--mes-right-spacing,0px) 5px 0'), '样式补回原来 .mes_text 的右侧留白与上下间距');
 
             await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, false);     // 撤哨
@@ -259,6 +298,82 @@ function addTurn(env, text, paras) {
             proto.getBoundingClientRect = function () { reads++; return gb.call(this); };
             check(w.eval('ipeInstallMesButtons')() === 0 && reads === 0, '全都挂好了再扫一遍：什么都不改，也不量盒子（不强制排版）');
             proto.getBoundingClientRect = gb;
+        } finally { w.close(); }
+    }
+
+    // ── 8. 美化把楼里的块重新排座（flex + order）：🐚 抄正文的 order，紧跟在正文底下，还挂在正文外面 ──
+    {
+        const env = setup(12, { css: '.mes_block{display:flex;flex-direction:column}.mes_text{order:2}.mes_block > details{order:-1}' });
+        const { w, tavern, F, row, inline } = env;
+        const r = el => el.getBoundingClientRect();
+        try {
+            w.eval('ipeLedgerInstallInlineObserver()');
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerSync()');
+            const blk = row(11).querySelector('.ipe-ledger-inline');
+            const mt = row(11).querySelector('.mes_text');
+            check(!!blk && blk.previousElementSibling === mt && w.eval('ipeLedgerInlineInside') === false, '还是挂在 .mes_text 后面（正文外），不用退回正文里');
+            check(blk.style.getPropertyValue('order') === '2' && blk.style.getPropertyPriority('order') === 'important', '抄了正文的 order: 2（带 !important，压得过主题给 details 的 order）');
+            check(r(row(11).querySelector('.ch_name')).bottom <= r(mt).top && r(mt).bottom <= r(blk).top, '排出来是：名字 → 正文 → 🐚');
+            const saved = blk.style.cssText;
+            blk.style.removeProperty('order');
+            check(r(blk).bottom <= r(mt).top, '对照：不抄 order，这套美化会把 🐚 排到正文上面（截图里那样）');
+            blk.style.cssText = saved;
+            for (let i = 0; i < 3; i++) mt.innerHTML = '<p>正文被重写 ' + i + '</p>';
+            await microtasks();
+            check(row(11).querySelector('.ipe-ledger-inline') === blk, '正文整块重写照样碰不到它（2.25.0 的好处都在）');
+
+            await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, false);
+            const last = addTurn(env, '新楼正文。');
+            await tavern.eventSource.emit('MESSAGE_RECEIVED', last, 'normal');
+            const mt2 = row(last).querySelector('.mes_text'), blk2 = row(last).querySelector('.ipe-ledger-inline');
+            check(inline().length === 1 && !!blk2 && blk2.previousElementSibling === mt2 && r(mt2).bottom <= r(blk2).top, '挪到新楼：紧跟新楼正文，在它底下');
+        } finally { w.close(); }
+    }
+
+    // ── 9. grid 美化：抄 order 也压不住 → 退回老办法住进正文末尾；生图段贴在 🐚 前面；正文重写当场补回；新楼照样住正文末尾 ──
+    {
+        const env = setup(12, { layout: 'grid-hole', css: '.mes_block{display:grid}' });
+        const { w, tavern, F, row, inline, st } = env;
+        const r = el => el.getBoundingClientRect();
+        try {
+            w.eval('ipeLedgerInstallInlineObserver()');
+            st.baseTemplatesJson = JSON.stringify([
+                { id: 'tpl_a', name: '水墨', value: '<draw>INK: {Description}</draw>' },
+                { id: 'tpl_b', name: '动漫', value: '<draw>ANIME: {Description}</draw>' }]);
+            st.activeBaseTemplate = 'tpl_a';
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerSync()');
+            const mt = row(11).querySelector('.mes_text');
+            const blk = row(11).querySelector('.ipe-ledger-inline');
+            check(w.eval('ipeLedgerInlineInside') === true && blk.parentNode === mt && mt.lastElementChild === blk, '量出来 🐚 在正文上面：退回正文末尾住');
+            check(!blk.style.getPropertyValue('order') && r(mt.children[mt.children.length - 2]).bottom <= r(blk).top, '住进正文不带 order，排在最后一段正文底下');
+            check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('.mes_text > .ipe-ledger-inline{margin:10px 0 0}'), '住在正文里时外边距还原成老样子（不多缩右边）');
+
+            F('injectDescToMessage')('a girl by the sea', 11);
+            const p = mt.querySelector('.ipe-draw-inline');
+            check(!!p && p.nextElementSibling === blk && mt.lastElementChild === blk, '绘画注入：生图段贴在 🐚 前面，🐚 还是垫底');
+            st.activeBaseTemplate = 'tpl_b';
+            F('reinjectDescToMessage')(11, { preferRecord: true });
+            const ps = mt.querySelectorAll('.ipe-draw-inline');
+            check(ps.length === 1 && ps[0].textContent === '<draw>ANIME: a girl by the sea</draw>' && ps[0].nextElementSibling === blk && mt.lastElementChild === blk, '换画风：原地换，🐚 不被当成旧段摘掉，还是垫底');
+
+            mt.innerHTML = '<p>酒馆重写了正文</p>';
+            await microtasks();
+            const again = row(11).querySelector('.ipe-ledger-inline');
+            check(!!again && again.parentNode === mt && mt.lastElementChild === again && inline().length === 1, '正文被整块重写：观察器当场补回正文末尾');
+
+            await tavern.eventSource.emit('GENERATION_STARTED', 'normal', {}, false);
+            const last = addTurn(env, '新楼正文。');
+            await tavern.eventSource.emit('MESSAGE_RECEIVED', last, 'normal');
+            const mt2 = row(last).querySelector('.mes_text');
+            check(inline().length === 1 && mt2.lastElementChild === row(last).querySelector('.ipe-ledger-inline'), '新楼：挪进新楼正文末尾，上一楼摘干净');
+            check(w.eval('ipeLedgerInlineNeedsPlace()') === false, '住在正文里也算在位，观察器不会来回挪');
+            await tavern.eventSource.emit('CHAT_CHANGED');
+            check(w.eval('ipeLedgerInlineInside') === false, '换聊天：住哪重新量（不少卡自带美化，楼里怎么排跟着聊天变）');
+            await delay(260);
+            const blk3 = row(last).querySelector('.ipe-ledger-inline');
+            check(w.eval('ipeLedgerInlineInside') === true && inline().length === 1 && !!blk3 && mt2.lastElementChild === blk3, '这个聊天还是 grid 美化：量完又住回正文末尾，只有一块');
         } finally { w.close(); }
     }
 

@@ -1883,6 +1883,8 @@ body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-ledger-age {
 .ipe-ledger-inline{margin:5px var(--mes-right-spacing,0px) 5px 0;padding:6px 10px;border:1px solid rgba(120,126,172,.35);border-radius:10px;font-size:.9em;font-weight:500;line-height:calc(var(--mainFontSize,15px) + .5rem);overflow-wrap:anywhere;text-align:left;overflow-anchor:none}
 .ipe-ledger-inline-title{cursor:pointer;user-select:none;opacity:.75;font-weight:600}
 .ipe-ledger-inline-body{white-space:pre-wrap;word-break:break-word;margin-top:6px;line-height:1.6;text-align:left}
+/* 2.26.3 美化把楼里的块重新排座、🐚 退回正文末尾住的时候：外边距还原成住在正文里那时的样子（正文自己有右侧留白，不再多缩一截） */
+.mes_text > .ipe-ledger-inline{margin:10px 0 0}
 /* 2.25.0 注入进楼的那段生图 tag：换行照原样分行（酒馆重画后换行也是 <br>），重画前后高度差不多；不当滚动锚点——换画风会原地换掉它 */
 .mes_text > p.ipe-draw-inline{white-space:pre-line;overflow-anchor:none}
 

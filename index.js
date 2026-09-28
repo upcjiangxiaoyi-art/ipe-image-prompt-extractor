@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.26.2";
+var IPE_VERSION = "2.26.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2090,7 +2090,8 @@ var ipeMesBtnGuard = ipeMakeRepairGuard("楼层 🎨 按钮", 8, 30000, 120000);
 /* 2.25.0 🐚 块挂在那一楼 .mes_text 的后面（兄弟节点），不再塞进 .mes_text 里。
    .mes_text 是酒馆和别的扩展反复整块重写的地方：流式每一帧、滑动、改楼、updateMessageBlock、变量框架刷新都是 innerHTML 一把换掉。
    以前块在里面，换一次就没了，250ms 后才补回来，楼尾一缩一伸；补的时候又动了 .mes_text，盯着它的美化还会再重画一次。
-   挪到外面：重写正文碰不到它，滑动 / 续写时它一直在楼尾当页脚；正文 → 楼尾生图段 → 🐚 的先后也不会重画一次换一次位置。 */
+   挪到外面：重写正文碰不到它，滑动 / 续写时它一直在楼尾当页脚；正文 → 楼尾生图段 → 🐚 的先后也不会重画一次换一次位置。
+   2.26.3 美化把楼里的块重新排座时，🐚 抄正文的 order 紧跟正文；还压不住就退回正文末尾（ipeLedgerInlineFit）。 */
 function ipeLedgerInlineTarget() {
     var cur = cfg().ledgerInlineShow === false ? "" : String(ipeLedgerRead().current || "").trim();
     if (!cur) return { text: "", host: null };
@@ -2107,9 +2108,43 @@ function ipeLedgerInlineTarget() {
             || d.querySelector('#chat .mes[data-mesid="' + idx + '"] .mes_text');
     return { text: cur, host: host };
 }
-/* 在 .mes_text 后面就算在位；中间夹了别的扩展挂的东西也不去抢那个「紧挨着」的位置，免得和它来回挪 */
+/* 在 .mes_text 后面就算在位；中间夹了别的扩展挂的东西也不去抢那个「紧挨着」的位置，免得和它来回挪。
+   2.26.3 退回正文里住的时候（见 ipeLedgerInlineFit），在那楼正文里就算在位 */
 function ipeLedgerInlineInPlace(box, host) {
-    return !!(box && host && box.parentNode === host.parentNode && (host.compareDocumentPosition(box) & 4));
+    if (!box || !host) return false;
+    if (ipeLedgerInlineInside) return box.parentNode === host;
+    return box.parentNode === host.parentNode && !!(host.compareDocumentPosition(box) & 4);
+}
+/* 2.26.3 🐚 跟着正文排。有的美化把楼里几块重新排了座：.mes_block 设成 flex 再给 .mes_text 一个 order，或者干脆 grid 按格子摆，
+   挂在 .mes_text 后面的 🐚 就被排到名字底下、正文上面去了。
+   · 先把正文的 order 抄给 🐚：flex 里 order 一样的按 DOM 先后排，🐚 就紧跟在正文后面；挂在正文外、正文重写碰不到它的好处全留着；
+   · 放好量一眼：🐚 的头还在正文的头上面（grid 格子、定位这类抄 order 也没用）→ 退回 2.25.0 以前的老办法，塞进正文末尾，
+     这个聊天里以后都这么放、换聊天重新量（这类美化下正文整块重写时它会被抹一下，观察器当场补回）。
+   只在放块、挪块、这一楼还没量过时量；量过的同一楼只换字不碰排版。 */
+var ipeLedgerInlineInside = false;
+function ipeLedgerInlinePut(box, host) {
+    if (ipeLedgerInlineInside) host.appendChild(box);
+    else host.insertAdjacentElement("afterend", box);
+}
+function ipeLedgerInlineFitted(box, host) {
+    return ipeLedgerInlineInside || !!(box && box.__ipeFitHost === host);
+}
+function ipeLedgerInlineFit(box, host) {
+    if (!box || !host || ipeLedgerInlineInside || box.parentNode !== host.parentNode) return;
+    try {
+        var w = (host.ownerDocument && host.ownerDocument.defaultView) || window;
+        var want = String(w.getComputedStyle(host).order || "0");
+        if (String(w.getComputedStyle(box).order || "0") !== want) box.style.setProperty("order", want, "important");
+        var hr = host.getBoundingClientRect(), br = box.getBoundingClientRect();
+        if (!(hr.width || hr.height) || !(br.width || br.height)) return;   // 这楼没画出来（藏着、不在页面上）：先不判，下回再量
+        box.__ipeFitHost = host;
+        if (br.top < hr.top - 1) {
+            ipeLedgerInlineInside = true;
+            box.style.removeProperty("order");
+            host.appendChild(box);
+            try { console.log("[IPE] 🐚 这套美化把楼里的块重新排了序，挂在正文后面会跑到正文上面：改回放进正文末尾"); } catch(e) {}
+        }
+    } catch(e) {}
 }
 /* 该显示、目标楼已经画出来了、块却不在那楼 .mes_text 后面 → 要放 */
 function ipeLedgerInlineNeedsPlace() {
@@ -2147,14 +2182,16 @@ function ipeLedgerRenderInline(opts) {
             var existingBody = existing.querySelector("." + IPE_LEDGER_INLINE_CLASS + "-body");
             var inPlace = ipeLedgerInlineInPlace(existing, host);
             var changed = existingBody.textContent !== cur;
-            if (inPlace && olds.length === 1 && !changed) return true;
+            var fitted = ipeLedgerInlineFitted(existing, host);
+            if (inPlace && olds.length === 1 && !changed && fitted) return true;
             var apply = function(){
                 clearOlds(existing);
-                if (!inPlace) host.insertAdjacentElement("afterend", existing);   // 同一个节点挪过去，展开状态跟着走
+                if (!inPlace) ipeLedgerInlinePut(existing, host);   // 同一个节点挪过去，展开状态跟着走
                 if (changed) existingBody.textContent = cur;
+                if (!ipeLedgerInlineFitted(existing, host)) ipeLedgerInlineFit(existing, host);
             };
-            // 只是折着的块换字：高度不变、没挪、也没有别处的旧块要摘，不用量，省一次强制排版
-            if (inPlace && olds.length === 1 && !existing.open) apply();
+            // 只是折着的块换字：高度不变、没挪、这楼量过、也没有别处的旧块要摘，不用量，省一次强制排版
+            if (inPlace && olds.length === 1 && !existing.open && fitted) apply();
             else ipeKeepChatView(apply);
             return true;
         }
@@ -2172,7 +2209,8 @@ function ipeLedgerRenderInline(opts) {
         box.appendChild(sum); box.appendChild(body);
         ipeKeepChatView(function(){
             clearOlds(null);
-            host.insertAdjacentElement("afterend", box);
+            ipeLedgerInlinePut(box, host);
+            ipeLedgerInlineFit(box, host);
         });
         return true;
     } catch(e) { return false; }
@@ -8483,6 +8521,7 @@ function bindAll() {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
+                ipeLedgerInlineInside = false;   // 2.26.3 🐚 住哪重新量：不少卡自带美化样式，楼里怎么排跟着聊天变
                 ipeLedgerChatEpoch++;
                 ipeLedgerLastAutoInput = null;
                 ipeLedgerMirrorDirty = true;   // 换了聊天，「继承」列表里该把上一个聊天算进来
@@ -8708,7 +8747,7 @@ function injectDescToMessage(desc, targetIdx) {
 
     var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');
     // 2.25.0 贴的还是原来那串文字，只多个类名（换行照原样分行）；贴前贴后钉住视线，楼尾长出一段不把眼前的字顶走
-    if (el && String(el.textContent || "").indexOf(tag) < 0) ipeKeepChatView(function(){ el.appendChild(ipeDrawMakeParagraph(el.ownerDocument, tag)); });
+    if (el && String(el.textContent || "").indexOf(tag) < 0) ipeKeepChatView(function(){ ipeDrawAppend(el, ipeDrawMakeParagraph(el.ownerDocument, tag)); });
     try { ipeInstallMesButtons([q('#chat .mes[mesid="' + idx + '"]')]); } catch(eB) {}   // 只检查刚写入记录的这一楼
 
     return { injected: true, tag: tag };
@@ -8803,6 +8842,7 @@ function ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv, oldTail) {
     var olds = [];
     try {
         Array.prototype.slice.call(el.children).forEach(function(ch){
+            if (ch.classList && ch.classList.contains(IPE_LEDGER_INLINE_CLASS)) return;   // 🐚 住在正文里时（2.26.3 兜底）不是旧生图段
             var t = String(ch.textContent || "").trim();
             if (!t) return;
             if ((prev && t === prev) || (env && !ipeStripEnvelope(t, env).trim()) || !ipeLedgerStripImageTag(t).trim()) olds.push(ch);
@@ -8818,7 +8858,9 @@ function ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv, oldTail) {
         }
         if (String(el.textContent || "").indexOf(tag) >= 0) return;   // 楼里已经原样贴着这段
         var p = ipeDrawMakeParagraph(el.ownerDocument, tag);
-        if (ref && ref.parentNode === parent) parent.insertBefore(p, ref); else parent.appendChild(p);
+        if (ref && ref.parentNode === parent) parent.insertBefore(p, ref);
+        else if (parent === el) ipeDrawAppend(el, p);
+        else parent.appendChild(p);
     });
 }
 
@@ -8830,6 +8872,11 @@ function ipeDrawMakeParagraph(d, tag) {
     p.className = IPE_DRAW_INLINE_CLASS;
     p.textContent = String(tag || "");
     return p;
+}
+/* 生图段贴在正文末尾；🐚 退回正文里住的时候（2.26.3 兜底）贴在 🐚 前面，🐚 一直垫底 */
+function ipeDrawAppend(el, p) {
+    var shell = el.querySelector(":scope > ." + IPE_LEDGER_INLINE_CLASS);
+    if (shell) el.insertBefore(p, shell); else el.appendChild(p);
 }
 /* 剥之前是 before，剥掉楼尾生图块之后是 stripped。stripped 原样是 before 的开头，多出来的那截才是被剥掉的旧块；
    中间也被剥过东西（正文里还夹着别的生图标签）就不认，免得把正文当成旧块。 */
