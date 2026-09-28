@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.25.1";
+var IPE_VERSION = "2.26.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -57,6 +57,8 @@ const DEFAULTS = {
     autoInjectDelay: 1800,
     supplementPresetsJson: "[]",   // 2.16.0 补充指令常用短语
     requestTimeout: 0,
+    imgStream: true,       // 2.26.0 生图提取流式接收：边收边看思考与输出，状态行按秒走；关 = 老的整包干等
+    imgIdleTimeout: 120,   // 秒。生图请求连续多少秒一个字节都没收到才判死（首字到了放宽一倍），判死算一次失败；0 = 永不
     apiEndpoint: "", apiKey: "", model: "",
     apiProfilesJson: "", activeApiProfile: "api_1",
     systemPrompt: "", baseTemplate: "", characterAnchors: "", extractionRules: "", anchorUsageGuide: "",
@@ -1149,8 +1151,9 @@ function ipeLedgerWatchdog(controller, idleMs) {
      2 思考流      delta.reasoning_content / delta.reasoning 只计数，不进账本
      3 中转偷懒    要了 stream:true 却整包 JSON 回来 → 回退 parseChatResponse
      4 流里夹 error 对象 → 当场抛，不等 [DONE]
-   onChunk 每收到一块就喊一声（喂看门狗），onProgress 给状态行报字数。 */
-async function ipeLedgerReadStream(res, onChunk, onProgress) {
+   onChunk 每收到一块就喊一声（喂看门狗），onProgress 给状态行报字数。
+   2.26.0 onDelta(正文新字, 思考新字)：生图提取要把思考和输出边收边显示；挂账不传，照旧只计数、不留思考原文。 */
+async function ipeLedgerReadStream(res, onChunk, onProgress, onDelta) {
     var content = "", reasonChars = 0, sawData = false, buf = "", allText = "", finish = "";
     var lastReport = 0;
     function report(force) {
@@ -1176,14 +1179,23 @@ async function ipeLedgerReadStream(res, onChunk, onProgress) {
         if (!ch) return;
         if (ch.finish_reason) finish = String(ch.finish_reason);
         var d = ch.delta || ch.message || {};
-        if (typeof d.content === "string") content += d.content;
+        var piece = "";
+        if (typeof d.content === "string") piece = d.content;
         else if (Array.isArray(d.content)) d.content.forEach(function(p){
             if (!p) return;
-            if (typeof p === "string") content += p;
-            else if (typeof p.text === "string") content += p.text;
+            if (typeof p === "string") piece += p;
+            else if (typeof p.text === "string") piece += p.text;
         });
+        content += piece;
         var r = d.reasoning_content != null ? d.reasoning_content : d.reasoning;
+        /* OpenRouter 新格式只给 reasoning_details（它同时也给 reasoning 字符串，那时不重复算） */
+        if (typeof r !== "string" && Array.isArray(d.reasoning_details)) {
+            r = d.reasoning_details.map(function(x){ return x && typeof (x.text || x.summary) === "string" ? (x.text || x.summary) : ""; }).join("");
+        }
         if (typeof r === "string") reasonChars += r.length;
+        if (typeof onDelta === "function" && (piece || (typeof r === "string" && r))) {
+            try { onDelta(piece, typeof r === "string" ? r : ""); } catch(eD) {}   // 显示出错不能断了收流
+        }
     }
     function feed(chunk) {
         if (!chunk) return;
@@ -4824,8 +4836,38 @@ function ipeImgRefreshLayerUI() {
     try { ipeCastRefreshUI(); } catch(eC) {}
 }
 
+/* 2.26.0 生图 API 区的「流式接收」「空闲超时」 */
+function ipeImgStreamRefreshUI() {
+    var doc = ipeRootDocument();
+    ["ipe-img-stream", "iped-img-stream"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().imgStream !== false; });
+    ["ipe-img-idle", "iped-img-idle"].forEach(function(id){
+        var el = q("#" + id); if (!el || doc.activeElement === el) return;
+        var v = String(Math.max(0, Math.floor(Number(cfg().imgIdleTimeout) || 0)));
+        if (el.value !== v) el.value = v;
+    });
+}
+function ipeImgStreamBindUI() {
+    ["ipe-img-stream", "iped-img-stream"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("imgStream", !!el.checked); ipeImgStreamRefreshUI();
+            setStatus(el.checked ? "生图提取改为流式接收：边收边看思考与输出" : "生图提取改为整包等待：看不到过程，思考模型容易被中转掐断", el.checked ? "#6ec577" : "#c9a227");
+        });
+    });
+    ["ipe-img-idle", "iped-img-idle"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            var n = Math.max(0, Math.floor(Number(el.value) || 0));
+            save("imgIdleTimeout", n); ipeImgStreamRefreshUI();
+            setStatus(n > 0 ? "生图空闲超时 " + n + " 秒（连续这么久一个字节都没有才判死）" : "已关闭生图空闲超时：卡死只能手点「打断请求」", n > 0 ? "#6ec577" : "#c9a227");
+        });
+    });
+    ipeImgStreamRefreshUI();
+}
+
 function ipeImgBindLayerUI() {
     ipeCastBindUI();
+    ipeImgStreamBindUI();
     ["ipe-layered", "iped-layered"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -5184,24 +5226,17 @@ function ipeCastScanPrompt(userName) {
         "8. 不要解释，不要标题，不要代码块。"
     ].join("\n");
 }
-async function ipeCastScanCall(sourceText, userName) {
+async function ipeCastScanCall(sourceText, userName, statusText) {
     var c = cfg();
     if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
     if (!c.model) throw new Error("请先加载并选择模型");
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
     var body = { model: c.model, messages: [
         { role: "system", content: ipeCastScanPrompt(userName) },
         { role: "user", content: "【设定资料】\n" + sourceText }
-    ], stream: false };
+    ] };
     var temp = ipeCastTemperature(); if (temp != null) body.temperature = temp;
-    var res = await ipeFetchWithTimeout(buildChatUrl(c.apiEndpoint), { method: "POST", headers: headers, body: JSON.stringify(body) }, Number(c.requestTimeout || 0));
-    var raw = await res.text();
-    if (!res.ok) throw new Error("API " + res.status + "：" + raw.slice(0, 220));
-    var data; try { data = JSON.parse(raw); } catch(e) { throw new Error("API 返回不是 JSON：" + raw.slice(0, 180)); }
-    var out = parseChatResponse(data);
-    if (!out) throw new Error("无法解析响应：" + raw.slice(0, 220));
-    return out;
+    // 2.26.0 资料一长副 AI 要想好一阵：跟提取一样走流式，状态行报进度、实况框看它整理到谁了
+    return ipeImgChat(body, { title: "🔍 外貌整理实况", status: statusText || "" });
 }
 /* 这一行会原样贴进每楼提示词，敏感规则管不到它：skin 一律换成 complexion，免得撞生图接口的审核词 */
 function ipeCastSafeLook(look) {
@@ -5253,8 +5288,9 @@ async function ipeCastScan() {
         var src = await ipeCastGatherSources();
         if (!src.text.trim()) { setStatus("没读到任何设定资料：先打开一个角色的聊天", "#d4726a"); return; }
         var summary = ipeCastSourceSummary(src.stat);
-        setStatus("🔍 " + summary + "。副 AI 正在整理人物外貌…", "#6ec577");
-        var raw = await ipeCastScanCall(src.text, src.user);
+        var scanText = "🔍 " + summary + "。副 AI 正在整理人物外貌…";
+        setStatus(scanText, "#6ec577");
+        var raw = await ipeCastScanCall(src.text, src.user, scanText);
         var norm = ipeCastNormalizeScan(raw);
         if (!norm.cards.length) { setStatus("副 AI 没整理出人物外貌（资料里可能没写外貌），锚点没动。" + summary + "。返回开头：" + String(raw).slice(0, 80), "#d4726a"); return; }
         var title = ipeCharName() || (src.stat.chars[0] || "人物");
@@ -5351,14 +5387,168 @@ function ipeAbortCurrentRequest() {
     }
 }
 
-async function callAPI(text, supplement, lockOverride) {
+/* ============================================================
+   🎨 2.26.0 生图提取走流式
+   以前整包干等：思考模型、慢中转半天没动静，看不出连没连上，只能对着「正在提取…」干瞪眼；
+   有的中转见连接闲着还会半路掐断。现在 stream:true 边收边拼（读流、看门狗跟挂账是同一套）：
+   · 状态行按阶段走字、秒数每秒跳：连接中 → 已连上，等模型开口 → 模型思考中，已想 N 字 → 模型输出中，已写 N 字；
+   · 预览区的「实况」框边收边显示思考和输出原文，跑完也留着，想看它想了啥随时翻；
+   · 空闲看门狗：连续 N 秒一个字节都没有才判死（首字到了放宽一倍），判死算一次失败，照老规矩自动重试一次；
+   · 中转不认流式、整包 JSON 回来，照整包解析；「流式接收」可以关，关了就是老的整包干等（秒数照跳）。
+   ============================================================ */
+function ipeImgIdleMs() {
+    var sec = Number(cfg().imgIdleTimeout);
+    if (!Number.isFinite(sec) || sec <= 0) return 0;
+    return Math.max(1, Math.floor(sec)) * 1000;
+}
+/* 有的中转把思考写进正文开头的 <think>…</think>：这一块算思考，后面才是输出；还没收尾的整段都算思考 */
+function ipeSplitThink(text) {
+    var s = String(text || "");
+    var m = s.match(/^\s*<(think|thinking)\s*>/i);
+    if (!m) return { think: "", out: s, open: false };
+    var rest = s.slice(m[0].length);
+    var cm = rest.match(new RegExp("</" + m[1] + "\\s*>", "i"));
+    if (!cm) return { think: rest, out: "", open: true };
+    return { think: rest.slice(0, cm.index), out: rest.slice(cm.index + cm[0].length).replace(/^\s+/, ""), open: false };
+}
+
+/* 「实况」框：面板和抽屉各一个，只显示最近一次请求——新请求一开始就接管，旧请求晚到的字不再往里写 */
+var ipeImgLiveSeq = 0;
+var IPE_IMG_LIVE_TAIL = 4000;   // 框里只留最后这么多字，思考再长也不拖慢
+function ipeImgLiveTail(s) { s = String(s || ""); return s.length > IPE_IMG_LIVE_TAIL ? "…" + s.slice(-IPE_IMG_LIVE_TAIL) : s; }
+function ipeImgLiveSetText(el, text) {
+    if (!el || el.textContent === text) return;
+    var stick = el.scrollHeight - el.clientHeight - el.scrollTop < 24;   // 人往上翻着看就不把他拽回底部
+    el.textContent = text;
+    if (stick) el.scrollTop = el.scrollHeight;
+}
+function ipeImgLiveBegin(title) {
+    var seq = ++ipeImgLiveSeq;
+    function paint(v) {
+        if (seq !== ipeImgLiveSeq) return;
+        ["ipe", "iped"].forEach(function(p){
+            var box = q("#" + p + "-live"); if (!box) return;
+            if (box.style.display === "none") box.style.display = "";
+            var t = q("#" + p + "-live-title"); if (t && t.textContent !== title) t.textContent = title;
+            var meta = q("#" + p + "-live-meta"); if (meta && meta.textContent !== v.meta) meta.textContent = v.meta;
+            box.classList.toggle("ipe-live-done", !!v.done);
+            box.classList.toggle("ipe-live-fail", !!v.fail);
+            var tw = q("#" + p + "-live-think-wrap"); if (tw) tw.style.display = v.think ? "" : "none";
+            ipeImgLiveSetText(q("#" + p + "-live-think"), ipeImgLiveTail(v.think));
+            ipeImgLiveSetText(q("#" + p + "-live-out"), ipeImgLiveTail(v.out));
+        });
+    }
+    return { update: paint, end: paint };
+}
+
+/* 生图这边所有对副 AI 的请求都走这里：提取、自动提取人物外貌。
+   opts.controller：外面给的中止器（「打断请求」按钮用的那个）；opts.title：实况框标题；opts.status：状态行前缀。
+   返回剥掉开头 <think> 块之后的正文；用户点打断时原样抛 AbortError，外面据此判「人掐的」不重试。 */
+async function ipeImgChat(body, opts) {
+    opts = opts || {};
+    var c = cfg();
+    var useStream = c.imgStream !== false;
+    body.stream = useStream;
+    var headers = { "Content-Type": "application/json" };
+    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    var controller = opts.controller || (typeof AbortController !== "undefined" ? new AbortController() : null);
+    var dog = ipeLedgerWatchdog(controller, ipeImgIdleMs());
+    var live = ipeImgLiveBegin(opts.title || "🛰 实况");
+    var t0 = Date.now(), connected = false, content = "", reasoning = "";
+    var REASON_KEEP = 65536, lastPaint = 0, lastStatus = 0;
+    function secs() { return Math.max(0, Math.round((Date.now() - t0) / 1000)); }
+    function view() {
+        var sp = ipeSplitThink(content);
+        return { think: reasoning + (reasoning && sp.think ? "\n" : "") + sp.think, out: sp.out,
+                 thinkLen: reasoning.length + sp.think.length, outLen: sp.out.trim().length };
+    }
+    function phase(v) {
+        if (!connected) return "连接中";
+        if (v.outLen) return "模型输出中，已写 " + v.outLen + " 字";
+        if (v.thinkLen) return "模型思考中，已想 " + v.thinkLen + " 字";
+        return useStream ? "已连上，等模型开口" : "已连上，等整包回来（流式接收关着）";
+    }
+    function counts(v) {
+        var bits = [];
+        if (v.thinkLen) bits.push("思考 " + v.thinkLen + " 字");
+        if (v.outLen) bits.push("输出 " + v.outLen + " 字");
+        bits.push(secs() + " 秒");
+        return bits.join(" · ");
+    }
+    /* 收流时一个 token 就来一块，最多每 120ms 画一次、状态行每 400ms 写一次；没有新字时每秒照样跳秒数 */
+    function paint(force) {
+        var now = Date.now();
+        if (!force && now - lastPaint < 120) return;
+        lastPaint = now;
+        var v = view(), ph = phase(v);
+        if (opts.status && (force || now - lastStatus >= 400)) { lastStatus = now; setStatus(opts.status + ph + " · " + secs() + " 秒", "#6ec577"); }
+        live.update({ think: v.think, out: v.out, meta: ph + " · " + secs() + " 秒" });
+    }
+    var ticker = setInterval(function(){ paint(true); }, 1000);
+    paint(true);
+    try {
+        dog.kick();
+        var res = await ipeFetchWithTimeout(buildChatUrl(c.apiEndpoint), {
+            method: "POST", headers: headers, body: JSON.stringify(body),
+            signal: controller ? controller.signal : undefined
+        }, Number(c.requestTimeout || 0));
+        dog.kick();
+        connected = true; paint(true);
+        if (!res.ok) {
+            var errRaw = await res.text();
+            throw new Error("API " + res.status + "：" + errRaw.slice(0, 220));
+        }
+        var text = "", finish = "";
+        if (useStream) {
+            var got = await ipeLedgerReadStream(res, function(){ dog.relax(); dog.kick(); }, null, function(piece, rpiece){
+                if (piece) content += piece;
+                if (rpiece && reasoning.length < REASON_KEEP) reasoning += rpiece;
+                paint(false);
+            });
+            text = got.text; finish = got.finish;
+            if (!content && text) content = text;   // 中转不认流式、整包 JSON 回来：没有逐块的新字，整段一次到
+        } else {
+            var raw = await res.text();
+            var data;
+            try { data = JSON.parse(raw); } catch(e) { throw new Error("API 返回不是 JSON：" + raw.slice(0, 180)); }
+            text = parseChatResponse(data); finish = ipeLedgerFinishOf(data);
+            content = text;
+            try { var rc = data.choices[0].message.reasoning_content; if (typeof rc === "string" && rc.trim() !== text) reasoning = rc.slice(0, REASON_KEEP); } catch(eR) {}
+        }
+        var sp = ipeSplitThink(text);
+        var out = sp.out.trim();
+        var f = String(finish || "").toLowerCase();
+        /* 老整包那条路（parseChatResponse）在正文空、只有 reasoning_content 时拿它兜底——有的中转把正文塞在那儿。流式照做，被截断的不算 */
+        if (!out && !sp.think && reasoning.trim() && f !== "length" && f !== "max_tokens") out = reasoning.trim();
+        if (!out) {
+            var thinkN = reasoning.length + sp.think.length;
+            if (f === "length" || f === "max_tokens") throw new Error("模型返回为空，finish_reason=length：输出被截断" + (thinkN ? "（思考已用掉 " + thinkN + " 字）" : "") + "。插件不主动设 max_tokens，请检查中转 / 模型的默认输出上限，或换个不思考的模型。");
+            if (sp.open) throw new Error("模型只想没写：<think> 还没收尾就结束了（finish_reason=" + (finish || "无") + "，思考 " + thinkN + " 字）");
+            throw new Error("模型返回为空（" + (useStream ? "流式已收完，" : "") + "正文 0 字，finish_reason=" + (finish || "无") + (thinkN ? "，思考 " + thinkN + " 字" : "") + "）");
+        }
+        var v = view();
+        live.end({ think: v.think, out: v.out.trim() ? v.out : out, meta: "✓ 完成 · " + counts(v), done: true });
+        return out;
+    } catch(e) {
+        var err = e;
+        if (dog.fired()) {
+            err = new Error("提取超时：连续 " + Math.round(dog.currentMs() / 1000) + " 秒没收到模型任何字节，已主动断开。"
+                + (useStream ? "连接大概率卡在中转那头，换套 API 预设试试。" : "「流式接收」关着时思考模型整包干等很容易被判死，把它打开。"));
+        }
+        var userStop = e && e.name === "AbortError" && !dog.fired();
+        var v2 = view();
+        live.end({ think: v2.think, out: v2.out, meta: (userStop ? "⏹ 已中止 · " : "✗ 失败 · ") + counts(v2), fail: !userStop });
+        throw err;
+    } finally {
+        dog.clear();
+        clearInterval(ticker);
+    }
+}
+
+async function callAPI(text, supplement, lockOverride, statusText) {
     var c = cfg();
     if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
     if (!c.model) throw new Error("请先加载并选择模型");
-
-    var url = buildChatUrl(c.apiEndpoint);
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
 
     ipeUserAbortRequested = false;
     if (typeof AbortController !== "undefined") {
@@ -5375,49 +5565,13 @@ async function callAPI(text, supplement, lockOverride) {
         messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: buildVisionUserPrompt(text, supplement || "", lockOverride) }
-        ],
-        stream: false
+        ]
     };
     var imgTemp = ipeCastTemperature();
     if (imgTemp != null) body.temperature = imgTemp;
 
-    var fetchOptions = {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(body)
-    };
-    if (ipeAbortController) fetchOptions.signal = ipeAbortController.signal;
-
-    var res = await ipeFetchWithTimeout(url, fetchOptions, Number(cfg().requestTimeout || 0));
-
-    var raw = await res.text();
-
-    if (!res.ok) {
-        throw new Error("API " + res.status + "：" + raw.slice(0, 220));
-    }
-
-    var data;
-    try {
-        data = JSON.parse(raw);
-    } catch(e) {
-        throw new Error("API 返回不是 JSON：" + raw.slice(0, 180));
-    }
-
-    var out = parseChatResponse(data);
-    if (out) return out;
-
-    var finish = "";
-    try {
-        if (data.choices && data.choices[0] && data.choices[0].finish_reason) {
-            finish = data.choices[0].finish_reason;
-        }
-    } catch(e) {}
-
-    if (finish === "length") {
-        throw new Error("模型返回为空，finish_reason=length。服务端仍然截断了输出。当前插件已不主动设置 max_tokens；请检查中转/模型是否有默认输出上限。原始返回：" + raw.slice(0, 180));
-    }
-
-    throw new Error("无法解析响应：" + raw.slice(0, 220));
+    // 2.26.0 走流式（stream 由 ipeImgChat 按「流式接收」开关填）：连没连上、在想什么、写了什么，状态行和实况框边收边显示
+    return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "" });
 }
 
 function setStatus(t, color) {
@@ -6227,7 +6381,10 @@ function createPanel() {
         '<label>模型</label><select id="ipe-model"><option value="'+esc(c.model)+'">'+(c.model?esc(c.model)+' (已保存)':'请先加载模型')+'</option></select>'+
         '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-btn-models" class="ipe-btn">加载模型</button><button id="ipe-btn-test" class="ipe-btn">测试连接</button></div>'+
         '<div id="ipe-models-status" class="ipe-hint" style="display:none;white-space:pre-wrap;word-break:break-all"></div>'+
-        '<div class="ipe-hint">可保存多个 API 预设；切换预设会同步地址、key 和模型。</div>');
+        '<div class="ipe-hint">可保存多个 API 预设；切换预设会同步地址、key 和模型。</div>'+
+        '<div style="color:#888;font-size:12px;margin-top:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">流式接收（边收边看思考与输出） <input type="checkbox" id="ipe-img-stream"></label></div>'+
+        '<label>空闲超时（秒，0 = 永不）<input type="text" id="ipe-img-idle" placeholder="120"></label>'+
+        '<div class="ipe-hint">默认开。模型边想边把字流回来：状态行按秒走，预览区「实况」框里看得到它在想什么、写了什么，连没连上一眼就知道；中转也不会因为半天没动静掐断连接。关了就是老的整包干等。空闲超时不是总时长，是连续多少秒一个字节都没收到才判死，判死算一次失败，照常自动重试一次。</div>');
 
     h += secHTML("system-prompt","系统提示", true,
         '<label>系统提示预设<select id="ipe-system-slot"></select></label>'+
@@ -6318,6 +6475,14 @@ function createPanel() {
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
+        /* 2.26.0 实况：流式收到的思考与输出边收边显示，跑完也留着；第一次请求前藏着 */
+        '<details id="ipe-live" class="ipe-fold ipe-live" data-ipe-fold="panel-image-live" open style="display:none">'+
+            '<summary><span id="ipe-live-title">🛰 实况</span><span id="ipe-live-meta" class="ipe-live-meta"></span></summary>'+
+            '<div class="ipe-fold-body">'+
+                '<div id="ipe-live-think-wrap" style="display:none"><div class="ipe-live-label">💭 思考</div><div id="ipe-live-think" class="ipe-live-think"></div></div>'+
+                '<div class="ipe-live-label">✍️ 输出</div><div id="ipe-live-out" class="ipe-live-out"></div>'+
+            '</div>'+
+        '</details>'+
         '<div id="ipe-layers-box" style="display:none">'+
             ipeImgLayerRowsHTML("ipe", false)+
             '<div class="ipe-hint" style="margin-top:6px">锁住的层不重提，原样沿用框里那段；「只重摇这层」= 其余各层临时锁定。场景没换时环境层、基调没变时氛围层，自动沿用本聊天上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose} 单独放置，{Description} 拿剩下的层；只写 {Description} 就是五层拼成一段。下面这框是拼好的整段，直接改也行。</div>'+
@@ -6529,7 +6694,9 @@ function ipeArrangeUI() {
         var image = drawer.querySelector('[data-ipe-tab="image"]');
         if (image) {
             var markers = Array.from(image.children).filter(function(el){ return el.tagName === "HR" && el.nextElementSibling && el.nextElementSibling.tagName === "SMALL" && el.nextElementSibling.querySelector("b"); });
-            var keys = ["api", "system", "template", "anchors", "rules", "preview"];
+            /* 2.26.0 补上 common：2.23.0 加了「公共块」小标题却没补名字，之后整体错一格——
+               抽屉里被当成「预览」挪到最上面展开的其实是「提取规则」，真正的预览（状态行、提取 / 打断按钮）压在最底下还折着 */
+            var keys = ["api", "system", "template", "common", "anchors", "rules", "preview"];
             markers.forEach(function(marker, i){
                 var heading = marker.nextElementSibling;
                 var card = wrap(marker, markers[i + 1] || null, "drawer-image-" + keys[i], heading.textContent, keys[i] === "preview");
@@ -6667,6 +6834,9 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-btn-models" class="menu_button" value="加载模型"><input type="button" id="iped-btn-test" class="menu_button" value="测试连接"></div>';
     h += '<div id="iped-models-status" style="display:none;color:#888;font-size:12px;margin:4px 0;white-space:pre-wrap;word-break:break-all"></div>';
     h += '<small style="color:#888">可保存多个 API 预设；切换预设会同步地址、key 和模型。</small>';
+    h += '<div style="margin-top:6px"><label>流式接收（边收边看思考与输出） <input type="checkbox" id="iped-img-stream"></label></div>';
+    h += '<label>空闲超时（秒，0 = 永不）</label><input type="text" id="iped-img-idle" class="text_pole" placeholder="120">';
+    h += '<small style="color:#888">默认开。状态行按秒走，预览区「实况」框边收边显示思考与输出，连没连上一眼就知道；关了就是老的整包干等。空闲超时 = 连续多少秒一个字节都没收到才判死，判死算一次失败，照常自动重试一次。</small>';
     h += '<hr><small><b>系统提示</b></small>';
     h += '<label>系统提示预设</label><select id="iped-system-slot" class="text_pole"></select>';
     h += '<textarea id="iped-system-prompt" class="text_pole" rows="4" placeholder="系统提示词"></textarea>';
@@ -6707,6 +6877,9 @@ function createDrawer() {
     h += '<hr><small><b>预览</b></small>';
     h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
     h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
+    h += '<details id="iped-live" class="ipe-fold ipe-live" data-ipe-fold="drawer-image-live" open style="display:none"><summary><span id="iped-live-title">🛰 实况</span><span id="iped-live-meta" class="ipe-live-meta"></span></summary><div class="ipe-fold-body">'
+       + '<div id="iped-live-think-wrap" style="display:none"><div class="ipe-live-label">💭 思考</div><div id="iped-live-think" class="ipe-live-think"></div></div>'
+       + '<div class="ipe-live-label">✍️ 输出</div><div id="iped-live-out" class="ipe-live-out"></div></div></details>';
     h += '<div id="iped-layers-box" style="display:none">' + ipeImgLayerRowsHTML("iped", true)
        + '<small style="color:#888">锁住的层不重提；「只重摇这层」= 其余各层临时锁定。环境 / 氛围没变时沿用上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose}，{Description} 拿剩下的层。</small></div>';
     h += '<textarea id="iped-preview-text" class="text_pole" rows="5" placeholder="生成的 Description 将显示在这里…"></textarea>';
@@ -8903,10 +9076,11 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
 
     processing = true;
     var ball = q("#ipe-chat-quick-entry"); if(ball)ball.classList.add("processing");
-    setStatus(retryAttempt > 0 ? "正在自动重试提取…" : (ipeImgLayeredOn() ? "正在分层提取…" : "正在提取…"),"#6ec577"); setBtns(false,false);
+    var startText = retryAttempt > 0 ? "正在自动重试提取…" : (ipeImgLayeredOn() ? "正在分层提取…" : "正在提取…");
+    setStatus(startText,"#6ec577"); setBtns(false,false);
     var layerNote = "";
     try {
-        var desc = await callAPI(text, supplement||"", lockOverride);
+        var desc = await callAPI(text, supplement||"", lockOverride, startText);   // 2.26.0 状态行接着这句往后报进度
         var cast = ipeCastProcess(desc);
         var castPending = !!(cast && cast.block);
         if (cast) desc = cast.text;

@@ -2559,3 +2559,22 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processin
 @keyframes ipe-cap-ledger-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(143,171,220,.80); } 50% { box-shadow: 0 0 0 4.5px rgba(143,171,220,0); } }
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7f9dd6; box-shadow: 0 0 2.5px rgba(127,157,214,.95); }
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { background: #f7ea5e; box-shadow: 0 0 2.5px rgba(230,205,40,.95); }
+
+/* ============================================================
+   🎨 2.26.0 生图流式 · 实况框
+   借 .ipe-fold 的卡片皮（七套配色已有），里面两栏小字、限高内滚；颜色一律半透明，深浅皮都能看。
+   ============================================================ */
+.ipe-live > summary { display: flex; align-items: center; gap: 2px 6px; flex-wrap: wrap; }   /* 居中：面板皮给折叠卡标题设了 38px 触屏高度，基线对齐会把字顶到上面、底下空一截 */
+.ipe-live > summary::after { margin-left: auto; }
+.ipe-live-meta { font-weight: 400; font-size: 11px; opacity: .75; font-variant-numeric: tabular-nums; }
+.ipe-live.ipe-live-done .ipe-live-meta { color: #6ec577; opacity: 1; }
+.ipe-live.ipe-live-fail .ipe-live-meta { color: #d4726a; opacity: 1; }
+.ipe-live-label { font-size: 11px; opacity: .6; margin: 2px 0 3px; }
+.ipe-live-think, .ipe-live-out {
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+    font-size: 11.5px; line-height: 1.5; max-height: 132px; overflow-y: auto;
+    padding: 6px 8px; border-radius: 6px; background: rgba(127,127,127,.10);
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+.ipe-live-think { opacity: .72; font-style: italic; margin-bottom: 6px; }
+.ipe-live-out:empty::before { content: "（还没开始写）"; opacity: .45; }

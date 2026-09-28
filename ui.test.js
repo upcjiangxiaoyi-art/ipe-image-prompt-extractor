@@ -23,6 +23,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(new Set(beforeIDs).size === beforeIDs.length, '两处入口没有重复控件 ID');
         check(panel.querySelector('.ipe-sections').firstElementChild.id === 'ipe-section-preview', '浮窗预览在生图配置之前');
         check(drawer.querySelector('[data-ipe-tab="image"]').firstElementChild.dataset.ipeFold === 'drawer-image-preview', '抽屉预览在生图配置之前');
+        // 2.26.0：以前只看名字，名字错一格也照样过——现在看内容：置顶展开的那张卡里真有状态行和预览框，每张卡名字和标题对得上
+        const drawerCards = [...drawer.querySelectorAll('[data-ipe-tab="image"] > details')];
+        const firstCard = drawerCards[0];
+        check(firstCard.open && !!firstCard.querySelector('#iped-status') && !!firstCard.querySelector('#iped-preview-text') && firstCard.querySelector('summary').textContent === '预览', '抽屉置顶展开的就是真正的预览（状态行、预览框都在里面）');
+        const wantTitle = { api: 'API 配置', system: '系统提示', template: '基础模板', common: '公共块', anchors: '角色锚点', rules: '提取规则', preview: '预览' };
+        check(drawerCards.length === 7 && drawerCards.every(c => wantTitle[c.dataset.ipeFold.replace('drawer-image-', '')] === c.querySelector('summary').textContent), '抽屉七张卡的名字和标题一一对上（' + drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '') + '=' + c.querySelector('summary').textContent).join(' ') + '）');
         check(drawer.querySelector('.inline-drawer-content').firstElementChild.classList.contains('ipe-tabs'), '抽屉导航置顶');
         for (const key of ['api', 'system', 'template', 'anchors', 'rules']) check(!drawer.querySelector('[data-ipe-fold="drawer-image-' + key + '"]').open, '抽屉 ' + key + ' 默认收起');
         for (const prefix of ['ipe', 'iped']) {
