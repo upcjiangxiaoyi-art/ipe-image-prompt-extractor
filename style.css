@@ -469,7 +469,7 @@
 }
 @keyframes ipe-cap-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(176, 177, 207, .65); }
-    50%      { box-shadow: 0 0 0 9px rgba(176, 177, 207, 0); }
+    50%      { box-shadow: 0 0 0 4.5px rgba(176, 177, 207, 0); }
 }
 
 #ipe-chat-quick-entry.ipe-ledger-busy {
@@ -477,28 +477,30 @@
 }
 @keyframes ipe-cap-ledger-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(126, 151, 172, .60); }
-    50%      { box-shadow: 0 0 0 9px rgba(126, 151, 172, 0); }
+    50%      { box-shadow: 0 0 0 4.5px rgba(126, 151, 172, 0); }
 }
 /* 记账与生图同时忙时，记账脉冲优先（时效风险更高） */
 #ipe-chat-quick-entry.ipe-ledger-busy.processing {
     animation: ipe-cap-ledger-pulse 1.4s ease-in-out infinite;
 }
 
-/* 记账小灯：胶囊左侧雾蓝点（伪元素即 flex 子项，无需定位） */
+/* 记账小灯：胶囊左侧雾蓝点（伪元素即 flex 子项，无需定位）
+   2.25.1 袖珍浮标：小灯、间距、发光跟着胶囊一起减半。小灯取整数 4px 不取 3.5px：半像素会把后面的胶囊推到 x.5 的位置，
+   浏览器按像素对齐时胶囊右端被裁掉一截、小灯也被压扁 */
 #ipe-chat-quick-entry.ipe-ledger-busy::before {
     content: "";
-    width: 7px; height: 7px; border-radius: 50%;
+    width: 4px; height: 4px; border-radius: 50%;
     background: #7E97AC;
-    box-shadow: 0 0 5px rgba(126, 151, 172, .8);
-    margin-right: 4px; align-self: center; flex: none;
+    box-shadow: 0 0 2.5px rgba(126, 151, 172, .8);
+    margin-right: 2px; align-self: center; flex: none;
 }
 /* 有结果待注入：胶囊右侧绿点 */
 #ipe-chat-quick-entry.has-result::after {
     content: "";
-    width: 7px; height: 7px; border-radius: 50%;
+    width: 4px; height: 4px; border-radius: 50%;
     background: #6ec577;
-    box-shadow: 0 0 4px rgba(110, 197, 119, .6);
-    margin-left: 4px; align-self: center; flex: none;
+    box-shadow: 0 0 2px rgba(110, 197, 119, .6);
+    margin-left: 2px; align-self: center; flex: none;
 }
 
 
@@ -511,10 +513,10 @@
    ============================================================ */
 #ipe-chat-quick-entry.processing::after {
     content: "";
-    width: 7px; height: 7px; border-radius: 50%;
+    width: 4px; height: 4px; border-radius: 50%;
     background: #B0B1CF;
-    box-shadow: 0 0 5px rgba(176, 177, 207, .85);
-    margin-left: 4px; align-self: center; flex: none;
+    box-shadow: 0 0 2.5px rgba(176, 177, 207, .85);
+    margin-left: 2px; align-self: center; flex: none;
     animation: ipe-lamp-breathe 1.2s ease-in-out infinite;
 }
 @keyframes ipe-lamp-breathe {
@@ -1371,12 +1373,12 @@ body.ipe-skin-mist:not(#_) #ipe-chat-quick-entry svg circle {
 
 #ipe-chat-quick-entry.processing::after {
     background: #9b90cb !important;
-    box-shadow: 0 0 6px rgba(155, 144, 203, .88) !important;
+    box-shadow: 0 0 3px rgba(155, 144, 203, .88) !important;
 }
 
 #ipe-chat-quick-entry.ipe-ledger-busy::before {
     background: #76b5ca !important;
-    box-shadow: 0 0 6px rgba(118, 181, 202, .85) !important;
+    box-shadow: 0 0 3px rgba(118, 181, 202, .85) !important;
 }
 
 /* ============================================================
@@ -2333,12 +2335,12 @@ html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg text { fill: #0b5c7e 
 html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg circle,
 html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg path { stroke: #ffffff !important; }
 html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-beach; }
-@keyframes ipe-cap-pulse-beach { 0%, 100% { box-shadow: 0 0 0 0 rgba(232,178,198,.75); } 50% { box-shadow: 0 0 0 9px rgba(232,178,198,0); } }
+@keyframes ipe-cap-pulse-beach { 0%, 100% { box-shadow: 0 0 0 0 rgba(232,178,198,.75); } 50% { box-shadow: 0 0 0 4.5px rgba(232,178,198,0); } }
 html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy,
 html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-beach; }
-@keyframes ipe-cap-ledger-pulse-beach { 0%, 100% { box-shadow: 0 0 0 0 rgba(0,145,189,.60); } 50% { box-shadow: 0 0 0 9px rgba(0,145,189,0); } }
-html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #0091bd; box-shadow: 0 0 5px rgba(0,145,189,.8); }
-html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.processing::after { background: #e8b2c6; box-shadow: 0 0 5px rgba(232,178,198,.9); }
+@keyframes ipe-cap-ledger-pulse-beach { 0%, 100% { box-shadow: 0 0 0 0 rgba(0,145,189,.60); } 50% { box-shadow: 0 0 0 4.5px rgba(0,145,189,0); } }
+html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #0091bd; box-shadow: 0 0 2.5px rgba(0,145,189,.8); }
+html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry.processing::after { background: #e8b2c6; box-shadow: 0 0 2.5px rgba(232,178,198,.9); }
 
 /* 2.19.13 珠光海螺 🐚 · 取自月光石色系「雾蓝月辉」：6f7f92 风暴蓝 · c9d0d8 银纱薄雾 · f6f2d8 月漾奶黄 · f3eee7 珍珠白。
    叠在浅色皮上只换颜色：左上灰蓝莫兰迪、右下珍珠白，中段银雾过渡，一点月漾奶黄做暖光；
@@ -2442,12 +2444,12 @@ html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg text { fill: #2f3b4a 
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg circle,
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg path { stroke: #ffffff !important; }
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-pearl; }
-@keyframes ipe-cap-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,208,216,.85); } 50% { box-shadow: 0 0 0 9px rgba(201,208,216,0); } }
+@keyframes ipe-cap-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,208,216,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(201,208,216,0); } }
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy,
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-pearl; }
-@keyframes ipe-cap-ledger-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(111,127,146,.65); } 50% { box-shadow: 0 0 0 9px rgba(111,127,146,0); } }
-html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #56677c; box-shadow: 0 0 5px rgba(111,127,146,.9); }
-html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.processing::after { background: #c9d0d8; box-shadow: 0 0 5px rgba(111,127,146,.85); }
+@keyframes ipe-cap-ledger-pulse-pearl { 0%, 100% { box-shadow: 0 0 0 0 rgba(111,127,146,.65); } 50% { box-shadow: 0 0 0 4.5px rgba(111,127,146,0); } }
+html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #56677c; box-shadow: 0 0 2.5px rgba(111,127,146,.9); }
+html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry.processing::after { background: #c9d0d8; box-shadow: 0 0 2.5px rgba(111,127,146,.85); }
 
 /* 2.19.14 柠檬海滩 🍋 · 三色组合：f7ea5e 柠檬黄 · afc5e6 长春花蓝 · f4b4d0 樱花粉。
    叠在浅色皮上只换颜色：左上柠檬黄、中段亮白、右下樱花粉，长春花蓝在右侧点一片；
@@ -2551,9 +2553,9 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg text { fill: #2f3f5c 
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg circle,
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg path { stroke: #ffffff !important; }
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-lemon; }
-@keyframes ipe-cap-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(247,234,94,.90); } 50% { box-shadow: 0 0 0 9px rgba(247,234,94,0); } }
+@keyframes ipe-cap-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(247,234,94,.90); } 50% { box-shadow: 0 0 0 4.5px rgba(247,234,94,0); } }
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy,
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-lemon; }
-@keyframes ipe-cap-ledger-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(143,171,220,.80); } 50% { box-shadow: 0 0 0 9px rgba(143,171,220,0); } }
-html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7f9dd6; box-shadow: 0 0 5px rgba(127,157,214,.95); }
-html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { background: #f7ea5e; box-shadow: 0 0 5px rgba(230,205,40,.95); }
+@keyframes ipe-cap-ledger-pulse-lemon { 0%, 100% { box-shadow: 0 0 0 0 rgba(143,171,220,.80); } 50% { box-shadow: 0 0 0 4.5px rgba(143,171,220,0); } }
+html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7f9dd6; box-shadow: 0 0 2.5px rgba(127,157,214,.95); }
+html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { background: #f7ea5e; box-shadow: 0 0 2.5px rgba(230,205,40,.95); }

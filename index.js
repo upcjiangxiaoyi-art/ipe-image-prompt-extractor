@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.25.0";
+var IPE_VERSION = "2.25.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6045,9 +6045,11 @@ function createChatQuickButton() {
     imp("display", "inline-flex");
     imp("align-items", "center");
     imp("justify-content", "center");
-    imp("gap", "4px");
-    imp("height", "30px");
-    imp("min-height", "30px");
+    /* 2.25.1 袖珍浮标：整体缩到原来的一半。高度 30 → 15px，宽度由 SVG 按 120:44 自己算，比例、样子一丝不动；
+       投影、两侧小灯、忙碌脉冲外扩（style.css）一起减半 */
+    imp("gap", "2px");
+    imp("height", "15px");
+    imp("min-height", "15px");
     imp("padding", "0");
     imp("border-radius", "999px");
     imp("border", "none");
@@ -6064,7 +6066,7 @@ function createChatQuickButton() {
         try { btn.querySelectorAll("animate").forEach(function(a){ a.remove(); }); } catch(eA) {}
         imp("filter", "none");
     } else {
-        imp("filter", "drop-shadow(0 6px 14px rgba(0,0,0,.30))");
+        imp("filter", "drop-shadow(0 3px 7px rgba(0,0,0,.30))");
     }
     imp("z-index", "2147483647");
     imp("cursor", "grab");
@@ -6082,7 +6084,7 @@ function createChatQuickButton() {
     var startTop = 0;
 
     function clampPos(left, top) {
-        var w = 88, h = 36;
+        var w = 44, h = 18;
         try {
             var rect = btn.getBoundingClientRect();
             if (rect && rect.width) w = rect.width;

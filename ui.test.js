@@ -110,6 +110,11 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.ui.createChatQuickButton();
         const cap = d.querySelector('#ipe-chat-quick-entry');
         check(!!cap && !!cap.querySelector('animate') && String(cap.getAttribute('style') || '').includes('drop-shadow'), '浮标波纹动画与阴影滤镜按作者要求原样保留（2.19.6）');
+        // 2.25.1 袖珍浮标：整体减半，SVG 比例不动；小灯必须是整数像素（3.5px 会把胶囊推到半像素位置，右端被裁、小灯被压扁）
+        const capCss = fs.readFileSync(__dirname + '/style.css', 'utf8');
+        const lampSizes = [...capCss.matchAll(/#ipe-chat-quick-entry\.[\w-]+::(?:before|after)\s*\{[^}]*?width:\s*([\d.]+)px;\s*height:\s*([\d.]+)px/g)].map(m => m[1] + 'x' + m[2]);
+        check(cap.style.height === '15px' && cap.style.minHeight === '15px' && cap.querySelector('svg').getAttribute('viewBox') === '0 0 120 44' && String(cap.getAttribute('style')).includes('drop-shadow(0 3px 7px'), '浮标高 15px（原来 30px），投影同比减半，SVG 画布比例原样');
+        check(lampSizes.length === 3 && lampSizes.every(s => s === '4x4') && !/0 0 0 9px/.test(capCss) && (capCss.match(/0 0 0 4\.5px/g) || []).length === 8, '三颗小灯都是整数 4px、八套忙碌脉冲外扩都减半到 4.5px（' + lampSizes.join(' ') + '）');
         // 2.19.16 浮标动效开关：关 = 无 <animate>、无 drop-shadow；开 = 恢复；面板 / 抽屉两个勾同步
         w.eval('window.ui.ipeRebuildQuickButton = ipeRebuildQuickButton;');
         const motionCb = d.querySelector('#ipe-quick-motion'), motionCbD = d.querySelector('#iped-quick-motion');
