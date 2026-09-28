@@ -1161,8 +1161,8 @@ await (async () => {
     // 换画风：快捷下拉选动漫 → 模板预设同步 → 点按钮
     const quick = d.querySelector("#ipe-reinject-tpl"); ok(!!quick && quick.options.length === 2, "预览区有快捷模板下拉，两个模板都在");
     quick.value = "tpl_b"; quick.dispatchEvent(new w.Event("change", { bubbles: true }));
-    eq(st.activeBaseTemplate, "tpl_b", "快捷下拉选了就是切换基础模板");
-    eq(d.querySelector("#ipe-template-slot").value, "tpl_b", "基础模板区的下拉同步");
+    eq(st.activeBaseTemplate, "tpl_b", "快捷下拉选了就是切换画风模板");
+    eq(d.querySelector("#ipe-template-slot").value, "tpl_b", "画风模板区的下拉同步");
     d.querySelector("#ipe-btn-reinject").click();
     eq(tavern.chat[9].mes, "正文。\n\nANIME[ new desc ]END", "按钮：currentIdx 没定位时落到最后一条 AI 楼，旧 <draw> 没了、只有动漫块，不重复");
     eq(mesText.querySelectorAll("p").length, 1, "DOM 里也只有一段"); eq(mesText.querySelector("p").textContent, "ANIME[ new desc ]END", "DOM 里那段换成了动漫块（按 extra 记录的原文认旧段）");

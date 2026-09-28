@@ -27,8 +27,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const drawerCards = [...drawer.querySelectorAll('[data-ipe-tab="image"] > details')];
         const firstCard = drawerCards[0];
         check(firstCard.open && !!firstCard.querySelector('#iped-status') && !!firstCard.querySelector('#iped-preview-text') && firstCard.querySelector('summary').textContent === '预览', '抽屉置顶展开的就是真正的预览（状态行、预览框都在里面）');
-        const wantTitle = { api: 'API 配置', system: '系统提示', template: '基础模板', common: '公共块', anchors: '角色锚点', rules: '提取规则', preview: '预览' };
+        const wantTitle = { api: 'API 配置', system: '系统提示', template: '画风模板', common: '公共块', anchors: '角色锚点', rules: '提取规则', preview: '预览' };
         check(drawerCards.length === 7 && drawerCards.every(c => wantTitle[c.dataset.ipeFold.replace('drawer-image-', '')] === c.querySelector('summary').textContent), '抽屉七张卡的名字和标题一一对上（' + drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '') + '=' + c.querySelector('summary').textContent).join(' ') + '）');
+        // 2.26.2 界面上「基础模板」改叫「画风模板」：两处入口都搜不到旧名字，面板区块标题是新名字
+        check(panel.querySelector('#ipe-section-base-template > .ipe-section-header').textContent.includes('画风模板') && !panel.textContent.includes('基础模板') && !drawer.textContent.includes('基础模板'), '「基础模板」改叫「画风模板」：面板标题换了，面板和抽屉里都再看不到旧名字');
         check(drawer.querySelector('.inline-drawer-content').firstElementChild.classList.contains('ipe-tabs'), '抽屉导航置顶');
         for (const key of ['api', 'system', 'template', 'anchors', 'rules']) check(!drawer.querySelector('[data-ipe-fold="drawer-image-' + key + '"]').open, '抽屉 ' + key + ' 默认收起');
         for (const prefix of ['ipe', 'iped']) {

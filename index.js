@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.26.1";
+var IPE_VERSION = "2.26.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -3573,7 +3573,7 @@ function ipeAddTemplatePreset() {
 function ipeDeleteTemplatePreset() {
     var list = ipeGetBaseTemplates();
     if (list.length <= 1) {
-        setStatus("至少保留一个基础模板", "#d4726a");
+        setStatus("至少保留一个画风模板", "#d4726a");
         return;
     }
     var active = ipeGetActiveTemplateId();
@@ -6434,7 +6434,7 @@ function createPanel() {
         '<textarea id="ipe-system-prompt" rows="5" placeholder="系统提示词"></textarea>'+
         '<div class="ipe-hint">两套固定预设：情感 / 剧情。当前选中的系统提示会用于提取请求</div>');
 
-    h += secHTML("base-template","基础模板", true,
+    h += secHTML("base-template","画风模板", true,   // 2.26.2 界面上改叫「画风模板」（原「基础模板」，大家说找不到）；存储键 baseTemplatesJson、控件 id 不变
         '<label>模板预设<select id="ipe-template-slot"></select></label>'+
         '<label>模板名称<input type="text" id="ipe-template-name" value="" placeholder="例如：乙游CG"></label>'+
         '<label>挂公共块<select id="ipe-template-common"></select></label>'+
@@ -6460,7 +6460,7 @@ function createPanel() {
             '<button id="ipe-common-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-common-text" rows="6" placeholder="人物族裔 / 年龄 / 性别、人物区分、解剖与手、视线不看观众、无文字水印……收尾句也放这里的末尾"></textarea>'+
-        '<div class="ipe-hint">画风模板共用的通用规则写在这里，画风正文只写画风本身。模板在「基础模板」里选挂哪一份；顺序是 场景五段 → 画风正文 → 公共块。模板正文里已经原样带着这段文字的，不会再叠一份。删除公共块时，挂着它的模板改为不挂。</div>'+
+        '<div class="ipe-hint">画风模板共用的通用规则写在这里，画风正文只写画风本身。模板在「画风模板」里选挂哪一份；顺序是 场景五段 → 画风正文 → 公共块。模板正文里已经原样带着这段文字的，不会再叠一份。删除公共块时，挂着它的模板改为不挂。</div>'+
         '<label style="margin-top:8px">批量挂接：名字含<input type="text" id="ipe-common-batch-kw" value="" placeholder="留空 = 全部模板"></label>'+
         '<label>挂到<select id="ipe-common-batch-target"></select></label>'+
         '<div class="ipe-preview-actions" style="margin-top:2px">'+
@@ -6542,7 +6542,7 @@ function createPanel() {
         '<button id="ipe-btn-inject" class="ipe-btn ipe-btn-primary" disabled>确认注入</button></div>'+
         '<div class="ipe-preview-actions" style="margin-top:6px;align-items:center"><select id="ipe-reinject-tpl" style="flex:1;min-width:0"></select>'+
         '<button id="ipe-btn-reinject" class="ipe-btn" style="flex:none">换画风重注入</button></div>'+
-        '<div class="ipe-hint">不重新提取：换个基础模板，把这楼楼尾那块 &lt;draw&gt; 按新模板重拼一遍替换掉，旧的不留。这里选的就是「基础模板」里的模板预设，两边同步。</div>');
+        '<div class="ipe-hint">不重新提取：换个画风模板，把这楼楼尾那块 &lt;draw&gt; 按新模板重拼一遍替换掉，旧的不留。这里选的就是「画风模板」里的模板预设，两边同步。</div>');
 
     h += secHTML("ledger","\uD83D\uDCCB 账本（本聊天）", false,
         '<div id="ipe-ledger-chatkey" class="ipe-hint" style="margin-bottom:6px"></div>'+
@@ -6884,7 +6884,7 @@ function createDrawer() {
     h += '<label>系统提示预设</label><select id="iped-system-slot" class="text_pole"></select>';
     h += '<textarea id="iped-system-prompt" class="text_pole" rows="4" placeholder="系统提示词"></textarea>';
     h += '<small style="color:#888">两套固定预设：情感 / 剧情</small>';
-    h += '<hr><small><b>基础模板</b></small>';
+    h += '<hr><small><b>画风模板</b></small>';
     h += '<label>模板预设</label><select id="iped-template-slot" class="text_pole"></select>';
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
     h += '<label>挂公共块</label><select id="iped-template-common" class="text_pole"></select>';
@@ -6938,7 +6938,7 @@ function createDrawer() {
     h += '</div>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;align-items:center"><select id="iped-reinject-tpl" class="text_pole" style="flex:1;min-width:0"></select>';
     h += '<input type="button" id="iped-btn-reinject" class="menu_button" value="换画风重注入"></div>';
-    h += '<small style="color:#888">不重新提取：换个基础模板，把这楼楼尾那块 &lt;draw&gt; 按新模板重拼替换。</small>';
+    h += '<small style="color:#888">不重新提取：换个画风模板，把这楼楼尾那块 &lt;draw&gt; 按新模板重拼替换。</small>';
     h += '</div>';
     h += '<div data-ipe-tab="ledger">';
     h += '<div id="iped-ledger-chatkey" style="color:#888;font-size:11px;margin:4px 0"></div>';
@@ -7363,7 +7363,7 @@ function ipeImgPackImportText(txt, opts) {
    完成、点遮罩、Esc 都关；关的时候补发一次 change。
    ============================================================ */
 var IPE_ZOOM_TITLES = {
-    "ipe-system-prompt": "系统提示", "ipe-base-template": "基础模板", "ipe-common-text": "公共块", "ipe-char-anchors": "角色锚点",
+    "ipe-system-prompt": "系统提示", "ipe-base-template": "画风模板", "ipe-common-text": "公共块", "ipe-char-anchors": "角色锚点",
     "ipe-anchor-guide-editor": "通用锚点规则", "ipe-extract-rules": "提取规则", "ipe-preview-text": "生图描述（整段）",
     "ipe-layer-camera": "📷 镜头层", "ipe-layer-env": "🌆 环境层", "ipe-layer-mood": "🎞️ 氛围层",
     "ipe-layer-chars": "🧍 人物层", "ipe-layer-pose": "🤝 动作层",
