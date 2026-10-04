@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.26.4";
+var IPE_VERSION = "2.27.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -966,19 +966,42 @@ var ipeLedgerReportTruncated = false;
 var ipeLedgerLastUserChars = 0;      // 上次拼装后的总字数，面板灰字用
 
 /* ---- 账本历史层 ---- */
-function ipeLedgerHistoryBlock() {
+/* 2.27.0 旧账「攒两楼再换」：喂哪几版旧账，不再每楼往前挪一格。
+   上一发喂的最老那版钉住，新落的一版只往后接；接到比旋钮多一版（旋钮 3 版 → 旧账 2 版、3 版轮着来，再加现任），
+   下一发就跳回最近几版重新钉。开头没动的那一发，账本历史整段跟上一发一字不差，副 AI 那头的前缀缓存吃得上；跳的那一发断一次。
+   旋钮 1 版只喂现任，没得攒。钉子只记在内存里、按聊天认：刷新页面就从最近几版重新钉，顶多断一次缓存。
+   dry = 面板估字数的干跑：只看不挪钉子。不然估一下就把钉子推到下一楼的位置，重 roll 本楼时就跟上一发对不上了。 */
+var ipeLedgerHisPin = null;   // { chat, floor, ts }：上一发喂的最老那版旧账
+function ipeLedgerHistoryPick(vs, n, dry) {   // vs：旧版，新 → 旧；返回要喂的那几版，同样新 → 旧
+    var want = Math.max(0, n - 1);
+    if (!want || !vs.length) return [];
+    var base = Math.min(want, vs.length), cnt = base;
+    var key = ipeChatKey(), pin = ipeLedgerHisPin;
+    if (pin && pin.chat === key) {
+        for (var i = 0; i < vs.length; i++) {
+            if (vs[i].floor !== pin.floor || vs[i].ts !== pin.ts) continue;
+            if (i + 1 >= base && i + 1 <= want + 1) cnt = i + 1;   // 还钉得住：从它一路喂到最新；攒满了 / 不够数就跳回最近几版
+            break;
+        }
+    }
+    var pick = vs.slice(0, cnt);
+    if (!dry) ipeLedgerHisPin = { chat: key, floor: pick[cnt - 1].floor, ts: pick[cnt - 1].ts };
+    return pick;
+}
+function ipeLedgerHistoryBlock(dry) {
     var n = Number(cfg().ledgerVersionsN);
     if (!Number.isFinite(n) || n < 1) n = 3;
     if (n > 5) n = 5;
     var st = ipeLedgerRead();
     // 「压缩前」备份不喂：刚压完就把压缩前的全本喂回去，副 AI 会照着重新写长
-    var vs = st.versions.filter(function(v){ return !v.tag; }).slice(0, Math.max(0, n - 1));   // 旧版
+    var vs = ipeLedgerHistoryPick(st.versions.filter(function(v){ return !v.tag; }), n, dry);   // 旧版
     var out = [];
     for (var i = vs.length - 1; i >= 0; i--) {           // 旧 → 新
         out.push("\u3010\u7b2c " + (vs[i].floor >= 0 ? vs[i].floor : "?") + " \u697c\u65f6\u7248\u672c\u3011\n" + vs[i].text);
     }
     if (String(st.current || "").trim()) {
-        out.push("\u3010\u5f53\u524d\u7248\u672c\uff08\u7b2c " + (st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo()) + " \u697c\uff09\u3011\n" + st.current);
+        // 2.27.0 现任跟旧版用同一种标题：下一楼它变成旧版时标题一字不变，这一整份也吃得上缓存。哪份是现任写在段头
+        out.push("\u3010\u7b2c " + (st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo()) + " \u697c\u65f6\u7248\u672c\u3011\n" + st.current);
     }
     // 空账本必须说出来。什么都不说，副 AI 会以为不用建。
     if (!out.length) return "（当前还没有账本，这是第一次，请产出完整的一份。）";
@@ -1060,14 +1083,17 @@ function ipeLedgerStripImageTag(text) {
     return out;
 }
 
-/* 2.26.4 段落按「多久变一次」排，越稳越靠前：副 AI 那头的前缀缓存只认从头起一字不差的那一段，
+/* 段落按「多久变一次」排，越稳越靠前：副 AI 那头的前缀缓存只认从头起一字不差的那一段，
    中间哪段变了，它后面全部重新计费。
      规则（system）→ 本卡要点 → User 指令：几乎不变
-     剧情摘要 → 账本历史：每楼滑一格（最老的一条 / 一版挤出去）
+     账本历史：攒两楼再换（2.27.0），隔一楼整段跟上一发一字不差
+     剧情摘要：每楼滑一格（最老的一条挤出去）
      这次额外要求：只这一发；当前楼层 → 本轮正文：每楼都新
-   额外要求以前排在 User 指令后面，手动挂账改一句补充再重摇，摘要和账本历史整段都得重新算；
-   现在垫在后面，前面整段还能吃上一发的缓存。自动挂账不带额外要求，发出去的字一个没变。 */
-function ipeLedgerBuildUser(text, extra, atFloor) {
+   2.27.0 账本历史挪到剧情摘要前面：两块每楼都往后接新东西，排在前面那块一接新的，后面那块就跟着断，
+   只有排在前面的吃得到缓存。账本历史是几整份账本，比四五条摘要大得多。
+   2.26.4 这次额外要求垫到后面：手动挂账改一句补充再重摇，前面整段还能吃上一发的缓存。
+   dry = 面板估字数的干跑，见 ipeLedgerHistoryBlock。 */
+function ipeLedgerBuildUser(text, extra, atFloor, dry) {
     try { ipeLedgerReconcile(ipeFloorNo(), { silent: true }); } catch(eRec) {}   // 副 AI 只许拿活楼的账当底稿
     var st = ipeLedgerRead();
     var u = "";
@@ -1076,13 +1102,14 @@ function ipeLedgerBuildUser(text, extra, atFloor) {
     var order = String(st.order || "").trim();
     if (order) u += "\u3010User \u6307\u4ee4\u3011\n" + order + "\n\n";
 
+    var his = ipeLedgerHistoryBlock(dry);
+    var curNote = String(st.current || "").trim() ? " \u00b7 \u6700\u540e\u4e00\u4efd\u662f\u5f53\u524d\u7248\u672c" : "";   // · 最后一份是当前版本
+    if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0" + curNote + "\u3011\n" + his + "\n\n";
+
     ipeLedgerReportTruncated = false;
     var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
     var rep = ipeLedgerReportBlock(floorNo);
     if (rep) u += "\u3010\u5267\u60c5\u6458\u8981 \u00b7 \u8fd1 " + Number(cfg().ledgerReportFloors || 0) + " \u697c \u00b7 \u65e7\u2192\u65b0\u3011\n" + rep + "\n\n";
-
-    var his = ipeLedgerHistoryBlock();
-    if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0\u3011\n" + his + "\n\n";
 
     // 一次性补充：只这一发有效，不落盘，不污染常驻的 User 指令
     var ex = String(extra || "").trim();
@@ -1104,7 +1131,7 @@ function ipeLedgerEstimateChars() {
             if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m.mes; fl = i + 1; break; }
         }
         var sys = ipeLedgerSystemText().length;
-        var usr = ipeLedgerBuildUser(msg, "", fl).length;
+        var usr = ipeLedgerBuildUser(msg, "", fl, true).length;
         return sys + usr;
     } catch(e) { return 0; }
 }
@@ -1460,12 +1487,16 @@ function ipeLedgerCompressWarnChars() {
     var n = Number(cfg().ledgerCompressWarnChars);
     return (Number.isFinite(n) && n >= 0) ? n : 3000;
 }
-function ipeLedgerBuildCompressUser(cur) {
+function ipeLedgerBuildCompressUser(cur, extra) {
     var u = "";
     var note = ipeLedgerNoteValue().trim();
     if (note) u += "\u3010\u672c\u5361\u8981\u70b9\u3011\n" + note + "\n\n";
     u += "\u3010\u73b0\u4efb\u8d26\u672c\uff08" + cur.length + " \u5b57\uff09\u3011\n" + cur + "\n\n";
     u += ipeLedgerCompressPrompt() + "\n";
+    /* 2.27.0 「额外说一句」压缩也认：压不下去时提示叫人在这里点名哪段该合并再重 roll，以前请求里根本没带这一句。
+       排在压缩指令后面，改一句再重摇，前面的现任账本和指令还吃得上缓存。 */
+    var ex = String(extra || "").trim();
+    if (ex) u += "\n\u3010\u8fd9\u6b21\u989d\u5916\u8981\u6c42\u3011\n" + ex + "\n\n";
     u += "输出仍完整包在 " + ipeLedgerTagOpen() + " 和 " + ipeLedgerTagClose() + " 之间，标签外不写任何东西。";
     return u;
 }
@@ -1487,9 +1518,10 @@ async function ipeLedgerCompress() {
     if (!cur.trim()) { ipeLedgerStatus("账本是空的，没什么可压", "#c9a227"); return; }
     ipeLedgerPreviewKind = "compress";
     ipeLedgerSetBusy(true);
-    ipeLedgerStatus("正在压缩账本（" + cur.length + " 字）…副 AI 在合并支线、精简语言", "#c9a227");
+    var ex = ipeLedgerExtraOnce();
+    ipeLedgerStatus("正在压缩账本（" + cur.length + " 字）…副 AI 在合并支线、精简语言" + (ex ? "（带上了你补的那句）" : ""), "#c9a227");
     try {
-        var out = await ipeLedgerCallAPI("", "", ipeLedgerRead().lastFloor, ipeLedgerBuildCompressUser(cur));
+        var out = await ipeLedgerCallAPI("", "", ipeLedgerRead().lastFloor, ipeLedgerBuildCompressUser(cur, ex));
         var got = ipeLedgerExtract(out);
         var body = (got && got.text) ? got.text : String(out || "").trim();
         if (!body) { ipeLedgerPreviewKind = ""; ipeLedgerStatus("副 AI 回了个空，账本没动", "#d4726a"); return; }
@@ -8280,7 +8312,8 @@ function bindAll() {
         el.addEventListener("change", function(){
             save("ledgerVersionsN", Number(el.value) || 3);
             ipeLedgerRefreshBotEditors();
-            ipeLedgerStatus("账本历史带 " + (Number(el.value) || 3) + " 版", "#6ec577");
+            var vn = Number(el.value) || 3;
+            ipeLedgerStatus("账本历史带 " + vn + " 版" + (vn > 1 ? "（隔一楼多带一版旧账，好吃缓存）" : "（只带现任）"), "#6ec577");
         });
     });
 

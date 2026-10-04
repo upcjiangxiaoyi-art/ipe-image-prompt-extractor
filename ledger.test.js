@@ -68,7 +68,7 @@ function boot(floors) {
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeGetAnchorValue", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
         "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
-        "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
+        "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerEstimateChars", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -1601,7 +1601,7 @@ await (async () => {
     ok(d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("Normal 槽 →") >= 0 && d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("NSFW 槽 →") >= 0, "状态行同时报两个槽各选了什么");
 })();
 
-console.log("\n【47】 投喂顺序按变动频率排（2.26.4）：本卡要点 → User 指令 → 剧情摘要 → 账本历史 → 这次额外要求 → 当前楼层 → 本轮正文；只改补充那句重摇，前面整段一字不差");
+console.log("\n【47】 投喂顺序按变动频率排（2.26.4 / 2.27.0）：本卡要点 → User 指令 → 账本历史 → 剧情摘要 → 这次额外要求 → 当前楼层 → 本轮正文；只改补充那句重摇，前面整段一字不差");
 await (async () => {
     const { w, tavern, F } = boot(10);
     const st = withApi(tavern, F, "gpt-4.1");
@@ -1619,9 +1619,9 @@ await (async () => {
     await F("ipeLedgerCallAPI")(tavern.chat[9].mes, "", 10);
     const [a, b, c] = sent.map(x => x.messages[1].content);
     const at = h => a.indexOf(h);
-    const heads = ["【本卡要点】", "【User 指令】", "【剧情摘要", "【账本历史", "【这次额外要求】", "【当前楼层】", "【本轮正文】"];
+    const heads = ["【本卡要点】", "【User 指令】", "【账本历史", "【剧情摘要", "【这次额外要求】", "【当前楼层】", "【本轮正文】"];
     ok(heads.every(h => at(h) >= 0) && heads.every((h, i) => i === 0 || at(heads[i - 1]) < at(h)),
-        "段落顺序：本卡要点 → User 指令 → 剧情摘要 → 账本历史 → 这次额外要求 → 当前楼层 → 本轮正文", heads.map(h => h + "@" + at(h)).join(" "));
+        "段落顺序：本卡要点 → User 指令 → 账本历史 → 剧情摘要 → 这次额外要求 → 当前楼层 → 本轮正文", heads.map(h => h + "@" + at(h)).join(" "));
     ok(sent[0].messages[0].content === sent[1].messages[0].content, "system（挂账规则）两发一字不差");
     let k = 0; while (k < a.length && a[k] === b[k]) k++;
     const shared = a.slice(0, k);
@@ -1630,6 +1630,63 @@ await (async () => {
         "分叉在第 " + k + " 字，额外要求从第 " + at("【这次额外要求】") + " 字开始");
     ok(c.indexOf("【这次额外要求】") < 0, "不带补充（自动挂账就是这样）没有这一段");
     eq(c, a.replace("【这次额外要求】\n这楼的伤别记。\n\n", ""), "带不带补充，其余各段原样、顺序不变");
+})();
+
+console.log("\n【48】 账本历史攒两楼再换（2.27.0）：旧账 2、3 版轮着来，没跳的那一发从头到现任原样接着长；现任与旧版同一种标题；面板估字数不挪钉子，重 roll 本楼跟上一发一字不差；旋钮 2 版 1、2 版轮着来，1 版只喂现任");
+await (async () => {
+    const head = u => u.slice(0, u.indexOf("【当前楼层】"));                 // 开头到账本历史末尾（这几楼没写 report，后面直接是楼层）
+    const olds = u => (head(u).match(/楼时版本】/g) || []).length - 1;       // 减掉现任那份
+    const walk = (vn, to) => {
+        const { tavern, F } = boot(40);
+        tavern.extensionSettings[F("EXT_NAME")].ledgerVersionsN = vn;
+        const R = [];
+        for (let f = 2; f <= to; f += 2) {                                   // 偶数楼是 AI 楼：先拼请求，再落这楼的账
+            R.push({ f, u: F("ipeLedgerBuildUser")(tavern.chat[f - 1].mes, "", f) });
+            F("ipeLedgerCommit")("第 " + f + " 楼的账，够长够长够长够长够长。", f);
+        }
+        return { tavern, F, R };
+    };
+    const { tavern, F, R } = walk(3, 30);
+    const tail = R.filter(r => r.f >= 8);                                    // 第 8 楼起旧账够数
+    eq(tail.map(r => olds(r.u)).join(","), tail.map((r, i) => i % 2 ? 3 : 2).join(","), "旋钮 3 版：旧账 2、3 版轮着来（再加现任），最多只多一版");
+    let grew = 0, okPrefix = true;
+    for (let i = 1; i < R.length; i++) {
+        if (olds(R[i - 1].u) < 0 || olds(R[i].u) !== olds(R[i - 1].u) + 1) continue;   // 没跳的那一发（第一份账本之前是空账本，不算）
+        grew++;
+        if (R[i].u.indexOf(head(R[i - 1].u)) !== 0) okPrefix = false;
+    }
+    ok(grew >= 6 && okPrefix, "没跳的那一发：上一发从开头到账本历史末尾（连现任那份）原样是这一发的开头，前缀缓存吃得上", "没跳的 " + grew + " 发");
+    ok(R.every(r => r.u.indexOf("【当前版本") < 0), "现任不再单独叫「当前版本」：跟旧版同一种标题，变成旧版时一字不变");
+    ok(R.slice(1).every(r => r.u.indexOf("【账本历史 · 旧→新 · 最后一份是当前版本】") === 0), "段头写明最后一份是当前版本");
+    const last = R[R.length - 1];
+    ok(F("ipeLedgerEstimateChars")() > 0, "面板估字数照常出数");
+    F("ipeLedgerReconcile")(last.f - 1);                                     // 重 roll 第 30 楼：这楼的账撕掉，现任退回第 28 楼
+    eq(F("ipeLedgerBuildUser")(tavern.chat[last.f - 1].mes, "", last.f), last.u, "面板估过字数再重 roll 本楼：请求跟上一发一字不差（估字数是干跑，不挪钉子）");
+    const two = walk(2, 20).R.filter(r => r.f >= 6);
+    eq(two.map(r => olds(r.u)).join(","), two.map((r, i) => i % 2 ? 2 : 1).join(","), "旋钮 2 版：旧账 1、2 版轮着来");
+    const one = walk(1, 20).R.filter(r => r.f >= 4);
+    ok(one.every(r => olds(r.u) === 0), "旋钮 1 版：只喂现任，不攒");
+})();
+
+console.log("\n【49】 压缩账本带上「额外说一句」（2.27.0）：写了就进请求，排在压缩指令后面、包裹要求前面；没写跟以前一字不差");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    withApi(tavern, F, "gpt-4.1");
+    const big = "【楼层状态】\n" + Array.from({ length: 40 }, (_, i) => "- 第 " + (i + 1) + " 条：某支线的过程描写，够长够长够长。").join("\n");
+    F("ipeLedgerCommit")(big, 10);
+    const sent = [];
+    w.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>压过的账本，够长够长够长。</ledger>" } }] }) }; };
+    await F("ipeLedgerCompress")();
+    d.querySelector("#ipe-ledger-extra").value = "把第 3 到第 9 条合成一条。";
+    await F("ipeLedgerCompress")();                                          // 写一句再重摇
+    const [a, b] = sent.map(x => x.messages[1].content);
+    ok(a.indexOf("【这次额外要求】") < 0, "没写：请求里没有这一段");
+    const k = b.indexOf("【这次额外要求】\n把第 3 到第 9 条合成一条。");
+    ok(k >= 0, "写了：压缩请求带上这一句");
+    ok(k > b.indexOf("只删不添") && k < b.indexOf("输出仍完整包在"), "排在压缩指令后面、包裹要求前面");
+    eq(b.replace("\n【这次额外要求】\n把第 3 到第 9 条合成一条。\n\n", ""), a, "去掉这一段，其余跟没写时一字不差");
+    eq(F("ipeLedgerRead")().current, big, "只是预览，采用前账本没动");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
