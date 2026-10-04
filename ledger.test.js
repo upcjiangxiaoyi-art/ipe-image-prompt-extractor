@@ -1601,6 +1601,37 @@ await (async () => {
     ok(d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("Normal 槽 →") >= 0 && d.querySelector("#ipe-ledger-mode-now").textContent.indexOf("NSFW 槽 →") >= 0, "状态行同时报两个槽各选了什么");
 })();
 
+console.log("\n【47】 投喂顺序按变动频率排（2.26.4）：本卡要点 → User 指令 → 剧情摘要 → 账本历史 → 这次额外要求 → 当前楼层 → 本轮正文；只改补充那句重摇，前面整段一字不差");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
+    st.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "本卡要点", value: "左肩旧伤七天好。" }]);
+    st.activeLedgerNote = "ln_1";
+    tavern.chat[5].mes = "第6层 <report>六楼摘要</report>";
+    tavern.chat[7].mes = "第8层 <report>八楼摘要</report>";
+    F("ipeLedgerCommit")("第 6 楼的账，够长够长够长够长够长。", 6);
+    F("ipeLedgerCommit")("第 8 楼的账，够长够长够长够长够长。", 8);
+    const s0 = F("ipeLedgerRead")(); s0.order = "别写天气。"; F("ipeLedgerSave")(s0);
+    const sent = [];
+    w.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>x</ledger>" } }] }) }; };
+    await F("ipeLedgerCallAPI")(tavern.chat[9].mes, "这楼的伤别记。", 10);
+    await F("ipeLedgerCallAPI")(tavern.chat[9].mes, "伤照记，只是别升级。", 10);
+    await F("ipeLedgerCallAPI")(tavern.chat[9].mes, "", 10);
+    const [a, b, c] = sent.map(x => x.messages[1].content);
+    const at = h => a.indexOf(h);
+    const heads = ["【本卡要点】", "【User 指令】", "【剧情摘要", "【账本历史", "【这次额外要求】", "【当前楼层】", "【本轮正文】"];
+    ok(heads.every(h => at(h) >= 0) && heads.every((h, i) => i === 0 || at(heads[i - 1]) < at(h)),
+        "段落顺序：本卡要点 → User 指令 → 剧情摘要 → 账本历史 → 这次额外要求 → 当前楼层 → 本轮正文", heads.map(h => h + "@" + at(h)).join(" "));
+    ok(sent[0].messages[0].content === sent[1].messages[0].content, "system（挂账规则）两发一字不差");
+    let k = 0; while (k < a.length && a[k] === b[k]) k++;
+    const shared = a.slice(0, k);
+    ok(k > at("【这次额外要求】") && shared.indexOf("八楼摘要") >= 0 && shared.indexOf("第 8 楼的账") >= 0,
+        "只改补充那句：分叉点在剧情摘要、账本历史（连现任账本）之后，前面整段一字不差，前缀缓存吃得上",
+        "分叉在第 " + k + " 字，额外要求从第 " + at("【这次额外要求】") + " 字开始");
+    ok(c.indexOf("【这次额外要求】") < 0, "不带补充（自动挂账就是这样）没有这一段");
+    eq(c, a.replace("【这次额外要求】\n这楼的伤别记。\n\n", ""), "带不带补充，其余各段原样、顺序不变");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

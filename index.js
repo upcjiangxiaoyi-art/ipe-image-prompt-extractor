@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.26.3";
+var IPE_VERSION = "2.26.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1060,6 +1060,13 @@ function ipeLedgerStripImageTag(text) {
     return out;
 }
 
+/* 2.26.4 段落按「多久变一次」排，越稳越靠前：副 AI 那头的前缀缓存只认从头起一字不差的那一段，
+   中间哪段变了，它后面全部重新计费。
+     规则（system）→ 本卡要点 → User 指令：几乎不变
+     剧情摘要 → 账本历史：每楼滑一格（最老的一条 / 一版挤出去）
+     这次额外要求：只这一发；当前楼层 → 本轮正文：每楼都新
+   额外要求以前排在 User 指令后面，手动挂账改一句补充再重摇，摘要和账本历史整段都得重新算；
+   现在垫在后面，前面整段还能吃上一发的缓存。自动挂账不带额外要求，发出去的字一个没变。 */
 function ipeLedgerBuildUser(text, extra, atFloor) {
     try { ipeLedgerReconcile(ipeFloorNo(), { silent: true }); } catch(eRec) {}   // 副 AI 只许拿活楼的账当底稿
     var st = ipeLedgerRead();
@@ -1068,9 +1075,6 @@ function ipeLedgerBuildUser(text, extra, atFloor) {
     if (note)  u += "\u3010\u672c\u5361\u8981\u70b9\u3011\n" + note + "\n\n";
     var order = String(st.order || "").trim();
     if (order) u += "\u3010User \u6307\u4ee4\u3011\n" + order + "\n\n";
-    // 一次性补充：只这一发有效，不落盘，不污染常驻的 User 指令
-    var ex = String(extra || "").trim();
-    if (ex) u += "\u3010\u8fd9\u6b21\u989d\u5916\u8981\u6c42\u3011\n" + ex + "\n\n";
 
     ipeLedgerReportTruncated = false;
     var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
@@ -1079,6 +1083,10 @@ function ipeLedgerBuildUser(text, extra, atFloor) {
 
     var his = ipeLedgerHistoryBlock();
     if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0\u3011\n" + his + "\n\n";
+
+    // 一次性补充：只这一发有效，不落盘，不污染常驻的 User 指令
+    var ex = String(extra || "").trim();
+    if (ex) u += "\u3010\u8fd9\u6b21\u989d\u5916\u8981\u6c42\u3011\n" + ex + "\n\n";
 
     u += "\u3010\u5f53\u524d\u697c\u5c42\u3011\u7b2c " + floorNo + " \u697c\n\n";   // 正文取自哪层就报哪层，藏末楼时不再虚报 chat.length
     u += "\u3010\u672c\u8f6e\u6b63\u6587\u3011\n" + ipeTrimSourceText(ipeLedgerStripModeTag(ipeLedgerStripImageTag(text)));
