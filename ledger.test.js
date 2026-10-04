@@ -1792,7 +1792,7 @@ await (async () => {
         await w.eval("ipeLedgerRunManual")(); w.eval("ipeLedgerAdoptPreview")("panel");
         ok(cur().lastFloor === 10 && cur().current.includes("海边"), "按现在这条重新预览再采用：照常落账");
         w.eval("ipeLedgerPending = '被拦下的旧账：菜烧糊了，够长够长。'; ipeLedgerPendingInput = ipeLedgerInput(SillyTavern.getContext().chat[9], 10); ipeLedgerPreviewFloor = 10;");
-        tavern.chat[9].mes = "又改了一遍：他们在山上。";
+        tavern.chat[9].mes = "又改了一遍：他们在山上。"; await tavern.eventSource.emit("MESSAGE_EDITED", 9);   // 酒馆里改楼会发改楼事件
         w.document.querySelector("#ipe-ledger-force-btn").click();
         ok(!cur().current.includes("菜烧糊") && statusText(w).indexOf("作废没采用") >= 0, "被拦下以后那楼改了：强制采用不落账", statusText(w));
     }
@@ -1857,6 +1857,33 @@ await (async () => {
     w.fetch = async () => ({ ok: true, status: 200, body: sseBody([sse({ content: "<think>" + think }), "data: [DONE]\n\n"]) });
     await F("ipeLedgerRun")(9, false);
     ok(statusText(w).indexOf("思考 " + think.length + " 字") >= 0 && F("ipeLedgerRead")().current.indexOf("绷带") >= 0, "只想没写：按回了个空报失败（带上思考字数），账本没动", statusText(w));
+})();
+
+console.log("\n【52】 生图注入不算改楼（2.27.4）：挂账路上楼尾贴了生图段（正文末尾的空行被顺手去掉、画风模板不是标签包着的也一样），照常落账，不再挂第二次；同一楼的重复通知也认得出来；真改楼照旧作废重挂");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    async function midRun(mes, setup, during) {
+        const b = boot(10); const st = withApi(b.tavern, b.F); st.ledgerAutoRun = true;
+        if (setup) setup(st);
+        b.F("ipeLedgerCommit")("第八楼的账：大家在吃饭，够长够长够长。", 8);
+        b.tavern.chat[9].mes = mes;
+        const box = { calls: 0 }; let held = null;
+        b.w.fetch = () => { box.calls++; if (box.calls === 1) return new Promise(res => { held = () => res(okBody("第十楼的账，够长够长够长够长。")); }); return Promise.resolve(okBody("第十楼的账（又挂一次），够长够长够长。")); };
+        b.F("ipeLedgerRun")(9, true); await wait(20);
+        await during(b);
+        held(); await wait(150);
+        return Object.assign(b, { box, cur: () => b.F("ipeLedgerRead")() });
+    }
+    let r = await midRun("第十楼正文：他推开窗。\n", null, b => b.F("injectDescToMessage")("a girl by the window", 9));
+    ok(r.box.calls === 1 && r.cur().lastFloor === 10 && r.cur().current.indexOf("又挂一次") < 0, "正文末尾带换行、挂账路上注入生图：只挂一次，照常落账", "calls=" + r.box.calls);
+    r = await midRun("第十楼正文：他推开窗。", st => { st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "自定义", value: "{Description}" }]); st.activeBaseTemplate = "tpl_1"; },
+        b => b.F("injectDescToMessage")("a girl by the window", 9));
+    ok(r.box.calls === 1 && r.cur().lastFloor === 10, "画风模板不是标签包着的：注入照样不算改楼，只挂一次", "calls=" + r.box.calls);
+    await r.tavern.eventSource.emit("MESSAGE_RECEIVED", 9); await wait(700);
+    ok(r.box.calls === 1, "落账后同一楼又来一次「收到新楼」：正文多了生图段也认得是同一楼，不再挂", "calls=" + r.box.calls);
+    r = await midRun("第十楼正文：他推开窗。", null, async b => { b.tavern.chat[9].mes = "改后：他关上了窗。"; await b.tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(350); });
+    ok(r.box.calls === 2 && r.cur().current.indexOf("又挂一次") >= 0, "真在酒馆里改了楼：照旧作废，按改后的正文重挂", "calls=" + r.box.calls);
 })();
 
 console.log("\n" + "\u2500".repeat(46));

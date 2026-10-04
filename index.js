@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.3";
+var IPE_VERSION = "2.27.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1724,17 +1724,34 @@ function ipeLedgerInputChatCurrent(input) {
 }
 /* 2.27.1 落账前再看一眼那楼还是不是那楼。请求在路上的几十秒里，那楼可能被删了（楼号还可能被新发的一楼占上）、
    左右滑到了别的 swipe、或者被改过——回来的这份账记的是已经不存在的剧情，落下去就是幽灵账：
-   当场贴进主 AI 的耳朵，下一楼还拿它当底稿接着往下记。生图后来往楼尾追加的 <draw> 段不算改（剥掉再比）。
+   当场贴进主 AI 的耳朵，下一楼还拿它当底稿接着往下记。
+   2.27.4「改过」只认酒馆的改楼事件（MESSAGE_EDITED，见 ipeLedgerMarkEdited），不再逐字比正文：
+   生图在挂账途中往楼尾贴 <draw> 时会顺手去掉正文末尾的空行，画风模板不是标签包着的还剥不干净，
+   逐字比就把这当成改过，账作废再挂一遍——每楼挂两次。
    返回 ""（还是那楼）/ "gone"（那楼没了、藏了、楼号被 user 楼占上，或者换了聊天）/ "changed"（楼还在，换了 swipe 或改过正文）。 */
 function ipeLedgerInputDrift(input) {
     if (!input || !ipeLedgerInputChatCurrent(input)) return "gone";
     var m = null;
     try { m = (ctx().chat || [])[input.floor - 1]; } catch(e) {}
     if (!m || m.is_user || m.is_system === true) return "gone";
+    if (m === input.msg) return (m.swipe_id !== input.swipe || input.edited) ? "changed" : "";
+    // 别的插件把这条消息整个换了个对象：只能比正文，剥掉楼尾生图段、去掉首尾空白，一样就还算同一楼
     var same = false;
-    try { same = ipeLedgerStripImageTag(String(m.mes || "")) === ipeLedgerStripImageTag(input.text); } catch(e2) {}
-    if (m === input.msg) return (m.swipe_id === input.swipe && same) ? "" : "changed";
-    return same ? "" : "changed";   // 别的插件把这条消息整个换了个对象：正文一样就还算同一楼
+    try { same = ipeLedgerStripImageTag(String(m.mes || "")).trim() === ipeLedgerStripImageTag(String(input.text || "")).trim(); } catch(e2) {}
+    return same ? "" : "changed";
+}
+/* 2.27.4 酒馆发了改楼事件：在路上的挂账、手动预览、被拦下等强制采用的那份，按的要是这楼，都记一笔「改过」 */
+function ipeLedgerMarkEdited(i) {
+    [ipeLedgerActiveInput, ipeLedgerPreviewInput, ipeLedgerPendingInput].forEach(function(x){
+        if (x && x.floor - 1 === i) x.edited = true;
+    });
+}
+/* 2.27.4 插件自己改了楼里的正文（生图注入、换画风重注入）：不算剧情变了。
+   记着的几份「这一发按的是哪段正文」跟着换成改后的样子，同一楼的重复通知照旧认得出来，不会再挂一遍 */
+function ipeLedgerOwnEdit(msg) {
+    [ipeLedgerActiveInput, ipeLedgerLastAutoInput, ipeLedgerPreviewInput, ipeLedgerPendingInput].forEach(function(x){
+        if (x && x.msg === msg && x.swipe === msg.swipe_id) x.text = String(msg.mes || "");
+    });
 }
 var IPE_LEDGER_DRIFT_WORD = { gone: "已经删了", changed: "换了一条 swipe 或者改过了" };
 var ipeLedgerDropped = "";            // 这一发挂完却作废了（那楼删了 / 换了），发送前等挂账的拦截器据此报状态
@@ -8714,6 +8731,7 @@ function bindAll() {
                 cd.eventSource.on(cd.event_types.MESSAGE_EDITED, function(mesId){
                     var i = Number(mesId);
                     if (!Number.isFinite(i) || i < 0) return;
+                    try { ipeLedgerMarkEdited(i); } catch(eM) {}   // 2.27.4 路上那份挂账回来时据此认「改过」
                     setTimeout(function(){ try { ipeLedgerOnEdited(i); } catch(eE) {} }, 300);
                 });
             }
@@ -8900,6 +8918,7 @@ function injectDescToMessage(desc, targetIdx) {
     }
 
     msg.mes = String(msg.mes || "").trimEnd() + "\n\n" + tag;
+    try { ipeLedgerOwnEdit(msg); } catch(eO) {}   // 2.27.4 插件自己贴的生图段，挂账不当它是改了剧情
     ipeRememberInjectTag(msg, tag, desc, layers);
     // 酒馆左右滑 swipe 时会用 swipes[swipe_id] 覆盖 mes（syncSwipeToMes），
     // 只写 mes 不写 swipes，一滑回来注入的 tag 就没了。两边同步。
@@ -8975,6 +8994,7 @@ function reinjectDescToMessage(targetIdx, opts) {
     if (next === before) return { injected: false, reason: "same", tag: tag, idx: idx, replaced: false };
 
     msg.mes = next;
+    try { ipeLedgerOwnEdit(msg); } catch(eO) {}   // 2.27.4 换画风只换楼尾生图段，挂账不当它是改了剧情
     ipeRememberInjectTag(msg, tag, p.desc, p.layers);
     try {
         if (Array.isArray(msg.swipes) && Number.isInteger(msg.swipe_id) && msg.swipe_id >= 0 && msg.swipe_id < msg.swipes.length) {
