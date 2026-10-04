@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.4";
+var IPE_VERSION = "2.27.5";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1002,20 +1002,32 @@ function ipeLedgerHistoryPick(vs, n, dry) {   // vs：旧版，新 → 旧；返
 function ipeLedgerHisHint() {
     return ipeLedgerHisKept === true ? "｜旧账接着上一发" : (ipeLedgerHisKept === false ? "｜旧账重新起头" : "");
 }
-function ipeLedgerHistoryBlock(dry) {
+/* 2.27.5 喂给副 AI 的底稿。同一楼重挂（自动挂账已经落了这一楼，又点「重新挂账」，比如改完正文想按改后的重记）：
+   现任就是按这一楼记的，底稿退回这楼之前那一版——拿已经记过这楼的账再记一遍，伤势轮数这类计数会重复加。
+   旧版也跟着退一格，跟当初挂这一楼时那一发一样，前缀缓存照样吃得上。 */
+function ipeLedgerHistoryBase(st, forFloor) {
+    var cur = String(st.current || ""), curFloor = st.lastFloor;
+    // 「压缩前」备份不喂：刚压完就把压缩前的全本喂回去，副 AI 会照着重新写长
+    var olds = st.versions.filter(function(v){ return !v.tag; });
+    if (forFloor > 0 && curFloor === forFloor && cur.trim()) {
+        if (olds.length && olds[0].floor < forFloor) { cur = olds[0].text; curFloor = olds[0].floor; olds = olds.slice(1); }
+        else if (!olds.length) { cur = ""; curFloor = -1; }
+    }
+    return { cur: cur, curFloor: curFloor, olds: olds };
+}
+function ipeLedgerHistoryBlock(dry, forFloor) {
     var n = Number(cfg().ledgerVersionsN);
     if (!Number.isFinite(n) || n < 1) n = 3;
     if (n > 5) n = 5;
-    var st = ipeLedgerRead();
-    // 「压缩前」备份不喂：刚压完就把压缩前的全本喂回去，副 AI 会照着重新写长
-    var vs = ipeLedgerHistoryPick(st.versions.filter(function(v){ return !v.tag; }), n, dry);   // 旧版
+    var b = ipeLedgerHistoryBase(ipeLedgerRead(), forFloor);
+    var vs = ipeLedgerHistoryPick(b.olds, n, dry);   // 旧版
     var out = [];
     for (var i = vs.length - 1; i >= 0; i--) {           // 旧 → 新
         out.push("\u3010\u7b2c " + (vs[i].floor >= 0 ? vs[i].floor : "?") + " \u697c\u65f6\u7248\u672c\u3011\n" + vs[i].text);
     }
-    if (String(st.current || "").trim()) {
+    if (b.cur.trim()) {
         // 2.27.0 现任跟旧版用同一种标题：下一楼它变成旧版时标题一字不变，这一整份也吃得上缓存。哪份是现任写在段头
-        out.push("\u3010\u7b2c " + (st.lastFloor >= 0 ? st.lastFloor : ipeFloorNo()) + " \u697c\u65f6\u7248\u672c\u3011\n" + st.current);
+        out.push("\u3010\u7b2c " + (b.curFloor >= 0 ? b.curFloor : ipeFloorNo()) + " \u697c\u65f6\u7248\u672c\u3011\n" + b.cur);
     }
     // 空账本必须说出来。什么都不说，副 AI 会以为不用建。
     if (!out.length) return "（当前还没有账本，这是第一次，请产出完整的一份。）";
@@ -1116,12 +1128,12 @@ function ipeLedgerBuildUser(text, extra, atFloor, dry) {
     var order = String(st.order || "").trim();
     if (order) u += "\u3010User \u6307\u4ee4\u3011\n" + order + "\n\n";
 
-    var his = ipeLedgerHistoryBlock(dry);
-    var curNote = String(st.current || "").trim() ? " \u00b7 \u6700\u540e\u4e00\u4efd\u662f\u5f53\u524d\u7248\u672c" : "";   // · 最后一份是当前版本
+    var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
+    var his = ipeLedgerHistoryBlock(dry, floorNo);
+    var curNote = ipeLedgerHistoryBase(st, floorNo).cur.trim() ? " \u00b7 \u6700\u540e\u4e00\u4efd\u662f\u5f53\u524d\u7248\u672c" : "";   // · 最后一份是当前版本
     if (his) u += "\u3010\u8d26\u672c\u5386\u53f2 \u00b7 \u65e7\u2192\u65b0" + curNote + "\u3011\n" + his + "\n\n";
 
     ipeLedgerReportTruncated = false;
-    var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
     var rep = ipeLedgerReportBlock(floorNo);
     if (rep) u += "\u3010\u5267\u60c5\u6458\u8981 \u00b7 \u8fd1 " + Number(cfg().ledgerReportFloors || 0) + " \u697c \u00b7 \u65e7\u2192\u65b0\u3011\n" + rep + "\n\n";
 
@@ -1479,11 +1491,13 @@ function ipeLedgerAdoptPreview(which) {
         return;
     }
     ipeLedgerCommit(t, f);
+    if (ipeLedgerPreviewInput) ipeLedgerSrcMark(ipeLedgerPreviewInput);
     ipeLedgerModeAfterRun(ipeLedgerPreviewMode);
     ipeLedgerHidePreview();
     ipeLedgerClearExtra();
     ipeLedgerSync();
-    ipeLedgerStatus("已采用 \u2713 第 " + (f || ipeFloorNo()) + " 楼（旧版已进历史，可回滚）", "#6ec577");
+    ipeLedgerStatus("已采用 \u2713 第 " + (f || ipeFloorNo()) + " 楼（旧版已进历史，可回滚）"
+        + (ipeLedgerPreviewInput && ipeLedgerPreviewInput.edited ? "｜预览出来以后这楼改过，账是按改前的正文记的" : ""), "#6ec577");
 }
 
 function ipeLedgerExtraOnce() {
@@ -1725,22 +1739,23 @@ function ipeLedgerInputChatCurrent(input) {
 /* 2.27.1 落账前再看一眼那楼还是不是那楼。请求在路上的几十秒里，那楼可能被删了（楼号还可能被新发的一楼占上）、
    左右滑到了别的 swipe、或者被改过——回来的这份账记的是已经不存在的剧情，落下去就是幽灵账：
    当场贴进主 AI 的耳朵，下一楼还拿它当底稿接着往下记。
-   2.27.4「改过」只认酒馆的改楼事件（MESSAGE_EDITED，见 ipeLedgerMarkEdited），不再逐字比正文：
-   生图在挂账途中往楼尾贴 <draw> 时会顺手去掉正文末尾的空行，画风模板不是标签包着的还剥不干净，
+   2.27.4 不再逐字比正文：生图在挂账途中往楼尾贴 <draw> 时会顺手去掉正文末尾的空行，画风模板不是标签包着的还剥不干净，
    逐字比就把这当成改过，账作废再挂一遍——每楼挂两次。
-   返回 ""（还是那楼）/ "gone"（那楼没了、藏了、楼号被 user 楼占上，或者换了聊天）/ "changed"（楼还在，换了 swipe 或改过正文）。 */
+   2.27.5 改楼也不算作废（ripple 定的：改楼不自动重挂，那份账照常落下，状态行提醒，见 ipeLedgerOnEdited）；只认换 swipe、删楼。
+   返回 ""（还是那楼）/ "gone"（那楼没了、藏了、楼号被 user 楼占上，或者换了聊天）/ "changed"（楼还在，换了一条 swipe）。 */
 function ipeLedgerInputDrift(input) {
     if (!input || !ipeLedgerInputChatCurrent(input)) return "gone";
     var m = null;
     try { m = (ctx().chat || [])[input.floor - 1]; } catch(e) {}
     if (!m || m.is_user || m.is_system === true) return "gone";
-    if (m === input.msg) return (m.swipe_id !== input.swipe || input.edited) ? "changed" : "";
+    if (m === input.msg) return m.swipe_id !== input.swipe ? "changed" : "";
     // 别的插件把这条消息整个换了个对象：只能比正文，剥掉楼尾生图段、去掉首尾空白，一样就还算同一楼
     var same = false;
     try { same = ipeLedgerStripImageTag(String(m.mes || "")).trim() === ipeLedgerStripImageTag(String(input.text || "")).trim(); } catch(e2) {}
     return same ? "" : "changed";
 }
-/* 2.27.4 酒馆发了改楼事件：在路上的挂账、手动预览、被拦下等强制采用的那份，按的要是这楼，都记一笔「改过」 */
+/* 2.27.4 酒馆发了改楼事件：在路上的挂账、手动预览、被拦下等强制采用的那份，按的要是这楼，都记一笔「改过」。
+   2.27.5 起这一笔只用来提醒（落账、采用时状态行说一句「账是按改前的正文记的」），不再让那份账作废 */
 function ipeLedgerMarkEdited(i) {
     [ipeLedgerActiveInput, ipeLedgerPreviewInput, ipeLedgerPendingInput].forEach(function(x){
         if (x && x.floor - 1 === i) x.edited = true;
@@ -1753,7 +1768,7 @@ function ipeLedgerOwnEdit(msg) {
         if (x && x.msg === msg && x.swipe === msg.swipe_id) x.text = String(msg.mes || "");
     });
 }
-var IPE_LEDGER_DRIFT_WORD = { gone: "已经删了", changed: "换了一条 swipe 或者改过了" };
+var IPE_LEDGER_DRIFT_WORD = { gone: "已经删了", changed: "换了一条 swipe" };
 var ipeLedgerDropped = "";            // 这一发挂完却作废了（那楼删了 / 换了），发送前等挂账的拦截器据此报状态
 function ipeLedgerDropStale(input, drift) {
     ipeLedgerDropped = "第 " + input.floor + " 楼" + IPE_LEDGER_DRIFT_WORD[drift];
@@ -1868,9 +1883,11 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         }
 
         ipeLedgerCommit(body, msgFloor);
+        ipeLedgerSrcMark(input);
         ipeLedgerModeAfterRun(usedMode);
         ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜" + ipeLedgerLastMode + " 槽" + (ipeLedgerNsfwFellBack ? "（内容为空，已用 Normal 槽）" : "") : "")
-            + (ipeLedgerReportTruncated ? "（report 层已截断）" : "") + ipeLedgerHisHint(),
+            + (ipeLedgerReportTruncated ? "（report 层已截断）" : "") + ipeLedgerHisHint()
+            + (input.edited ? "｜这楼挂账途中改过，账是按改前的正文记的，改了剧情就点「重新挂账」" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
         ipeLedgerLastAutoInput = input;
@@ -3321,31 +3338,48 @@ function ipeLedgerScheduleEstimate() {
 }
 
 /* 落盘 → 贴耳 → 刷预览 → 楼内重绘，一条龙 */
-/* 改楼（2.17.0）：第 i 楼（0-based）正文改了。现任账本若正是按这楼记的，那是照改前正文记的，作废，
-   回退到更早的版本；自动挂账开着就立刻按改后的正文重挂。
-   改更早的楼不动账（改个错别字不该丢记忆），只提示；改比账本还高的楼，账本本来就没记到那，不管。
-   典型场景：倒退回第 110 楼把回复改掉再续写——以前 110 楼那份「买票去北京」的账原样留着。 */
+/* 改楼：第 i 楼（0-based）正文改了。
+   2.17.0 起改了现任账本那楼会撕账、自动挂账开着就按改后正文重挂——改个错别字、调个格式也多花一次挂账的钱。
+   2.27.5（ripple 定的）改楼一律不自动重挂：账本先不动，状态行提醒一句；改的是剧情，自己点「重新挂账」，
+   重挂同一楼时底稿会退回这楼之前那版（见 ipeLedgerHistoryBase），不会拿改前记的那份当底稿。
+   打开编辑框原样保存（正文其实没变）不提醒。改比账本还高的楼（挂账还在路上）在这里不管，落账时状态行再提醒。
+   改更早的楼：那楼的事已经写进后面每一版账里了，只能在账本里手动改掉对应那条。 */
+var IPE_LEDGER_SRC_META = "ipe_ledger_src_v1";   // { floor, swipe, sig }：现任账本是按哪楼哪条正文记的，原样保存不提醒用
+function ipeLedgerTextSig(text) {   // 剥掉楼尾生图段、去掉首尾空白，再算个 FNV-1a
+    var s = String(text || "");
+    try { s = ipeLedgerStripImageTag(s); } catch(e) {}
+    s = s.trim();
+    var h = 2166136261;
+    for (var k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619) >>> 0; }
+    return s.length + ":" + h;
+}
+function ipeLedgerSrcMark(input) {
+    try {
+        var r = ipeMetaRoot(); if (!r || !input) return;
+        r[IPE_LEDGER_SRC_META] = { floor: input.floor, swipe: input.swipe == null ? null : input.swipe, sig: ipeLedgerTextSig(input.text) };
+        var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+    } catch(e) {}
+}
+function ipeLedgerSrcSame(i) {
+    try {
+        var r = ipeMetaRoot(), s = r && r[IPE_LEDGER_SRC_META], m = (ctx().chat || [])[i];
+        if (!s || !m || s.floor !== i + 1) return false;
+        if (s.swipe !== (m.swipe_id == null ? null : m.swipe_id)) return false;
+        return s.sig === ipeLedgerTextSig(m.mes);
+    } catch(e) { return false; }
+}
 function ipeLedgerOnEdited(i) {
     var st = ipeLedgerRead();
     var floor = i + 1;
     if (!String(st.current || "").trim() || st.lastFloor < 0) return;
     if (floor > st.lastFloor) return;
     if (floor < st.lastFloor) {
-        ipeLedgerStatus("第 " + floor + " 楼改过了，比现任账本（第 " + st.lastFloor + " 楼）早，账本没动；要按改后的正文重记就点「重新挂账」", "#c9a227");
+        ipeLedgerStatus("第 " + floor + " 楼改过了，比现任账本（第 " + st.lastFloor + " 楼）早，账本没动；那楼要是改了剧情，得在账本里手动改掉对应那条", "#c9a227");
         return;
     }
-    ipeLedgerReconcile(i, { silent: true });
-    ipeLedgerApplyEP();
-    try { ipeLedgerRefreshEditors(); ipeLedgerRefreshEpPreview(); ipeLedgerRefreshBotEditors(); ipeLedgerRenderInline(); } catch(eR) {}
-    var st2 = ipeLedgerRead();
-    var auto = cfg().ledgerAutoRun === true;
-    var msg = null; try { msg = (ctx().chat || [])[i]; } catch(eM) {}
-    var rerun = auto && msg && !msg.is_user && msg.is_system !== true;
-    ipeLedgerStatus("第 " + floor + " 楼改过了，那楼的账作废"
-        + (st2.lastFloor >= 0 ? "，回退到第 " + st2.lastFloor + " 楼的账" : "，账本已清空")
-        + (rerun ? "，正在按改后的正文重挂…" : ""), "#c9a227");
-    try { console.log("[IPE] 改楼对账", { floor: floor, fallback: st2.lastFloor, rerun: !!rerun }); } catch(eL) {}
-    if (rerun) ipeLedgerRun(i, true);
+    if (ipeLedgerSrcSame(i)) return;   // 原样保存：正文其实没变
+    ipeLedgerStatus("第 " + floor + " 楼改过了，账本还是按改前的正文记的；改的是剧情就点「重新挂账」，按改后的重记", "#c9a227");
+    try { console.log("[IPE] 改楼", { floor: floor }); } catch(eL) {}
 }
 
 function ipeLedgerSync() {
@@ -8325,11 +8359,13 @@ function bindAll() {
                 return;
             }
             ipeLedgerCommit(ipeLedgerPending, ipeLedgerPreviewFloor || 0);
+            var pin = ipeLedgerPendingInput;
+            if (pin) ipeLedgerSrcMark(pin);
             ipeLedgerModeAfterRun(ipeLedgerPendingMode);
             ipeLedgerPending = null;
             ipeLedgerShowForce(false);
             ipeLedgerSync();
-            ipeLedgerStatus("已强制采用 \u2713 旧版仍在历史里，可随时回滚", "#6ec577");
+            ipeLedgerStatus("已强制采用 \u2713 旧版仍在历史里，可随时回滚" + (pin && pin.edited ? "｜拦下以后这楼改过，账是按改前的正文记的" : ""), "#6ec577");
         });
     });
 

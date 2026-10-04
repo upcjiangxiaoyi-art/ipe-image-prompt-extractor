@@ -1302,37 +1302,48 @@ await (async () => {
     eq(sel.options.length, 2, "下拉同步少一条");
 })();
 
-console.log("\n【40】 改楼撕账（2.17.0）：改现任账本那楼 → 那楼的账作废回退；改更早的楼不动；自动挂账开着就按改后正文重挂");
+console.log("\n【40】 改楼（2.17.0 → 2.27.5）：改了正文不自动重挂，账本先不动、状态行提醒；原样保存不提醒；点「重新挂账」重挂同一楼，底稿退回这楼之前那版");
 await (async () => {
-    const { w, tavern, F, EPK } = boot(10);
-    const st = tavern.extensionSettings[F("EXT_NAME")];
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
     const wait = ms => new Promise(r => setTimeout(r, ms));
-    F("ipeLedgerCommit")("八楼的账：两人还在食堂，够长够长够长够长。", 8);
-    F("ipeLedgerCommit")("十楼的账：买了去北京的票，够长够长够长够长。", 10);
-    F("ipeLedgerApplyEP")();
-    ok(String(tavern.extensionPrompts[EPK].value).indexOf("北京") >= 0, "改之前贴耳里有北京");
-    // 改更早的楼：不动账
-    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await wait(400);
-    eq(F("ipeLedgerRead")().lastFloor, 10, "改第 4 楼：现任账本还是第 10 楼的");
-    // 改现任账本那楼（第 10 楼 = idx 9），自动挂账关着
-    tavern.chat[9].mes = "第 10 层改过的正文：不去北京了，留在学校。够长够长够长够长够长够长。";
-    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(400);
-    let s = F("ipeLedgerRead")();
-    eq(s.lastFloor, 8, "改第 10 楼：那楼的账作废，回退到第 8 楼的账");
-    ok(s.current.indexOf("北京") < 0 && s.current.indexOf("食堂") >= 0, "现任账本是食堂那份");
-    ok(String(tavern.extensionPrompts[EPK].value).indexOf("北京") < 0, "贴耳里北京没了（改完不 roll 直接续写也干净）");
-    // 自动挂账开着：改完立刻按改后正文重挂
-    withApi(tavern, F, "gpt-4.1");
-    let sent = null;
-    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>重挂的账：留在学校，不去北京。够长够长够长够长够长够长。</ledger>" } }] }) }; };
+    let calls = 0, sent = null, reply = "十楼的账：买了去北京的票，够长够长够长够长。";
+    w.fetch = async (u, o) => { calls++; sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + reply + "</ledger>" } }] }) }; };
     st.ledgerAutoRun = true;
-    F("ipeLedgerCommit")("十楼的账：买了去北京的票，够长够长够长够长。", 10);
-    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(600);
+    F("ipeLedgerCommit")("八楼的账：两人还在食堂，够长够长够长够长。", 8);
+    tavern.chat[9].mes = "第 10 层正文：两人买了去北京的票。够长够长够长。";
+    await F("ipeLedgerRun")(9, true);
+    eq(F("ipeLedgerRead")().lastFloor, 10, "自动挂账落了第 10 楼");
+    // 改更早的楼：不动账，提醒只能手动改账本
+    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await wait(800);
+    ok(F("ipeLedgerRead")().lastFloor === 10 && statusText(w).indexOf("手动改掉") >= 0, "改第 4 楼：现任账本还是第 10 楼的，提醒要改得在账本里手动改", statusText(w));
+    // 打开编辑框原样保存：正文没变，不提醒、不重挂
+    const n0 = calls;
+    w.eval('ipeLedgerStatus("（测试占位）", "#999")');
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(800);
+    ok(calls === n0 && statusText(w).indexOf("改过了") < 0, "原样保存：不提醒、不重挂", statusText(w));
+    // 真改了第 10 楼：不撕账、不重挂，状态行提醒
+    tavern.chat[9].mes = "第 10 层改过的正文：不去北京了，留在学校。够长够长够长。";
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(800);
+    let s = F("ipeLedgerRead")();
+    ok(calls === n0 && s.lastFloor === 10 && s.current.indexOf("北京") >= 0, "改了正文：不自动重挂，账本先不动");
+    ok(statusText(w).indexOf("改过了") >= 0 && statusText(w).indexOf("重新挂账") >= 0, "状态行提醒：改的是剧情就点「重新挂账」", statusText(w));
+    // 点「重新挂账」：同一楼重挂，底稿退回第 8 楼那版
+    reply = "重挂的账：留在学校，不去北京。够长够长够长够长够长够长。";
+    await w.eval("ipeLedgerRunManual")();
+    const msgs = JSON.stringify(sent.messages);
+    ok(msgs.indexOf("不去北京了，留在学校") >= 0, "副 AI 收到的是改后的正文");
+    ok(msgs.indexOf("买了去北京的票") < 0 && msgs.indexOf("两人还在食堂") >= 0, "底稿退回第 8 楼那版，不拿改前记的那份当底稿");
+    w.eval("ipeLedgerAdoptPreview")("panel");
     s = F("ipeLedgerRead")();
-    ok(!!sent && JSON.stringify(sent).indexOf("不去北京了，留在学校") >= 0, "副 AI 收到的是改后的正文");
-    ok(!!sent && JSON.stringify(sent.messages).indexOf("买了去北京的票") < 0, "副 AI 拿到的底稿里没有作废的北京账");
-    eq(s.lastFloor, 10, "重挂后现任回到第 10 楼");
-    ok(s.current.indexOf("重挂的账") >= 0, "现任是按改后正文重挂的那份");
+    ok(s.lastFloor === 10 && s.current.indexOf("重挂的账") >= 0 && s.versions[0].floor === 8, "采用后现任是重挂的那份，第 8 楼那版还在历史里");
+    // 同一楼重挂的请求跟当初挂这一楼那发一样（只差正文），前缀缓存吃得上
+    const { tavern: t2, F: F2 } = boot(10);
+    F2("ipeLedgerCommit")("六楼的账，够长够长够长。", 6); F2("ipeLedgerCommit")("八楼的账，够长够长够长。", 8);
+    const first = F2("ipeLedgerBuildUser")(t2.chat[9].mes, "", 10);
+    F2("ipeLedgerCommit")("十楼的账，够长够长够长。", 10);
+    const again = F2("ipeLedgerBuildUser")(t2.chat[9].mes, "", 10);
+    eq(again, first, "重挂同一楼：喂给副 AI 的跟当初挂这一楼时一字不差");
 })();
 
 console.log("\n【41】 历史里程碑（2.17.0 / 2.18.2）：最近 6 版全留，之外每 10 楼、每 100 楼各留一版；副 AI 只喂最近几版");
@@ -1344,7 +1355,7 @@ console.log("\n【41】 历史里程碑（2.17.0 / 2.18.2）：最近 6 版全�
     const floors = s.versions.map(v => v.floor);
     eq(floors.slice(0, 6).join(","), "38,36,34,32,30,28", "最近 6 版全留（2.18.2）");
     eq(floors.slice(6).join(","), "18,8", "之后每 10 楼一个里程碑（近处已有的段不重复留）");
-    const his = F("ipeLedgerBuildUser")(tavern.chat[39].mes, "", 40);
+    const his = F("ipeLedgerBuildUser")(tavern.chat[39].mes, "", 41);   // 下一楼的请求（同一楼重挂底稿会退一版，见【40】）
     ok(his.indexOf("第 38 楼时版本") >= 0 && his.indexOf("第 36 楼时版本") >= 0 && his.indexOf("第 34 楼时版本") < 0 && his.indexOf("第 8 楼时版本") < 0, "副 AI 只喂最近 2 版，里程碑不进 prompt");
     // 倒退回第 11 楼：以前整本清空，现在退到第 8 楼的里程碑
     tavern.chat.splice(11); F("ipeLedgerReconcile")(11);
@@ -1745,12 +1756,13 @@ await (async () => {
         ok(!cur().current.includes("菜烧糊") && !ep().includes("菜烧糊"), "滑走那条的账回来晚了：作废，不进账本和贴耳");
         ok(cur().lastFloor === 10 && cur().current.includes("海边") && ep().includes("海边"), "按现在显示的这条重挂上了", cur().current.slice(0, 20));
     }
-    { // 挂账还在路上就改了这楼
-        const { tavern, F, ai, cur } = setup();
+    { // 挂账还在路上就改了这楼（2.27.5：改楼不自动重挂，那份账照常落下，状态行提醒）
+        const { w, tavern, F, ai, cur } = setup();
         tavern.chat[9].mes = "改前：他买了去北京的票。"; ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
         tavern.chat[9].mes = "改后：他没买票，留在家里。"; await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(350);
         ai.held(); await wait(150);
-        ok(!cur().current.includes("北京") && cur().current.includes("没买票") && cur().lastFloor === 10, "改前的账作废，按改后的正文重挂", cur().current.slice(0, 20));
+        ok(cur().current.includes("北京") && cur().lastFloor === 10 && ai.calls === 1, "挂账途中改了这楼：那份账照常落下，不再重挂", cur().current.slice(0, 20));
+        ok(statusText(w).indexOf("挂账途中改过") >= 0 && statusText(w).indexOf("重新挂账") >= 0, "状态行提醒：账是按改前的正文记的，改了剧情就点「重新挂账」", statusText(w));
     }
     { // 生图在挂账路上往楼尾追加 <draw>：不算改，照常落账
         const { tavern, F, ai, cur } = setup();
@@ -1792,9 +1804,13 @@ await (async () => {
         await w.eval("ipeLedgerRunManual")(); w.eval("ipeLedgerAdoptPreview")("panel");
         ok(cur().lastFloor === 10 && cur().current.includes("海边"), "按现在这条重新预览再采用：照常落账");
         w.eval("ipeLedgerPending = '被拦下的旧账：菜烧糊了，够长够长。'; ipeLedgerPendingInput = ipeLedgerInput(SillyTavern.getContext().chat[9], 10); ipeLedgerPreviewFloor = 10;");
-        tavern.chat[9].mes = "又改了一遍：他们在山上。"; await tavern.eventSource.emit("MESSAGE_EDITED", 9);   // 酒馆里改楼会发改楼事件
+        tavern.chat[9].swipes.push("又一条：他们在山上。"); tavern.chat[9].swipe_id = 2; tavern.chat[9].mes = "又一条：他们在山上。";
         w.document.querySelector("#ipe-ledger-force-btn").click();
-        ok(!cur().current.includes("菜烧糊") && statusText(w).indexOf("作废没采用") >= 0, "被拦下以后那楼改了：强制采用不落账", statusText(w));
+        ok(!cur().current.includes("菜烧糊") && statusText(w).indexOf("作废没采用") >= 0, "被拦下以后那楼换了一条 swipe：强制采用不落账", statusText(w));
+        w.eval("ipeLedgerPending = '被拦下的账：他们在山上，够长够长够长。'; ipeLedgerPendingInput = ipeLedgerInput(SillyTavern.getContext().chat[9], 10); ipeLedgerPreviewFloor = 10;");
+        tavern.chat[9].mes = "又一条：他们在山上，改了个字。"; await tavern.eventSource.emit("MESSAGE_EDITED", 9);
+        w.document.querySelector("#ipe-ledger-force-btn").click();
+        ok(cur().current.includes("他们在山上") && statusText(w).indexOf("拦下以后这楼改过") >= 0, "被拦下以后那楼只是改了：强制采用照常落账，提醒是按改前记的", statusText(w));
     }
     { // 压缩结果出来以后账本变了，再点采用
         const { w, tavern, F, cur } = setup();
@@ -1859,7 +1875,7 @@ await (async () => {
     ok(statusText(w).indexOf("思考 " + think.length + " 字") >= 0 && F("ipeLedgerRead")().current.indexOf("绷带") >= 0, "只想没写：按回了个空报失败（带上思考字数），账本没动", statusText(w));
 })();
 
-console.log("\n【52】 生图注入不算改楼（2.27.4）：挂账路上楼尾贴了生图段（正文末尾的空行被顺手去掉、画风模板不是标签包着的也一样），照常落账，不再挂第二次；同一楼的重复通知也认得出来；真改楼照旧作废重挂");
+console.log("\n【52】 生图注入不算改楼（2.27.4）：挂账路上楼尾贴了生图段（正文末尾的空行被顺手去掉、画风模板不是标签包着的也一样），照常落账，不再挂第二次；同一楼的重复通知也认得出来；真改楼也只提醒不重挂（2.27.5）");
 await (async () => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
     const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
@@ -1883,7 +1899,8 @@ await (async () => {
     await r.tavern.eventSource.emit("MESSAGE_RECEIVED", 9); await wait(700);
     ok(r.box.calls === 1, "落账后同一楼又来一次「收到新楼」：正文多了生图段也认得是同一楼，不再挂", "calls=" + r.box.calls);
     r = await midRun("第十楼正文：他推开窗。", null, async b => { b.tavern.chat[9].mes = "改后：他关上了窗。"; await b.tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(350); });
-    ok(r.box.calls === 2 && r.cur().current.indexOf("又挂一次") >= 0, "真在酒馆里改了楼：照旧作废，按改后的正文重挂", "calls=" + r.box.calls);
+    ok(r.box.calls === 1 && r.cur().lastFloor === 10 && r.cur().current.indexOf("又挂一次") < 0 && statusText(r.w).indexOf("挂账途中改过") >= 0,
+        "真在酒馆里改了楼（2.27.5）：那份账照常落下、不再重挂，状态行提醒", "calls=" + r.box.calls);
 })();
 
 console.log("\n" + "\u2500".repeat(46));
