@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.0";
+var IPE_VERSION = "2.27.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -842,6 +842,7 @@ function ipeLedgerReconcile(limit, opts) {
     } catch(e0) { return false; }
     if (!Number.isFinite(Number(limit)) || Number(limit) < 0) limit = ipeFloorNo();
     limit = Number(limit);
+    try { ipeLedgerModeRewind(limit); } catch(eMR) {}   // 2.27.1 场景标记也跟楼走：撕到哪，模式就退回那之前的标记
 
     var st = ipeLedgerRead();
     var smashed = 0;
@@ -1438,12 +1439,24 @@ function ipeLedgerAdoptPreview(which) {
     var t = el ? String(el.value || "").trim() : "";
     if (!t) { ipeLedgerStatus("预览是空的，没什么可采用", "#c9a227"); return; }
     if (ipeLedgerPreviewKind === "compress") {
+        var base = ipeLedgerCompressBase;
+        if (!base || base.chat !== ipeChatKey() || String(ipeLedgerRead().current || "") !== base.text) {
+            // 2.27.1 压缩期间账本变了（新挂了一楼、删楼 / 重 roll 撕回去、手改过）：这份是按旧账压的，采用就把旧账盖回来
+            ipeLedgerStatus("压缩以后账本变过了（新挂了一楼、删楼或重 roll 撕回去、手改过），这份压缩结果是按旧账压的，作废没采用；要压请再点一次「压缩一版」", "#c9a227");
+            return;
+        }
         ipeLedgerPreviewKind = "";
+        ipeLedgerCompressBase = null;
         ipeLedgerCommitCompressed(t);
         ipeLedgerHidePreview();
         return;
     }
     var f = ipeLedgerPreviewFloor || 0;   // 预览那份正文取自哪层，就盖哪层
+    var driftV = ipeLedgerPreviewInput ? ipeLedgerInputDrift(ipeLedgerPreviewInput) : "";
+    if (driftV) {   // 2.27.1 预览出来以后那楼删了 / roll 了 / 改了：采用就是把不存在的剧情记进账本
+        ipeLedgerStatus("这份预览是按第 " + f + " 楼原来的正文记的，那楼" + IPE_LEDGER_DRIFT_WORD[driftV] + "，没采用；要按现在的正文重记请点「重新挂账」", "#c9a227");
+        return;
+    }
     ipeLedgerCommit(t, f);
     ipeLedgerModeAfterRun(ipeLedgerPreviewMode);
     ipeLedgerHidePreview();
@@ -1517,6 +1530,7 @@ async function ipeLedgerCompress() {
     var cur = String(ipeLedgerRead().current || "");
     if (!cur.trim()) { ipeLedgerStatus("账本是空的，没什么可压", "#c9a227"); return; }
     ipeLedgerPreviewKind = "compress";
+    ipeLedgerCompressBase = { chat: ipeChatKey(), text: cur };
     ipeLedgerSetBusy(true);
     var ex = ipeLedgerExtraOnce();
     ipeLedgerStatus("正在压缩账本（" + cur.length + " 字）…副 AI 在合并支线、精简语言" + (ex ? "（带上了你补的那句）" : ""), "#c9a227");
@@ -1554,6 +1568,7 @@ async function ipeLedgerRunManual() {
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
     ipeLedgerPreviewFloor = msgFloor;
+    ipeLedgerPreviewInput = ipeLedgerInput(msg, msgFloor);
 
     ipeLedgerSetBusy(true);
     ipeLedgerStatus("正在挂账…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
@@ -1659,6 +1674,9 @@ function ipeLedgerSetBusy(on) {
 var ipeLedgerPending = null;      // 缩水拦截暂存，点「强制采用」才落盘
 var ipeLedgerPreviewFloor = 0;    // 预览那份正文取自哪一层，采用时照这个盖戳
 var ipeLedgerPendingMode = "normal"; // 被保护闸拦下的结果实际用了哪套规则
+var ipeLedgerPendingInput = null;     // 2.27.1 被拦下的那份是按哪楼哪条正文记的；强制采用前对一眼
+var ipeLedgerPreviewInput = null;     // 2.27.1 手动预览是按哪楼哪条正文记的；采用前对一眼
+var ipeLedgerCompressBase = null;     // 2.27.1 压缩时的现任账本原文；采用前账本变了就作废
 var ipeLedgerPreviewMode = "normal"; // 手动预览实际用了哪套规则；采用后才消费一次性模式
 
 function ipeLedgerShowForce(on) {
@@ -1683,6 +1701,45 @@ function ipeLedgerSameInput(a, b) {
 function ipeLedgerInputChatCurrent(input) {
     return input.chat === ipeChatKey() && input.root === ipeMetaRoot() && input.epoch === ipeLedgerChatEpoch;
 }
+/* 2.27.1 落账前再看一眼那楼还是不是那楼。请求在路上的几十秒里，那楼可能被删了（楼号还可能被新发的一楼占上）、
+   左右滑到了别的 swipe、或者被改过——回来的这份账记的是已经不存在的剧情，落下去就是幽灵账：
+   当场贴进主 AI 的耳朵，下一楼还拿它当底稿接着往下记。生图后来往楼尾追加的 <draw> 段不算改（剥掉再比）。
+   返回 ""（还是那楼）/ "gone"（那楼没了、藏了、楼号被 user 楼占上，或者换了聊天）/ "changed"（楼还在，换了 swipe 或改过正文）。 */
+function ipeLedgerInputDrift(input) {
+    if (!input || !ipeLedgerInputChatCurrent(input)) return "gone";
+    var m = null;
+    try { m = (ctx().chat || [])[input.floor - 1]; } catch(e) {}
+    if (!m || m.is_user || m.is_system === true) return "gone";
+    var same = false;
+    try { same = ipeLedgerStripImageTag(String(m.mes || "")) === ipeLedgerStripImageTag(input.text); } catch(e2) {}
+    if (m === input.msg) return (m.swipe_id === input.swipe && same) ? "" : "changed";
+    return same ? "" : "changed";   // 别的插件把这条消息整个换了个对象：正文一样就还算同一楼
+}
+var IPE_LEDGER_DRIFT_WORD = { gone: "已经删了", changed: "换了一条 swipe 或者改过了" };
+var ipeLedgerDropped = "";            // 这一发挂完却作废了（那楼删了 / 换了），发送前等挂账的拦截器据此报状态
+function ipeLedgerDropStale(input, drift) {
+    ipeLedgerDropped = "第 " + input.floor + " 楼" + IPE_LEDGER_DRIFT_WORD[drift];
+    try { ipeLedgerModeRewind(input.floor - 1); } catch(eM) {}   // 这一发开头按旧正文读过的场景标记也不算数
+    ipeLedgerStatus("第 " + input.floor + " 楼在挂账的时候" + IPE_LEDGER_DRIFT_WORD[drift] + "，这份账记的是已经不存在的剧情，作废没落账，账本还是上一份", "#c9a227");
+    try { console.log("[IPE] 挂账作废", { floor: input.floor, drift: drift }); } catch(eL) {}
+}
+/* 2.27.1 给最新一楼补挂：那楼滑到了别的 swipe（没重新生成），或者挂账路上被改过，账要按现在显示的这条重记。
+   只在自动挂账开着、这会儿没在挂账时动手；后面还有 AI 楼的不动（更早的楼改了照 2.17.0 的规矩不动账）；
+   那楼正被酒馆重新生成（新 swipe 还在出字）也不碰，等收到新楼照常挂。 */
+function ipeLedgerRerunLatest(idx) {
+    if (cfg().ledgerAutoRun !== true || ipeLedgerBusy) return false;
+    var chat = [];
+    try { chat = ctx().chat || []; } catch(e) { return false; }
+    var m = chat[idx];
+    if (!m || m.is_user || m.is_system === true || !String(m.mes || "").trim()) return false;
+    for (var j = chat.length - 1; j > idx; j--) {
+        var n = chat[j];
+        if (n && !n.is_user && n.is_system !== true && String(n.mes || "").trim()) return false;
+    }
+    if (idx === chat.length - 1 && ipeGenRunning()) return false;
+    ipeLedgerRun(idx, true);
+    return true;
+}
 var ipeLedgerQueued = false;          // 2.18.0 补挂队列：跑着的时候又来了一楼，跑完自动补最新一楼
 /* 可重试：5xx / 429 / 408 / 网络错 / 中转回了非 JSON。看门狗超时不重试——默认 300 秒一次，再等一轮太久，按老规矩计失败。 */
 var IPE_LEDGER_RETRYABLE_RE = /^API (5\d\d|429|408)|Failed to fetch|NetworkError|Load failed|network|ECONN|socket|返回不是 JSON/i;
@@ -1692,7 +1749,7 @@ function ipeLedgerRetryable(e) {
 }
 async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
     retryAttempt = Number(retryAttempt || 0);
-    var msg = null, msgFloor = 0;
+    var msg = null, msgFloor = 0, rerunIdx = -1;
     try {
         var chat = ctx().chat;
         if (typeof targetIdx === "number" && chat[targetIdx]) { msg = chat[targetIdx]; msgFloor = targetIdx + 1; }
@@ -1716,11 +1773,14 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
     ipeLedgerPreviewFloor = msgFloor;
     ipeLedgerSetBusy(true);
     ipeLedgerPending = null;
+    ipeLedgerDropped = "";
     ipeLedgerShowForce(false);
     ipeLedgerStatus("自动挂账中…（这会儿先别发下一条，贴耳还是上一份）", "#c9a227");
     try {
         var out = await ipeLedgerCallAPI(msg.mes, "", msgFloor);
         if (!ipeLedgerInputChatCurrent(input)) return; // 旧聊天的请求不能落进新聊天。
+        var drift = ipeLedgerInputDrift(input);       // 2.27.1 那楼删了 / 换了 swipe / 改过：这份账作废
+        if (drift) { ipeLedgerDropStale(input, drift); if (drift === "changed") rerunIdx = msgFloor - 1; return; }
         var usedMode = ipeLedgerLastMode;
         var got = ipeLedgerExtract(out);
 
@@ -1747,6 +1807,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         if (got.level === 4 && !oldText.trim() && body.length < IPE_LEDGER_MIN_LEN) {
             ipeLedgerPending = body;
             ipeLedgerPendingMode = usedMode;
+            ipeLedgerPendingInput = input;
             ipeLedgerShowForce(true);
             ipeLedgerStatus("副 AI 没写包裹，且回复很短（" + body.length + " 字），像是拒答而不是账本，已拦下。"
                 + "确实要用请点「强制采用」。｜原文：" + body.slice(0, 40), "#c9a227");
@@ -1756,6 +1817,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         if (oldText.trim() && body.length < oldText.length * IPE_LEDGER_SHRINK) {   // 保底 4
             ipeLedgerPending = body;
             ipeLedgerPendingMode = usedMode;
+            ipeLedgerPendingInput = input;
             ipeLedgerShowForce(true);
             // 事故现场就该停车等人来看，不能带着警报继续飞
             var wasAuto = cfg().ledgerAutoRun === true;
@@ -1790,7 +1852,13 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
             var rIdx = (typeof targetIdx === "number") ? targetIdx : (msgFloor - 1);
             ipeLedgerStatus("挂账失败（" + d.slice(0, 80) + "），" + Math.round(delay / 1000) + " 秒后自动重试一次…", "#c9a227");
             try { console.log("[IPE] 挂账重试", { floor: msgFloor, err: d.slice(0, 120) }); } catch(eL) {}
-            setTimeout(function(){ if (ipeLedgerInputChatCurrent(input)) ipeLedgerRun(rIdx, silent, 1); }, delay);
+            setTimeout(function(){
+                // 2.27.1 等重试的这几秒里那楼被删了就不重试（不然会给更早的一楼再记一遍）；那楼正在重新生成也不抢，收到新楼照常挂
+                var chatNow = []; try { chatNow = ctx().chat || []; } catch(eC) {}
+                if (!ipeLedgerInputChatCurrent(input) || chatNow[rIdx] !== input.msg) return;
+                if (rIdx === chatNow.length - 1 && ipeGenRunning()) return;
+                ipeLedgerRun(rIdx, silent, 1);
+            }, delay);
             return;
         }
         ipeLedgerFailStreak++;
@@ -1809,6 +1877,8 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         if (ipeLedgerQueued) {
             ipeLedgerQueued = false;
             if (cfg().ledgerAutoRun === true) setTimeout(function(){ ipeLedgerRun(null, true); }, 80);   // 补挂最新一楼
+        } else if (rerunIdx >= 0) {
+            ipeLedgerRerunLatest(rerunIdx);   // 2.27.1 按现在这条重挂；同步起跑，发送前等挂账的拦截器会接着等它
         }
     }
 }
@@ -1840,7 +1910,8 @@ async function ipeGenerateInterceptor(chat, contextSize, abort, type) {
             ipeLedgerStatus("等了 " + Math.round(sec) + " 秒账本还没挂完，这一发先送出去了，读到的是上一楼的账", "#c9a227");
         } else {
             try { ipeLedgerApplyEP(); } catch(e) {}
-            ipeLedgerStatus("账本挂完了（等了 " + (ipeLedgerWaitedMs / 1000).toFixed(1) + " 秒），这一发读到的是新账", "#6ec577");
+            if (ipeLedgerDropped) ipeLedgerStatus("等到的那份账作废了（" + ipeLedgerDropped + "），这一发读到的是上一份账", "#c9a227");
+            else ipeLedgerStatus("账本挂完了（等了 " + (ipeLedgerWaitedMs / 1000).toFixed(1) + " 秒），这一发读到的是新账", "#6ec577");
         }
     } catch(e) {}
 }
@@ -2284,6 +2355,8 @@ function ipeChatObserve(name, handler) {
    请求报错或人点停止酒馆可能不发结束事件，撤哨超过 IPE_CHAT_OBS_PAUSE_MAX_MS 自动接回。 */
 var ipeChatObsPaused = false, ipeChatObsPauseTimer = null;
 var IPE_CHAT_OBS_PAUSE_MAX_MS = 5 * 60 * 1000;
+var ipeGenAt = 0;   // 2.27.1 酒馆正往聊天里生成（不算 dryRun / quiet）的开始时间；结束、中止、收到新楼、换聊天归零
+function ipeGenRunning() { return ipeGenAt > 0 && Date.now() - ipeGenAt < IPE_CHAT_OBS_PAUSE_MAX_MS; }
 function ipeChatObsPause() {
     if (ipeChatObsPaused) return;
     ipeChatObsPaused = true;
@@ -2814,6 +2887,24 @@ function ipeLedgerModeSet(mode, floor) {
         r[IPE_LEDGER_MODE_META] = { mode: String(mode || "normal").toLowerCase(), floor: Number(floor) || 0, updatedAt: Date.now() };
         var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
     } catch(e) {}
+}
+/* 2.27.1 场景标记跟楼走：记着的模式是从已经撕掉的楼（被删 / 被 roll 掉 / 改过）读来的，就往回找还活着的楼里最后一个楼尾标记，
+   一个都没有就回 normal。不然新那条没写标记时，会「沿用」被 roll 掉那条的 nsfw，挂账规则跟着用错槽。 */
+function ipeLedgerModeRewind(limit) {
+    var s = ipeLedgerModeState();
+    if (!(s.floor > limit)) return false;
+    var mode = "normal", floor = 0, chat = [];
+    try { chat = ctx().chat || []; } catch(e) {}
+    for (var i = Math.min(limit, chat.length) - 1; i >= 0; i--) {
+        var m = chat[i];
+        if (!m || m.is_user || m.is_system === true) continue;
+        var src = String(m.mes || "");
+        try { src = ipeLedgerStripImageTag(src); } catch(e2) {}
+        var mk = ipeLedgerReadModeMarker(src);
+        if (mk && (mk === "normal" || ipeLedgerModeItem(mk))) { mode = mk; floor = i + 1; break; }
+    }
+    ipeLedgerModeSet(mode, floor);
+    return true;
 }
 function ipeLedgerModeItem(name) {
     var n = String(name || "").toLowerCase();
@@ -8189,6 +8280,12 @@ function bindAll() {
         var el = q("#" + id); if (!el) return;
         el.addEventListener("click", function(){
             if (ipeLedgerPending == null) { ipeLedgerStatus("没有待确认的结果", "#c9a227"); return; }
+            var driftP = ipeLedgerPendingInput ? ipeLedgerInputDrift(ipeLedgerPendingInput) : "";
+            if (driftP) {   // 2.27.1 拦下以后那楼删了 / 换了：强制采用就是把不存在的剧情记进账本
+                ipeLedgerPending = null; ipeLedgerPendingInput = null; ipeLedgerShowForce(false);
+                ipeLedgerStatus("被拦下的那份是按第 " + ipeLedgerPreviewFloor + " 楼原来的正文记的，那楼" + IPE_LEDGER_DRIFT_WORD[driftP] + "，这份作废没采用；要按现在的正文重记请点「重新挂账」", "#c9a227");
+                return;
+            }
             ipeLedgerCommit(ipeLedgerPending, ipeLedgerPreviewFloor || 0);
             ipeLedgerModeAfterRun(ipeLedgerPendingMode);
             ipeLedgerPending = null;
@@ -8604,7 +8701,12 @@ function bindAll() {
                     // 重roll第 i 楼（0-based）→ 那楼换了灵魂，它的账（floor=i+1）连同更高楼一起碎 → limit=i
                     var i = Number(mesId);
                     var limit = (Number.isFinite(i) && i >= 0) ? i : Math.max(0, ipeFloorNo() - 1);
-                    setTimeout(function(){ try { ipeLedgerReconcile(limit); ipeLedgerSync(); } catch(eS) {} }, 400);
+                    setTimeout(function(){
+                        try { ipeLedgerReconcile(limit); ipeLedgerSync(); } catch(eS) {}
+                        // 2.27.1 滑到已有的那条（没重新生成）：撕掉的是刚才那条的账，这条的账得补上，不然这楼的事账本里一直缺着。
+                        // 重新生成的新 swipe 不在这里挂，等收到新楼照常挂
+                        try { if (Number.isFinite(i) && i >= 0) ipeLedgerRerunLatest(i); } catch(eR) {}
+                    }, 400);
                 });
             }
             console.log("[IPE] 挂账楼层对账已绑定", {
@@ -8656,12 +8758,13 @@ function bindAll() {
             if (cg.event_types.GENERATION_STARTED) {
                 cg.eventSource.on(cg.event_types.GENERATION_STARTED, function(genType, genParams, dryRun){
                     if (dryRun === true) return;          // 只是算 token，不会重画聊天区
+                    if (String(genType || "").toLowerCase() !== "quiet") ipeGenAt = Date.now();
                     ipeChatObsPause();
                 });
             }
             ["GENERATION_ENDED", "GENERATION_STOPPED", "MESSAGE_RECEIVED", "CHAT_CHANGED"].forEach(function(n){
                 var ev = cg.event_types[n]; if (!ev) return;
-                cg.eventSource.on(ev, function(){ ipeChatObsResume(n); });
+                cg.eventSource.on(ev, function(){ ipeGenAt = 0; ipeChatObsResume(n); });
             });
         }
     } catch(e) {}

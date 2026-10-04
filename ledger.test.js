@@ -1689,6 +1689,133 @@ await (async () => {
     eq(F("ipeLedgerRead")().current, big, "只是预览，采用前账本没动");
 })();
 
+console.log("\n【50】 不留幽灵账（2.27.1）：挂账路上那楼删了 / 换了 swipe / 改了，回来的账作废不落账、不进贴耳，换了的按现在这条重挂；预览、强制采用、压缩采用前都对一眼；滑回已有的 swipe 补挂；场景标记跟楼走");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    const ledgerOf = mes => /菜烧糊/.test(mes) ? "菜烧糊了的账，够长够长够长够长。" : /海边/.test(mes) ? "去了海边的账，够长够长够长够长。"
+        : /没买票/.test(mes) ? "没买票留在家的账，够长够长够长够长。" : /北京/.test(mes) ? "买了去北京的票的账，够长够长够长。" : "别的账，够长够长够长够长够长。";
+    const lastUser = o => { try { const m = String(JSON.parse(o.body).messages[1].content); return m.slice(Math.max(0, m.indexOf("【本轮正文】"))); } catch (e) { return ""; } };   // 生图请求也会撞进来，别抛
+    // 假副 AI：按这一发喂的正文回对应的账；hold() 之后的那一发先压着，等测试 release
+    function sideAI(w) {
+        const t = { calls: 0, held: null, holdNext: false };
+        w.fetch = (u, o) => { t.calls++; const reply = okBody(ledgerOf(lastUser(o)));
+            if (!t.holdNext) return Promise.resolve(reply);
+            t.holdNext = false; return new Promise(res => { t.held = () => res(reply); }); };
+        return t;
+    }
+    const setup = () => {
+        const b = boot(10); const st = withApi(b.tavern, b.F); st.ledgerAutoRun = true;
+        b.F("ipeLedgerCommit")("第八楼的账：大家在吃饭，够长够长够长。", 8); b.F("ipeLedgerApplyEP")();
+        return Object.assign(b, { st, ai: sideAI(b.w), cur: () => b.F("ipeLedgerRead")(), ep: () => String((b.tavern.extensionPrompts[b.EPK] || {}).value || "") });
+    };
+
+    { // 只删 AI 末楼，挂账还在路上就发新消息（新消息占了第 10 楼）
+        const { w, tavern, F, ai, cur, ep } = setup();
+        tavern.chat[9].mes = "第十楼：菜烧糊了。"; ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
+        tavern.chat.splice(9); await tavern.eventSource.emit("MESSAGE_DELETED", 9); await wait(450);
+        await tavern.eventSource.emit("GENERATION_STARTED", undefined, {}, false);
+        tavern.chat.push({ is_user: true, is_system: false, mes: "我重新说一句。" });
+        const gate = w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal"); await wait(30);
+        ai.held(); await gate; await wait(50);
+        ok(cur().lastFloor === 8 && !cur().current.includes("菜烧糊") && !ep().includes("菜烧糊"), "删掉的那楼的账回来晚了：作废，不落账，不进贴耳", "lastFloor=" + cur().lastFloor);
+        ok(statusText(w).indexOf("作废") >= 0 && statusText(w).indexOf("上一份账") >= 0, "发送前等挂账的状态行照实说：等到的账作废了，这一发读到的是上一份", statusText(w));
+    }
+    { // 挂账还在路上就左滑回已有的那条：作废，按现在这条重挂
+        const { tavern, F, ai, cur, ep } = setup();
+        const m = tavern.chat[9]; m.swipes = ["第一条：他们去了海边。", "第二条：菜烧糊了。"]; m.swipe_id = 1; m.mes = m.swipes[1];
+        ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
+        m.swipe_id = 0; m.mes = m.swipes[0]; await tavern.eventSource.emit("MESSAGE_SWIPED", 9); await wait(450);
+        ai.held(); await wait(150);
+        ok(!cur().current.includes("菜烧糊") && !ep().includes("菜烧糊"), "滑走那条的账回来晚了：作废，不进账本和贴耳");
+        ok(cur().lastFloor === 10 && cur().current.includes("海边") && ep().includes("海边"), "按现在显示的这条重挂上了", cur().current.slice(0, 20));
+    }
+    { // 挂账还在路上就改了这楼
+        const { tavern, F, ai, cur } = setup();
+        tavern.chat[9].mes = "改前：他买了去北京的票。"; ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
+        tavern.chat[9].mes = "改后：他没买票，留在家里。"; await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(350);
+        ai.held(); await wait(150);
+        ok(!cur().current.includes("北京") && cur().current.includes("没买票") && cur().lastFloor === 10, "改前的账作废，按改后的正文重挂", cur().current.slice(0, 20));
+    }
+    { // 生图在挂账路上往楼尾追加 <draw>：不算改，照常落账
+        const { tavern, F, ai, cur } = setup();
+        tavern.chat[9].mes = "第十楼：他们去了海边。"; ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
+        tavern.chat[9].mes += "\n\n<draw>a beach at dusk</draw>";
+        ai.held(); await wait(60);
+        ok(cur().lastFloor === 10 && cur().current.includes("海边") && ai.calls === 1, "楼尾只多了生图段：照常落账，不作废、不重挂");
+    }
+    { // 别的插件把这条消息整个换了个对象，正文没变：还算同一楼
+        const { tavern, F, ai, cur } = setup();
+        tavern.chat[9].mes = "第十楼：他们去了海边。"; ai.holdNext = true; F("ipeLedgerRun")(9, true); await wait(20);
+        tavern.chat[9] = Object.assign({}, tavern.chat[9]);
+        ai.held(); await wait(60);
+        ok(cur().lastFloor === 10 && cur().current.includes("海边") && ai.calls === 1, "消息对象被换过、正文没变：照常落账");
+    }
+    { // 生成过第二条以后左滑回第一条（挂账不在路上）→ 撕掉第二条的账，给第一条补挂；重新生成新 swipe 时不抢着挂
+        const { tavern, F, ai, cur } = setup();
+        const m = tavern.chat[9]; m.swipes = ["第一条：他们去了海边。", "第二条：菜烧糊了。"]; m.swipe_id = 1; m.mes = m.swipes[1];
+        await F("ipeLedgerRun")(9, true);
+        ok(cur().current.includes("菜烧糊"), "第二条的账先挂上了");
+        m.swipe_id = 0; m.mes = m.swipes[0]; await tavern.eventSource.emit("MESSAGE_SWIPED", 9); await wait(600);
+        ok(cur().lastFloor === 10 && cur().current.includes("海边"), "滑回第一条：第二条的账撕掉，给第一条补挂上", cur().current.slice(0, 20));
+        const before = ai.calls;
+        m.swipes.push(""); m.swipe_id = 2; m.mes = "";
+        await tavern.eventSource.emit("MESSAGE_SWIPED", 9); await tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        m.mes = "第三条：菜烧糊了，还在出字…"; await wait(600);
+        ok(ai.calls === before && cur().lastFloor === 8, "右滑重新生成：撕掉这楼的账，新 swipe 还在出字时不抢着挂");
+        m.mes = m.swipes[2] = "第三条：菜烧糊了。"; await tavern.eventSource.emit("MESSAGE_RECEIVED", 9); await wait(700);
+        ok(cur().lastFloor === 10 && cur().current.includes("菜烧糊"), "新 swipe 出完收到新楼：照常挂上");
+    }
+    { // 手动预览出来以后 roll 了那楼，再点采用；强制采用同理
+        const { w, tavern, F, st, ai, cur } = setup(); st.ledgerAutoRun = false;
+        tavern.chat[9].mes = "旧的一条：菜烧糊了。";
+        await w.eval("ipeLedgerRunManual")();
+        await tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        tavern.chat[9].swipes = ["旧", "新的一条：去了海边。"]; tavern.chat[9].swipe_id = 1; tavern.chat[9].mes = "新的一条：去了海边。";
+        w.eval("ipeLedgerAdoptPreview")("panel");
+        ok(cur().lastFloor === 8 && !cur().current.includes("菜烧糊") && statusText(w).indexOf("没采用") >= 0, "预览出来后那楼 roll 了：不采用，状态行说明", statusText(w));
+        await w.eval("ipeLedgerRunManual")(); w.eval("ipeLedgerAdoptPreview")("panel");
+        ok(cur().lastFloor === 10 && cur().current.includes("海边"), "按现在这条重新预览再采用：照常落账");
+        w.eval("ipeLedgerPending = '被拦下的旧账：菜烧糊了，够长够长。'; ipeLedgerPendingInput = ipeLedgerInput(SillyTavern.getContext().chat[9], 10); ipeLedgerPreviewFloor = 10;");
+        tavern.chat[9].mes = "又改了一遍：他们在山上。";
+        w.document.querySelector("#ipe-ledger-force-btn").click();
+        ok(!cur().current.includes("菜烧糊") && statusText(w).indexOf("作废没采用") >= 0, "被拦下以后那楼改了：强制采用不落账", statusText(w));
+    }
+    { // 压缩结果出来以后账本变了，再点采用
+        const { w, tavern, F, cur } = setup();
+        w.fetch = async () => okBody("压过的第八楼账，够长够长。");
+        await F("ipeLedgerCompress")();
+        F("ipeLedgerCommit")("第十楼的新账：他们去了海边，够长够长。", 10);
+        w.eval("ipeLedgerAdoptPreview")("panel");
+        ok(cur().current.includes("海边") && statusText(w).indexOf("作废没采用") >= 0, "压缩以后又挂了一楼：压缩结果作废，不把旧账盖回来", statusText(w));
+        await F("ipeLedgerCompress")(); w.eval("ipeLedgerAdoptPreview")("panel");
+        ok(cur().current.includes("压过的"), "重新压一次再采用：照常落账");
+    }
+    { // 挂账失败等重试的几秒里那楼删了：不重试，不给更早的楼再记一遍
+        const { w, tavern, F, st, cur } = setup(); st.ledgerRetryOnce = true; st.ledgerRetryDelayMs = 80;
+        let calls = 0; w.fetch = async () => { calls++; return { ok: false, status: 503, text: async () => "busy" }; };
+        await F("ipeLedgerRun")(9, true);
+        tavern.chat.splice(9); await wait(200);
+        ok(calls === 1 && cur().lastFloor === 8, "那楼删了就不重试（以前会掉头给第 8 楼再记一遍）", "calls=" + calls);
+    }
+    { // 场景模式：被 roll 掉那条带 nsfw 标记，新的一条没写标记
+        const { w, tavern, F, st } = setup(); st.ledgerAutoRun = false; st.ledgerModeEnabled = true;
+        st.ledgerPromptNsfwPresetsJson = JSON.stringify([{ id: "lpn_1", name: "N", value: "NSFW 槽规则，够长。" }]);
+        let sys = ""; w.fetch = async (u, o) => { sys = JSON.parse(o.body).messages[0].content; return okBody("账，够长够长够长够长。"); };
+        tavern.chat[9].mes = "旧的一条。<route>nsfw</route>"; await F("ipeLedgerRun")(9, false);
+        ok(sys.indexOf("NSFW 槽规则") >= 0, "旧那条带 nsfw 标记：用 NSFW 槽");
+        await tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        tavern.chat[9].mes = "新的一条，没写标记。"; await F("ipeLedgerRun")(9, false);
+        ok(sys.indexOf("NSFW 槽规则") < 0, "roll 掉以后新那条没写标记：退回 roll 之前的模式，不沿用被 roll 掉那条的 nsfw");
+        tavern.chat[7].mes = "第八楼。<route>nsfw</route>"; await F("ipeLedgerRun")(7, false);   // 第 8 楼挂账时读到 nsfw
+        tavern.chat[9].mes = "旧的一条。<route>normal</route>"; await F("ipeLedgerRun")(9, false);
+        ok(sys.indexOf("NSFW 槽规则") < 0, "第 10 楼旧那条写着 normal：用 Normal 槽");
+        await tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        tavern.chat[9].mes = "又一条，没写标记。"; await F("ipeLedgerRun")(9, false);
+        ok(sys.indexOf("NSFW 槽规则") >= 0, "roll 掉写着 normal 的那条：往回找到还活着的第 8 楼写着 nsfw，照它沿用");
+    }
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
