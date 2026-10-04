@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.1";
+var IPE_VERSION = "2.27.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -970,24 +970,37 @@ var ipeLedgerLastUserChars = 0;      // 上次拼装后的总字数，面板灰�
 /* 2.27.0 旧账「攒两楼再换」：喂哪几版旧账，不再每楼往前挪一格。
    上一发喂的最老那版钉住，新落的一版只往后接；接到比旋钮多一版（旋钮 3 版 → 旧账 2 版、3 版轮着来，再加现任），
    下一发就跳回最近几版重新钉。开头没动的那一发，账本历史整段跟上一发一字不差，副 AI 那头的前缀缓存吃得上；跳的那一发断一次。
-   旋钮 1 版只喂现任，没得攒。钉子只记在内存里、按聊天认：刷新页面就从最近几版重新钉，顶多断一次缓存。
+   旋钮 1 版只喂现任，没得攒。
+   2.27.2 钉子记在这个聊天自己的数据里（chat_metadata），不再只放内存：手机上切出去看一眼别的 App，Safari 常常在后台把酒馆页面重新载入，
+   内存里的钉子一丢，每楼都从最近几版重新钉，缓存就永远停在旧账开头，每楼命中的数一模一样。
    dry = 面板估字数的干跑：只看不挪钉子。不然估一下就把钉子推到下一楼的位置，重 roll 本楼时就跟上一发对不上了。 */
-var ipeLedgerHisPin = null;   // { chat, floor, ts }：上一发喂的最老那版旧账
+var IPE_LEDGER_HISPIN_META = "ipe_ledger_hispin_v1";   // { floor, ts }：上一发喂的最老那版旧账
+var ipeLedgerHisKept = null;   // 上一次真发的请求：true = 旧账接着上一发，false = 重新起头，null = 没带旧账。状态行据此报一句
 function ipeLedgerHistoryPick(vs, n, dry) {   // vs：旧版，新 → 旧；返回要喂的那几版，同样新 → 旧
     var want = Math.max(0, n - 1);
-    if (!want || !vs.length) return [];
-    var base = Math.min(want, vs.length), cnt = base;
-    var key = ipeChatKey(), pin = ipeLedgerHisPin;
-    if (pin && pin.chat === key) {
+    if (!want || !vs.length) { if (!dry) ipeLedgerHisKept = null; return []; }
+    var base = Math.min(want, vs.length), cnt = base, kept = false;
+    var root = ipeMetaRoot(), pin = root ? root[IPE_LEDGER_HISPIN_META] : null;
+    if (pin && typeof pin === "object") {
         for (var i = 0; i < vs.length; i++) {
             if (vs[i].floor !== pin.floor || vs[i].ts !== pin.ts) continue;
-            if (i + 1 >= base && i + 1 <= want + 1) cnt = i + 1;   // 还钉得住：从它一路喂到最新；攒满了 / 不够数就跳回最近几版
+            if (i + 1 >= base && i + 1 <= want + 1) { cnt = i + 1; kept = true; }   // 还钉得住：从它一路喂到最新；攒满了 / 不够数就跳回最近几版
             break;
         }
     }
     var pick = vs.slice(0, cnt);
-    if (!dry) ipeLedgerHisPin = { chat: key, floor: pick[cnt - 1].floor, ts: pick[cnt - 1].ts };
+    if (!dry) {
+        ipeLedgerHisKept = kept;
+        var last = pick[cnt - 1];
+        if (root && !(pin && pin.floor === last.floor && pin.ts === last.ts)) {   // 钉子挪了才写，隔一楼写一次
+            root[IPE_LEDGER_HISPIN_META] = { floor: last.floor, ts: last.ts };
+            try { var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced(); } catch(e) {}
+        }
+    }
     return pick;
+}
+function ipeLedgerHisHint() {
+    return ipeLedgerHisKept === true ? "｜旧账接着上一发" : (ipeLedgerHisKept === false ? "｜旧账重新起头" : "");
 }
 function ipeLedgerHistoryBlock(dry) {
     var n = Number(cfg().ledgerVersionsN);
@@ -1832,7 +1845,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         ipeLedgerCommit(body, msgFloor);
         ipeLedgerModeAfterRun(usedMode);
         ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜" + ipeLedgerLastMode + " 槽" + (ipeLedgerNsfwFellBack ? "（内容为空，已用 Normal 槽）" : "") : "")
-            + (ipeLedgerReportTruncated ? "（report 层已截断）" : ""),
+            + (ipeLedgerReportTruncated ? "（report 层已截断）" : "") + ipeLedgerHisHint(),
             got.level === 1 ? "#6ec577" : "#c9a227");
         ipeLedgerSync();
         ipeLedgerLastAutoInput = input;

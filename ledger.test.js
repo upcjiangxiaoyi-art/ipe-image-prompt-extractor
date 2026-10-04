@@ -49,10 +49,10 @@ function makeTavern(floors) {
 }
 
 /* ---- 把 index.js 装进 jsdom，抠出内部函数 ---- */
-function boot(floors) {
+function boot(floors, reuse) {   // reuse：拿同一个聊天再开一个新页面（模拟页面重新载入，内存清空、聊天数据还在）
     const dom = new JSDOM("<!DOCTYPE html><body></body>", { runScripts: "outside-only", url: "http://localhost" });
     const w = dom.window;
-    const tavern = makeTavern(floors);
+    const tavern = reuse ? Object.assign(reuse, { eventSource: makeTavern(0).eventSource }) : makeTavern(floors);
     w.SillyTavern = { getContext: () => tavern };
     w.toastr = { error() {}, success() {}, warning() {}, info() {} };
     w.TextDecoder = TextDecoder; w.TextEncoder = TextEncoder;   // jsdom 没带，流式解码要用
@@ -77,7 +77,7 @@ function boot(floors) {
     const F = n => w["__t_" + n];
     // 事件绑定藏在 createUI() 里，由 APP_READY 触发——不发这个事件，什么都没绑上
     // 2.18.0 起挂账失败默认自动重试一次；老测试都是「失败一次就该弹卡 / 计数」，测试环境默认关掉，【44】单独打开
-    tavern.extensionSettings[F("EXT_NAME")] = Object.assign({}, F("DEFAULTS"), { ledgerRetryOnce: false });
+    if (!reuse) tavern.extensionSettings[F("EXT_NAME")] = Object.assign({}, F("DEFAULTS"), { ledgerRetryOnce: false });
     try { F("init")(); } catch (e) { console.log("init 抛错：" + e.message); }
     return { w, tavern, F, EPK: F("IPE_LEDGER_EP_KEY") };
 }
@@ -1666,6 +1666,21 @@ await (async () => {
     eq(two.map(r => olds(r.u)).join(","), two.map((r, i) => i % 2 ? 2 : 1).join(","), "旋钮 2 版：旧账 1、2 版轮着来");
     const one = walk(1, 20).R.filter(r => r.f >= 4);
     ok(one.every(r => olds(r.u) === 0), "旋钮 1 版：只喂现任，不攒");
+    // 2.27.2 页面重新载入（手机切出去再回来常这样）：钉子记在聊天数据里，接着用
+    const pre = walk(3, 12);                                                  // 第 12 楼那发刚跳过，下一发该接着往后长
+    const last12 = pre.R[pre.R.length - 1];
+    const again = boot(0, pre.tavern);                                       // 同一个聊天，新开的页面
+    const u14 = again.F("ipeLedgerBuildUser")(pre.tavern.chat[13].mes, "", 14);
+    ok(olds(last12.u) === 2 && olds(u14) === 3 && u14.indexOf(head(last12.u)) === 0, "页面重新载入以后：钉子还在，这一发接着上一发往后长", "olds " + olds(last12.u) + " → " + olds(u14));
+    // 状态行：旧账接着上一发 / 重新起头，攒满以后隔一楼轮着来；还没有旧账时不报
+    const h = boot(40); withApi(h.tavern, h.F);
+    const seen = [];
+    for (let f = 2; f <= 16; f += 2) {
+        await h.F("ipeLedgerRun")(f - 1, false);
+        const s = statusText(h.w);
+        seen.push(s.indexOf("旧账接着上一发") >= 0 ? "接" : (s.indexOf("旧账重新起头") >= 0 ? "起" : "-"));
+    }
+    eq(seen.join(""), "--起接接起接起", "挂账状态行报旧账接着上一发还是重新起头（第 2、4 楼还没旧账不报，攒满以后一楼一换）");
 })();
 
 console.log("\n【49】 压缩账本带上「额外说一句」（2.27.0）：写了就进请求，排在压缩指令后面、包裹要求前面；没写跟以前一字不差");
