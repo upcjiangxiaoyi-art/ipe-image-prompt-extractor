@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.2";
+var IPE_VERSION = "2.27.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1213,7 +1213,7 @@ async function ipeLedgerReadStream(res, onChunk, onProgress, onDelta) {
         var now = Date.now();
         if (!force && now - lastReport < 400) return;
         lastReport = now;
-        try { onProgress(content.length, reasonChars); } catch(e) {}
+        try { onProgress(content.length, reasonChars, content); } catch(e) {}
     }
     function handleLine(line) {
         line = line.replace(/\r$/, "");
@@ -1335,13 +1335,18 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
     var idleMs = ipeLedgerIdleMs();
     var dog = ipeLedgerWatchdog(ipeLedgerAbort, idleMs);
     var startedAt = Date.now();
-    function progress(chars, reasonChars) {
+    /* 2.27.3 思考和写账本分开报：思考放在 reasoning 字段里的、或者被中转用 <think>…</think> 包着混在正文开头发来的，
+       都算「正在思考，已想 N 字」；思考收尾、开始写正文，才换成「正在写账本，已收 N 字」，字数只算正文。 */
+    function progress(chars, reasonChars, text) {
         var sec = Math.round((Date.now() - startedAt) / 1000);
-        var t = chars >= 4
-            ? "挂账中…副 AI 正在写账本，已收 " + chars + " 字"
-            : (chars > 0
-                ? "挂账中…副 AI 已开口（" + chars + " 字），后面在思考，连接是通的"
-                : (reasonChars > 0 ? "挂账中…副 AI 思考中（思考 " + reasonChars + " 字）" : "挂账中…等副 AI 开口"));
+        var sp = ipeSplitThink(text == null ? "" : text);
+        var thinkN = (Number(reasonChars) || 0) + sp.think.length;
+        var outN = text == null ? chars : sp.out.trim().length;
+        var t = outN >= 4
+            ? "挂账中…副 AI 正在写账本，已收 " + outN + " 字"
+            : (thinkN > 0
+                ? "挂账中…副 AI 正在思考，已想 " + thinkN + " 字"
+                : (outN > 0 ? "挂账中…副 AI 已开口（" + outN + " 字），后面在思考，连接是通的" : "挂账中…等副 AI 开口"));
         ipeLedgerStatus(t + "，" + sec + " 秒（先别发下一条，贴耳还是上一份）", "#c9a227");
     }
 
@@ -1367,6 +1372,9 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
             out = parseChatResponse(data);
             finish = ipeLedgerFinishOf(data);
         }
+        // 2.27.3 开头的 <think>…</think> 是思考不是账本：剥掉再交出去，免得副 AI 没写包裹时整段思考被当成账本落下
+        var spOut = ipeSplitThink(out);
+        if (spOut.think || spOut.open) { reasonChars += spOut.think.length; out = spOut.out.trim(); }
         if (!out) throw new Error(ipeLedgerEmptyReason(finish, reasonChars));
         return out;
     } catch(e) {

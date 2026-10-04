@@ -1831,6 +1831,34 @@ await (async () => {
     }
 })();
 
+console.log("\n【51】 挂账状态行分阶段（2.27.3）：思考时报「正在思考，已想 N 字」，写正文再换「正在写账本，已收 N 字」；<think> 混在正文里发的也认，落账前剥掉");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    withApi(tavern, F, "gpt-5");
+    const said = [];
+    const orig = w.ipeLedgerStatus;
+    w.ipeLedgerStatus = function(txt) { said.push(String(txt)); return orig.apply(this, arguments); };
+    const sse = d => "data: " + JSON.stringify({ choices: [{ delta: d }] }) + "\n\n";
+    const think = "我先想想这一楼发生了什么，够长够长够长够长够长够长。";
+    const body = "<ledger>新账本：左肩旧伤第 10 楼起，够长够长够长够长够长。</ledger>";
+    w.fetch = async () => ({ ok: true, status: 200, body: sseBody([sse({ content: "<think>" + think }), sse({ content: "</think>\n" }), sse({ content: body }), "data: [DONE]\n\n"]) });
+    await F("ipeLedgerRun")(9, false);
+    ok(said.some(x => x.indexOf("正在思考，已想 " + think.length + " 字") >= 0) && !said.some(x => x.indexOf("正在写账本，已收 " + ("<think>" + think).length) >= 0),
+        "思考混在正文开头发来：报「正在思考，已想 N 字」，不当成写账本", said.slice(0, 3).join(" ｜ "));
+    ok(said.some(x => x.indexOf("正在写账本，已收 " + body.length + " 字") >= 0), "开始写正文：换成「正在写账本，已收 N 字」，字数只算正文");
+    ok(F("ipeLedgerRead")().current.indexOf("左肩旧伤") >= 0 && F("ipeLedgerRead")().current.indexOf("我先想想") < 0, "落账的是账本，不带思考");
+    said.length = 0;
+    w.fetch = async () => ({ ok: true, status: 200, body: sseBody([sse({ reasoning_content: think }), sse({ content: body }), "data: [DONE]\n\n"]) });
+    await F("ipeLedgerRun")(9, false);
+    ok(said.some(x => x.indexOf("正在思考，已想 " + think.length + " 字") >= 0), "思考放在 reasoning_content 字段里的：也报「正在思考，已想 N 字」");
+    w.fetch = async () => ({ ok: true, status: 200, body: sseBody([sse({ content: "<think>" + think + "</think>没写包裹的账本正文：右手还缠着绷带，够长够长够长。" }), "data: [DONE]\n\n"]) });
+    await F("ipeLedgerRun")(9, false);
+    ok(F("ipeLedgerRead")().current.indexOf("绷带") >= 0 && F("ipeLedgerRead")().current.indexOf("我先想想") < 0, "没写包裹时：开头那段思考剥掉，不混进账本");
+    w.fetch = async () => ({ ok: true, status: 200, body: sseBody([sse({ content: "<think>" + think }), "data: [DONE]\n\n"]) });
+    await F("ipeLedgerRun")(9, false);
+    ok(statusText(w).indexOf("思考 " + think.length + " 字") >= 0 && F("ipeLedgerRead")().current.indexOf("绷带") >= 0, "只想没写：按回了个空报失败（带上思考字数），账本没动", statusText(w));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
