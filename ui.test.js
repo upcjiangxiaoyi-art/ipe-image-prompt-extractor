@@ -254,6 +254,16 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         bt('ipe-ledger-body-tag').value = '</content>';
         bt('ipe-ledger-body-tag').dispatchEvent(new w.Event('change'));
         check(settings.bodyTag === 'content' && btIds.every(id => bt(id).value === 'content'), '填成 </content> 也认得：改回 content');
+        // 2.27.8 开场白开关：浮窗预览区、抽屉顶上各一个，都在「自动注入」下面；默认开着，改一个两个一起变
+        w.eval('window.ui.ipeGreetingBindUI = ipeGreetingBindUI;');
+        w.ui.ipeGreetingBindUI();
+        const gp = d.querySelector('#ipe-auto-greeting'), gd = d.querySelector('#iped-auto-greeting');
+        check(gp && gd && gp.checked && gd.checked, '开场白开关浮窗、抽屉各一个，默认开着');
+        check(gp.closest('label').parentElement.previousElementSibling.querySelector('#ipe-auto-inject') && gd.closest('label').parentElement.previousElementSibling.querySelector('#iped-auto-inject'), '两个开关都紧挨在「自动注入」下面');
+        gp.checked = false; gp.dispatchEvent(new w.Event('change'));
+        check(settings.imgAutoGreeting === false && !gd.checked && d.querySelector('#ipe-status').textContent.includes('开场白不自动出图'), '关掉浮窗那个：存下来，抽屉那个跟着关，状态行说开场白不自动出图了');
+        gd.checked = true; gd.dispatchEvent(new w.Event('change'));
+        check(settings.imgAutoGreeting === true && gp.checked, '打开抽屉那个：浮窗那个跟着开');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

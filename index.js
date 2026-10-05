@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.7";
+var IPE_VERSION = "2.27.8";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -95,6 +95,7 @@ const DEFAULTS = {
     ledgerCompressPrompt: "",       // 2.19.0 压缩指令，空 = 内置默认
     ledgerCompressWarnChars: 3000,  // 账本超过这么多字提醒可以压缩
     ledgerApiProfile: "",
+    imgAutoGreeting: true,         // 2.27.8 开场白也自动出图：关掉 = 开场白不自动提取，要图点「手动提取」
     bodyTag: "content",            // 2.27.7 正文标签：挂账、生图从这里取正文，新楼没收尾就不自动跑；留空 = 不认标签（照老样子认 <content>，只拦空回）
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
@@ -1815,7 +1816,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         }
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
-    var unfinished = silent ? ipeFloorUnfinished(msg) : "";   // 2.27.6 手动「重新挂账」不拦，你点了就跑
+    var unfinished = silent ? ipeFloorUnfinished(msg, msgFloor - 1) : "";   // 2.27.6 手动「重新挂账」不拦，你点了就跑
     if (unfinished) {
         ipeLedgerStatus("第 " + msgFloor + " 楼" + unfinished + "，自动挂账先不跑；重 roll 或点「继续」写完，收到新楼会照常挂。这楼其实写完了的话，点「重新挂账」手动挂", "#c9a227");
         try { console.log("[IPE] 挂账跳过没写完的楼", { floor: msgFloor, why: unfinished }); } catch(eL) {}
@@ -4906,12 +4907,30 @@ function ipeBodyTagBindUI() {
     ipeBodyTagRefreshUI();
 }
 
+/* 2.27.8 前两条 AI 楼都用正文标签包着，这楼一个都没有：多半是还没写到正文就断了——正文前面先写了别的
+   （自家标签包的思考 <cot>、状态栏、小标题），写到那儿就掐了。预设不用这个标签的，前面的楼也没有，不会误拦；
+   开场白一般不带标签，所以聊天最开头两楼认不出来。藏起来的楼不算。返回前面那几楼用的标签，认不出来返回 ""。 */
+function ipeBodyTagRecentUse(idx, tags) {
+    var chat = []; try { chat = ctx().chat || []; } catch(e) {}
+    var seen = 0, found = [], keys = {};
+    for (var k = Number(idx) - 1; k >= 0 && seen < 2; k--) {
+        var m = chat[k];
+        if (!m || m.is_user || m.is_system === true) continue;
+        var f = ipeBodyTagScan(String(m.mes || "").replace(IPE_THINK_BLOCK_RE, ""), tags).found;
+        if (!f.length) return "";
+        seen++;
+        f.forEach(function(x){ var kx = String(x).toLowerCase(); if (!keys[kx]) { keys[kx] = true; found.push(x); } });
+    }
+    return seen >= 2 ? ipeBodyTagLabel(found) : "";
+}
+
 /* 2.27.6 这楼像不像没写完：主 AI 空回，或者正文写到一半断了（中转掐断、手动停），酒馆照样当新楼收下，
    自动挂账、自动生图就拿空的 / 半截的正文跑一遍——白花钱，账本还记进了没发生的剧情。
    认得出来的：正文是空的（只剩思考、楼尾标记、生图段、空标签也算空）；<think> 开了没收尾（还在想就断了）；
    2.27.7 起正文标签看面板「正文标签」（默认 content）：开了没收尾 = 没写完，标签里一个字都没有 = 空回。
+   2.27.8 传了楼号（下标）的，再看一眼前两条 AI 楼：都有正文标签、这楼一个都没有，也当没写完（见 ipeBodyTagRecentUse）。
    正文标签留空、或者预设根本不用标签包正文的，写到一半断了跟本来就短分不出来，只能认空回。返回原因，没事返回 ""。 */
-function ipeFloorUnfinished(msg) {
+function ipeFloorUnfinished(msg, idx) {
     if (!msg) return "";
     var t = String(msg.mes || "");
     try { t = ipeLedgerStripImageTag(t); } catch(e) {}
@@ -4926,6 +4945,10 @@ function ipeFloorUnfinished(msg) {
     var scan = ipeBodyTagScan(t, tags);
     if (scan.unclosed) return "正文没写完（<" + scan.unclosed + "> 开了没收尾）";
     if (scan.found.length && !ipeVisibleText(scan.parts.join("\n"))) return "空回了（" + ipeBodyTagLabel(scan.found) + " 里一个字都没有）";
+    if (!scan.found.length && idx != null && Number(idx) >= 0) {
+        var used = ipeBodyTagRecentUse(idx, tags);
+        if (used) return "像是还没写到正文就断了（前两楼都有 " + used + "，这楼一个都没有）";
+    }
     return "";
 }
 
@@ -5211,6 +5234,7 @@ function ipeImgBindLayerUI() {
     ipeCastBindUI();
     ipeImgStreamBindUI();
     ipeBodyTagBindUI();
+    ipeGreetingBindUI();
     ["ipe-layered", "iped-layered"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -6858,6 +6882,7 @@ function createPanel() {
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="ipe-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
+        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="开新聊天时，开场白也会被当成新楼自动提取出图。关掉 = 开场白不自动提取，要图点「手动提取」">开场白也自动出图 <input type="checkbox" id="ipe-auto-greeting"'+(c.imgAutoGreeting!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
         /* 2.26.0 实况：流式收到的思考与输出边收边显示，跑完也留着；第一次请求前藏着 */
@@ -7205,6 +7230,7 @@ function createDrawer() {
     h += '<div style=\"margin-bottom:6px\"><label>显示快捷入口 <input type=\"checkbox\" id=\"iped-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="iped-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label>自动注入 <input type="checkbox" id="iped-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>';
+    h += '<div style="margin-bottom:6px"><label title="开新聊天时，开场白也会被当成新楼自动提取出图。关掉 = 开场白不自动提取，要图点「手动提取」">开场白也自动出图 <input type="checkbox" id="iped-auto-greeting"'+(c.imgAutoGreeting!==false?' checked':'')+'></label></div>';
     h += '<div style="margin:8px 0;display:flex;gap:6px"><input type="button" id="iped-open-panel" class="menu_button" value="打开 IPE 小面板"><input type="button" id="iped-reset-entry" class="menu_button" value="重置入口位置"></div>';
     h += '<div class="ipe-tabs" style="margin:8px 0">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
@@ -9423,7 +9449,32 @@ function onReinject() {
     } catch(e){ console.error("[IPE]", e); setStatus("重注入失败: " + e.message, "#d4726a"); }
 }
 
-function onMsgReceived(idx) {
+/* 2.27.8 开场白：开新聊天（或者打开只有开场白的聊天）时，酒馆把开场白当新楼发「收到新楼」，type = first_message，
+   以前一律自动提取出图。老酒馆不带 type：第一条用户消息之前的 AI 楼算开场白（群聊会有好几条）。
+   带了 type 就只认 first_message——开场白后面没发话、直接让 AI 往下写的那楼是新写的，照常出图。 */
+function ipeIsGreetingFloor(idx, type) {
+    if (type != null && String(type) !== "") return String(type) === "first_message";
+    var chat = []; try { chat = ctx().chat || []; } catch(e) {}
+    var i = Number(idx);
+    if (!Number.isFinite(i) || i < 0 || !chat[i] || chat[i].is_user) return false;
+    for (var k = 0; k < i; k++) if (chat[k] && chat[k].is_user) return false;
+    return true;
+}
+function ipeGreetingRefreshUI() {
+    ["ipe-auto-greeting", "iped-auto-greeting"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().imgAutoGreeting !== false; });
+}
+function ipeGreetingBindUI() {
+    ["ipe-auto-greeting", "iped-auto-greeting"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("imgAutoGreeting", !!el.checked); ipeGreetingRefreshUI();
+            setStatus(el.checked ? "开场白也自动出图：开新聊天时开场白照常自动提取" : "开场白不自动出图了：开新聊天时开场白不提取，要图点「手动提取」", "#6ec577");
+        });
+    });
+    ipeGreetingRefreshUI();
+}
+
+function onMsgReceived(idx, type) {
     if (!cfg().enabled) return;
     try {
         var chat = ctx().chat || [];
@@ -9439,6 +9490,10 @@ function onMsgReceived(idx) {
             }
             if (i < 0 || !msg) return;
             try { console.log("[IPE] 生图：事件没带楼号（收到:", idx, "），已自行定位第", i + 1, "楼"); } catch(eLg) {}
+        }
+        if (cfg().imgAutoGreeting === false && ipeIsGreetingFloor(i, type)) {
+            setStatus("第 " + (i + 1) + " 楼是开场白，「开场白也自动出图」关着，这楼不自动提取；要图点「手动提取」", "#c9a227");
+            return;
         }
 
         pendingAutoIdx = i;
@@ -9471,9 +9526,9 @@ function runPendingAutoExtract() {
 
         var msg = ctx().chat[idx];
         if (!msg || msg.is_user) return;
-        var unfinished = ipeFloorUnfinished(msg);   // 2.27.6 空回 / 没写完的楼不提取、不注入
+        var unfinished = ipeFloorUnfinished(msg, idx);   // 2.27.6 空回 / 没写完的楼不提取、不注入
         if (unfinished) {
-            setStatus("第 " + (idx + 1) + " 楼" + unfinished + "，自动提取先不跑；重 roll 或点「继续」写完，收到新楼会照常提取", "#c9a227");
+            setStatus("第 " + (idx + 1) + " 楼" + unfinished + "，自动提取先不跑；重 roll 或点「继续」写完，收到新楼会照常提取。这楼其实写完了的话，点「手动提取」", "#c9a227");
             return;
         }
 

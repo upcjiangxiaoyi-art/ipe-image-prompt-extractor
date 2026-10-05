@@ -1996,6 +1996,83 @@ await (async () => {
     ok(vp2.indexOf("【正文内容】\n他推开门，外面的雨停了。") >= 0, "这楼没有正文标签：兜底用整楼（和以前一样）", vp2.slice(-80));
 })();
 
+console.log("\n【55】 开场白开关（2.27.8）：关掉以后开场白不自动提取出图（新酒馆认 first_message，老酒馆认第一句话之前的 AI 楼，群聊几条开场白都算），挂账照常、手动提取照常；开场白后面新写的楼照常出图");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    const AI = mes => ({ is_user: false, is_system: false, mes });
+    const GREET = "暮春三月，洛京飞花。镇北侯世子韩川央率三千铁骑踏过祁门关。";
+    async function greet(opts) {
+        const b = boot(1); const st = withApi(b.tavern, b.F); st.autoInjectDelay = 500; st.ledgerAutoRun = true;
+        if (opts.off) st.imgAutoGreeting = false;
+        b.tavern.chat.length = 0;
+        (opts.chat || [AI(GREET)]).forEach(m => b.tavern.chat.push(m));
+        const box = { ledger: 0, img: 0 };
+        b.w.fetch = async () => { box.ledger++; return okBody("开场的账，够长够长够长够长。"); };
+        b.w.runExtract = async function(){ box.img++; };
+        await b.tavern.eventSource.emit("MESSAGE_RECEIVED", ...opts.args); await wait(900);
+        return Object.assign(b, { box, img: () => (b.w.document.querySelector("#ipe-status") || {}).textContent || "" });
+    }
+    let r = await greet({ args: [0, "first_message"] });
+    ok(r.box.img === 1, "默认开着：开场白照常自动提取（和以前一样）", JSON.stringify(r.box));
+    r = await greet({ off: true, args: [0, "first_message"] });
+    ok(r.box.img === 0 && r.img().indexOf("开场白") >= 0 && r.img().indexOf("手动提取") >= 0, "关掉：开场白不自动提取，状态行说是开场白、要图点手动提取", JSON.stringify(r.box) + " " + r.img());
+    ok(r.box.ledger === 1, "关掉也照常挂账（这个开关只管出图）", JSON.stringify(r.box));
+    await r.w.eval("onExtract")(); await wait(50);
+    ok(r.box.img === 1, "关掉以后点「手动提取」照样提取开场白", JSON.stringify(r.box));
+    r = await greet({ off: true, args: [0] });
+    ok(r.box.img === 0, "老酒馆事件不带 type：第一句话之前的 AI 楼也认作开场白", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI("甲的开场白，够长够长。"), AI("乙的开场白，够长够长。")], args: [1, "first_message"] });
+    ok(r.box.img === 0, "群聊第二条开场白：同样不自动提取", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI("甲的开场白，够长够长。"), AI("乙的开场白，够长够长。")], args: [1] });
+    ok(r.box.img === 0, "群聊第二条开场白、事件不带 type：也认得", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI(GREET), AI("没等你说话，AI 接着往下写的这一楼。")], args: [1, "normal"] });
+    ok(r.box.img === 1, "开场白后面直接让 AI 往下写的那楼（type 不是 first_message）：是新写的，照常出图", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI(GREET), { is_user: true, is_system: false, mes: "你好" }, AI("回你的这一楼，够长够长。")], args: [2] });
+    ok(r.box.img === 1, "说过话以后的楼、事件不带 type：照常出图", JSON.stringify(r.box));
+})();
+
+console.log("\n【56】 还没写到正文就断了（2.27.8）：前两条 AI 楼都有正文标签、这楼一个都没有（断在自家标签包的思考、正文前的状态栏里），自动挂账和自动生图都先不跑；预设不用这个标签、只有一楼有、正文标签留空，都照常跑");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    const C = (tag, txt) => "<think>想好了</think>\n<" + tag + ">" + txt + "</" + tag + ">\n<status>体力 10</status>";
+    async function cut(mes, prep, bodyTag) {
+        const b = boot(10); const st = withApi(b.tavern, b.F); st.ledgerAutoRun = true; st.autoInjectDelay = 500;
+        if (bodyTag !== undefined) st.bodyTag = bodyTag;
+        b.F("ipeLedgerCommit")("第八楼的账：大家在吃饭，够长够长够长。", 8);
+        if (prep) prep(b.tavern.chat);     // 第 4、6、8 楼（下标 3、5、7）是 AI 楼
+        const box = { ledger: 0, img: 0 };
+        b.w.fetch = async () => { box.ledger++; return okBody("第十楼的账，够长够长够长够长。"); };
+        b.w.runExtract = async function(){ box.img++; };
+        b.tavern.chat[9].mes = mes;
+        await b.tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal"); await wait(900);
+        return Object.assign(b, { box, img: () => (b.w.document.querySelector("#ipe-status") || {}).textContent || "" });
+    }
+    const both = tag => chat => { chat[5].mes = C(tag, "第六楼的正文。"); chat[7].mes = C(tag, "第八楼的正文。"); };
+    let r = await cut("<cot>先盘一下这一楼：他该不该开门", both("content"));
+    ok(r.box.ledger === 0 && r.box.img === 0 && r.F("ipeLedgerRead")().lastFloor === 8, "前两楼都有 <content>，这楼断在 <cot> 思考里（插件不认这个思考标签）：都不跑，账本还停在第 8 楼", JSON.stringify(r.box));
+    ok(statusText(r.w).indexOf("还没写到正文就断了") >= 0 && statusText(r.w).indexOf("<content>") >= 0, "挂账状态行说像是还没写到正文就断了，点名前两楼用的 <content>", statusText(r.w));
+    ok(r.img().indexOf("还没写到正文就断了") >= 0 && r.img().indexOf("手动提取") >= 0, "生图状态行也说了，写完了的话点手动提取", r.img());
+    r = await cut("<status>体力 10，心情 阴</status>\n", both("content"));
+    ok(r.box.ledger === 0 && r.box.img === 0, "前两楼都有 <content>，这楼只写了正文前的状态栏就断了：都不跑", JSON.stringify(r.box));
+    r = await cut(C("content", "他推开门，外面的雨停了。"), both("content"));
+    ok(r.box.ledger === 1 && r.box.img === 1, "对照：这楼也写完了 <content>，照常跑", JSON.stringify(r.box));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门");
+    ok(r.box.ledger === 1 && r.box.img === 1, "前面的楼都没有 <content>（预设本来不用）：照常跑，不误拦", JSON.stringify(r.box));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门", chat => { chat[7].mes = C("content", "第八楼的正文。"); });
+    ok(r.box.ledger === 1 && r.box.img === 1, "只有上一楼有 <content>、再往前那楼没有：认不准，照常跑", JSON.stringify(r.box));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门", both("content"), "");
+    ok(r.box.ledger === 1 && r.box.img === 1, "正文标签留空：不认标签，照常跑", JSON.stringify(r.box));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门", both("正文"), "正文");
+    ok(r.box.ledger === 0 && r.box.img === 0 && statusText(r.w).indexOf("<正文>") >= 0, "正文标签填「正文」、前两楼都有 <正文>：同样拦，点名 <正文>", JSON.stringify(r.box) + " " + statusText(r.w));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门", chat => { chat[3].mes = C("content", "第四楼的正文。"); chat[5].mes = C("content", "第六楼的正文。"); chat[7].mes = "（藏起来的旁白）"; chat[7].is_system = true; });
+    ok(r.box.ledger === 0 && r.box.img === 0, "藏起来的楼不算：越过它看前两条 AI 楼，都有 <content>，照样拦", JSON.stringify(r.box));
+    r = await cut("<cot>先盘一下这一楼：他该不该开门", both("content"));
+    await r.w.eval("ipeLedgerRunManual")();
+    ok(r.box.ledger === 1, "手动「重新挂账」不拦：你点了就跑", JSON.stringify(r.box));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
