@@ -395,6 +395,54 @@ function addTurn(env, text, paras) {
         } finally { w.close(); }
     }
 
+    // ── 11. 2.27.10 垫层、字色只看样式：楼还没排好版也判得出；美化晚到也认；换聊天连「量过」的记号一起清，同一楼也重新量；自检报得出来 ──
+    const THEME = '.mes{color:#f5f4e9} .mes_text{position:relative;z-index:3;color:#1b2722}';
+    {
+        const env = setup(12, { css: THEME });
+        const { w, F, row } = env;
+        try {
+            row(11).style.display = 'none';                                              // 头一回放块时这楼还没排好版：量不出盒子
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerRenderInline()');
+            const mt = row(11).querySelector('.mes_text'), blk = row(11).querySelector('.ipe-ledger-inline');
+            check(w.eval('ipeLedgerInlineInside') === true && blk.parentNode === mt, '楼还没排好版（量不出盒子）：垫层、字色照样判得出，🐚 住进正文末尾');
+            row(11).style.display = '';
+            const rep = w.eval('ipeLedgerInlineReport()');
+            check(rep.includes('住法：住正文里') && rep.includes('🐚 在：正文里') && rep.includes('正文：z-index 3') && rep.includes('字色 rgb(27, 39, 34)'), '自检报出：住正文里、正文垫在 z-index 3、正文字色', rep);
+        } finally { w.close(); }
+    }
+    {
+        const env = setup(12);
+        const { w, F, row, d } = env;
+        try {
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerRenderInline()');
+            const mt = row(11).querySelector('.mes_text'), blk = row(11).querySelector('.ipe-ledger-inline');
+            check(w.eval('ipeLedgerInlineInside') === false && blk.previousElementSibling === mt, '前提：没美化，挂在正文外、量过了');
+            const rep0 = w.eval('ipeLedgerInlineReport()');
+            check(rep0.includes('住法：挂正文外') && rep0.includes('🐚 在：正文外（紧跟正文）') && rep0.includes('量过：是') && !rep0.includes('该住正文里'), '自检报出：挂正文外、量过、不用挪', rep0);
+            d.head.insertAdjacentHTML('beforeend', '<style>' + THEME + '</style>');       // 卡自带的美化晚到
+            w.eval('ipeLedgerRenderInline()');
+            check(w.eval('ipeLedgerInlineInside') === true && blk.parentNode === mt && mt.lastElementChild === blk, '美化晚到（块已经量过、挂在正文外）：下回同步再看一眼样式，住进正文末尾');
+        } finally { w.close(); }
+    }
+    {
+        const env = setup(12, { layout: 'grid-hole', css: '.mes_block{display:grid}' });
+        const { w, tavern, F, row, inline } = env;
+        const r = el => el.getBoundingClientRect();
+        try {
+            w.eval('ipeLedgerInstallInlineObserver()');
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerSync()');
+            const mt = row(11).querySelector('.mes_text');
+            check(w.eval('ipeLedgerInlineInside') === true && mt.lastElementChild === row(11).querySelector('.ipe-ledger-inline'), '前提：grid 美化，量过住在正文末尾');
+            await tavern.eventSource.emit('CHAT_CHANGED');                              // 酒馆又发了一次换聊天，楼没重画
+            await delay(260);
+            const blk = row(11).querySelector('.ipe-ledger-inline');
+            check(inline().length === 1 && !!blk && blk.parentNode === mt && r(mt).top <= r(blk).top, '换聊天（楼没重画）：同一楼也重新量，还是住回正文末尾，不跑到正文上面');
+        } finally { w.close(); }
+    }
+
     clearTimeout(watchdog);
     console.log('通过 ' + count + ' 项顺滑回归');
 })().catch(e => { console.error(e); process.exitCode = 1; clearTimeout(watchdog); });

@@ -200,6 +200,7 @@ console.log("\n\u30109\u3011 \u8D34\u8033\u81EA\u68C0\u7EDD\u4E0D\u80FD\u6C61\u6
     ok(out && String(out.textContent || "").indexOf("贴耳自检") >= 0,
         "自检文本落在只读框里");
     ok(!out || out.tagName === "PRE", "只读框是 pre，不是可编辑控件");
+    ok(out && String(out.textContent || "").indexOf("【🐚 楼内块自检】") >= 0, "2.27.10 看贴耳顺带报 🐚 楼内块（手机看不到控制台，靠截图）");
 }
 
 

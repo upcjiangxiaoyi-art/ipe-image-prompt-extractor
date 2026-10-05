@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.9";
+var IPE_VERSION = "2.27.10";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2121,6 +2121,8 @@ function ipeLedgerInspectEP() {
             : "\n\u26A0\uFE0F 贴耳内容与账本现任对不上——这就是 roll 抢跑那类问题的现场")
         + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
 
+    head += ipeLedgerInlineReport() + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
+
     /* 只往只读框里写。绝不碰 #ipe-ledger-preview——那个框旁边就是「采用」，
        也绝不碰 #ipe-ledger-text——那是账本正文。自检文本一旦有被采用的可能，
        就等于给账本开了条污染通道。 */
@@ -2132,6 +2134,36 @@ function ipeLedgerInspectEP() {
     });
     if (!shown) { try { alert(payload); } catch(e) {} }
     ipeLedgerStatus("已抓取贴耳原文 \u2713 只读，不会进账本", "#6ec577");
+}
+
+/* 2.27.10 🐚 楼内块自检：手机上看不到控制台，🐚 不见了只能靠截图。跟贴耳自检一起出：
+   块在不在、住哪、正文和块的层级 / 字色 / 盒子、这一点从上往下叠着哪些元素。只读，不动任何东西。 */
+function ipeLedgerInlineReport() {
+    var out = ["【🐚 楼内块自检】"];
+    try {
+        if (cfg().ledgerInlineShow === false) { out.push("楼内显示关着：不显示是正常的"); return out.join("\n"); }
+        var tg = ipeLedgerInlineTarget();
+        if (!tg.text) { out.push("账本是空的：没东西可显示"); return out.join("\n"); }
+        if (!tg.host) { out.push("最后一条 AI 楼的正文在页面上没找到（还没画出来？）"); return out.join("\n"); }
+        var d = ipeRootDocument(), host = tg.host, row = host.closest ? host.closest(".mes") : null;
+        var box = row ? row.querySelector("." + IPE_LEDGER_INLINE_CLASS) : null;
+        out.push("目标：第 " + (row ? Number(row.getAttribute("mesid")) + 1 : "?") + " 楼　页面上 🐚 共 " + d.querySelectorAll("." + IPE_LEDGER_INLINE_CLASS).length + " 块　住法：" + (ipeLedgerInlineInside ? "住正文里" : "挂正文外"));
+        if (!box) { out.push("这楼没有 🐚"); return out.join("\n"); }
+        var w = (host.ownerDocument && host.ownerDocument.defaultView) || window;
+        var hs = w.getComputedStyle(host), bs = w.getComputedStyle(box);
+        var p = box.parentNode;
+        out.push("🐚 在：" + (p === host ? "正文里" : p === host.parentNode ? "正文外（紧跟正文）" : "别处（" + String((p && p.className) || (p && p.nodeName) || "?") + "）") + (box.open ? "，展开" : "，折着") + "　量过：" + (box.__ipeFitHost === host ? "是" : "否"));
+        out.push("正文：z-index " + hs.zIndex + "　position " + hs.position + "　字色 " + hs.color);
+        out.push("🐚：z-index " + bs.zIndex + "　字色 " + bs.color + "　display " + bs.display + "　visibility " + bs.visibility + "　opacity " + bs.opacity);
+        var hr = host.getBoundingClientRect(), br = box.getBoundingClientRect();
+        out.push("盒子：正文 " + Math.round(hr.width) + "×" + Math.round(hr.height) + " @" + Math.round(hr.top) + "　🐚 " + Math.round(br.width) + "×" + Math.round(br.height) + " @" + Math.round(br.top));
+        if (p !== host) { var why = ipeLedgerInlineStyleWhy(box, host); if (why) out.push("该住正文里：" + why); }
+        if (d.elementsFromPoint && br.width && br.height) {
+            var name = function(e){ return e.nodeName.toLowerCase() + (e.id ? "#" + e.id : "") + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(/\s+/).slice(0, 2).join(".") : ""); };
+            out.push("这一点从上往下：" + d.elementsFromPoint(br.left + Math.min(24, br.width / 2), br.top + Math.min(12, br.height / 2)).slice(0, 4).map(name).join(" › "));
+        }
+    } catch(e) { out.push("自检出错：" + (e && e.message)); }
+    return out.join("\n");
 }
 
 /* ============================================================
@@ -2308,27 +2340,43 @@ function ipeLedgerInlinePut(box, host) {
 function ipeLedgerInlineFitted(box, host) {
     return ipeLedgerInlineInside || !!(box && box.__ipeFitHost === host);
 }
+/* 2.27.10 垫层、字色只看样式，不用等排版：2.27.9 排在「这楼排好版没有」后面判，手机上头一回放块时那楼常常还没排好版，
+   一跳过就再没人来量，🐚 照旧压在底纹下面。挂在正文外的块才问（正文里的字色本来就跟着正文）。 */
+function ipeLedgerInlineStyleWhy(box, host) {
+    try {
+        var w = (host.ownerDocument && host.ownerDocument.defaultView) || window;
+        var hs = w.getComputedStyle(host), bs = w.getComputedStyle(box), hz = String(hs.zIndex || "auto");
+        if (hz !== "auto") return "给正文单独垫了一层（z-index " + hz + "），挂在正文外面会被楼里的底纹、边框盖住";
+        if (hs.color && bs.color && hs.color !== bs.color) return "给正文另配了字色，挂在正文外面字色对不上（有的跟底色一个颜色）";
+    } catch(e) {}
+    return "";
+}
+function ipeLedgerInlineMoveInside(box, host, why) {
+    ipeLedgerInlineInside = true;
+    box.__ipeFitHost = host;
+    box.style.removeProperty("order");
+    host.appendChild(box);
+    try { console.log("[IPE] 🐚 这套美化" + why + "：改回放进正文末尾"); } catch(e) {}
+}
 function ipeLedgerInlineFit(box, host) {
     if (!box || !host || ipeLedgerInlineInside || box.parentNode !== host.parentNode) return;
     try {
+        var why = ipeLedgerInlineStyleWhy(box, host);
+        if (why) { ipeLedgerInlineMoveInside(box, host, why); return; }
         var w = (host.ownerDocument && host.ownerDocument.defaultView) || window;
         var want = String(w.getComputedStyle(host).order || "0");
         if (String(w.getComputedStyle(box).order || "0") !== want) box.style.setProperty("order", want, "important");
         var hr = host.getBoundingClientRect(), br = box.getBoundingClientRect();
         if (!(hr.width || hr.height) || !(br.width || br.height)) return;   // 这楼没画出来（藏着、不在页面上）：先不判，下回再量
         box.__ipeFitHost = host;
-        var hs = w.getComputedStyle(host), bs = w.getComputedStyle(box), hz = String(hs.zIndex || "auto");
-        var why = br.top < hr.top - 1 ? "把楼里的块重新排了序，挂在正文后面会跑到正文上面"
-            : hz !== "auto" ? "给正文单独垫了一层（z-index " + hz + "），挂在正文外面会被楼里的底纹、边框盖住"
-            : (hs.color && bs.color && hs.color !== bs.color) ? "给正文另配了字色，挂在正文外面字色对不上（有的跟底色一个颜色）"
-            : "";
-        if (why) {
-            ipeLedgerInlineInside = true;
-            box.style.removeProperty("order");
-            host.appendChild(box);
-            try { console.log("[IPE] 🐚 这套美化" + why + "：改回放进正文末尾"); } catch(e) {}
-        }
+        if (br.top < hr.top - 1) ipeLedgerInlineMoveInside(box, host, "把楼里的块重新排了序，挂在正文后面会跑到正文上面");
     } catch(e) {}
+}
+/* 2.27.10 换聊天重新量：住法清回「正文外」，量过的记号也一起清掉。以前只清住法：同一楼的块被挪回正文外，
+   记号还说「量过了」，就再也不量，grid、垫层这类美化下 🐚 跑到正文上面或者压在底纹下面。 */
+function ipeLedgerInlineRemeasure() {
+    ipeLedgerInlineInside = false;
+    try { ipeRootDocument().querySelectorAll("." + IPE_LEDGER_INLINE_CLASS).forEach(function(b){ b.__ipeFitHost = null; }); } catch(e) {}
 }
 /* 该显示、目标楼已经画出来了、块却不在那楼 .mes_text 后面 → 要放 */
 function ipeLedgerInlineNeedsPlace() {
@@ -2366,13 +2414,14 @@ function ipeLedgerRenderInline(opts) {
             var existingBody = existing.querySelector("." + IPE_LEDGER_INLINE_CLASS + "-body");
             var inPlace = ipeLedgerInlineInPlace(existing, host);
             var changed = existingBody.textContent !== cur;
-            var fitted = ipeLedgerInlineFitted(existing, host);
+            var fitted = ipeLedgerInlineFitted(existing, host)
+                && (ipeLedgerInlineInside || !ipeLedgerInlineStyleWhy(existing, host));   // 2.27.10 挂在正文外的每回再看一眼样式：垫层、字色晚到的美化也认
             if (inPlace && olds.length === 1 && !changed && fitted) return true;
             var apply = function(){
                 clearOlds(existing);
                 if (!inPlace) ipeLedgerInlinePut(existing, host);   // 同一个节点挪过去，展开状态跟着走
                 if (changed) existingBody.textContent = cur;
-                if (!ipeLedgerInlineFitted(existing, host)) ipeLedgerInlineFit(existing, host);
+                if (!fitted || !ipeLedgerInlineFitted(existing, host)) ipeLedgerInlineFit(existing, host);
             };
             // 只是折着的块换字：高度不变、没挪、这楼量过、也没有别处的旧块要摘，不用量，省一次强制排版
             if (inPlace && olds.length === 1 && !existing.open && fitted) apply();
@@ -8875,7 +8924,7 @@ function bindAll() {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
-                ipeLedgerInlineInside = false;   // 2.26.3 🐚 住哪重新量：不少卡自带美化样式，楼里怎么排跟着聊天变
+                ipeLedgerInlineRemeasure();   // 2.26.3 🐚 住哪重新量：不少卡自带美化样式，楼里怎么排跟着聊天变
                 ipeLedgerChatEpoch++;
                 ipeLedgerLastAutoInput = null;
                 ipeLedgerMirrorDirty = true;   // 换了聊天，「继承」列表里该把上一个聊天算进来
