@@ -377,6 +377,24 @@ function addTurn(env, text, paras) {
         } finally { w.close(); }
     }
 
+    // ── 10. 2.27.9 美化给正文垫了一层、另配了字色：楼里的底纹（z-index 0）压在正文外的东西上面，主题字色又跟底纹一个颜色 → 住进正文末尾 ──
+    for (const c of [
+        { css: '.mes{color:#f5f4e9} .mes_text{position:relative;z-index:3;color:#1b2722}', inside: true, label: '正文垫了一层（z-index 3）又另配了字色（半卷清欢这类）' },
+        { css: '.mes_text{position:relative;z-index:3}', inside: true, label: '只给正文垫了一层、字色一样' },
+        { css: '.mes{color:#f5f4e9} .mes_text{color:#1b2722}', inside: true, label: '只给正文另配了字色' },
+        { css: '.mes_text{position:relative}', inside: false, label: '正文只是 position:relative，没垫层、没另配字色' },
+    ]) {
+        const env = setup(12, { css: c.css });
+        const { w, F, row, inline } = env;
+        try {
+            F('ipeLedgerCommit')('第 12 楼的账本，够长够长够长够长够长。', 12);
+            w.eval('ipeLedgerRenderInline()');
+            const mt = row(11).querySelector('.mes_text'), blk = row(11).querySelector('.ipe-ledger-inline');
+            if (c.inside) check(w.eval('ipeLedgerInlineInside') === true && inline().length === 1 && blk.parentNode === mt && mt.lastElementChild === blk && w.getComputedStyle(blk).color === w.getComputedStyle(mt).color, c.label + '：🐚 住进正文末尾，跟正文同一层、同一个字色');
+            else check(w.eval('ipeLedgerInlineInside') === false && inline().length === 1 && blk.previousElementSibling === mt && !blk.getAttribute('style'), c.label + '：照旧挂在正文外，不加行内样式');
+        } finally { w.close(); }
+    }
+
     clearTimeout(watchdog);
     console.log('通过 ' + count + ' 项顺滑回归');
 })().catch(e => { console.error(e); process.exitCode = 1; clearTimeout(watchdog); });

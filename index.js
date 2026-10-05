@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.8";
+var IPE_VERSION = "2.27.9";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -2295,7 +2295,11 @@ function ipeLedgerInlineInPlace(box, host) {
    · 先把正文的 order 抄给 🐚：flex 里 order 一样的按 DOM 先后排，🐚 就紧跟在正文后面；挂在正文外、正文重写碰不到它的好处全留着；
    · 放好量一眼：🐚 的头还在正文的头上面（grid 格子、定位这类抄 order 也没用）→ 退回 2.25.0 以前的老办法，塞进正文末尾，
      这个聊天里以后都这么放、换聊天重新量（这类美化下正文整块重写时它会被抹一下，观察器当场补回）。
-   只在放块、挪块、这一楼还没量过时量；量过的同一楼只换字不碰排版。 */
+   只在放块、挪块、这一楼还没量过时量；量过的同一楼只换字不碰排版。
+   2.27.9 还有两种也住进正文末尾：
+   · 美化给正文单独垫了一层（.mes_text 有 z-index）：楼里的底纹、边框是另几层，挂在正文外的 🐚 没层级，整块压在底纹下面；
+   · 美化给正文另配了字色：🐚 在正文外拿的是主题字色，有的美化里跟底纹一个颜色（半卷清欢：奶白字、奶白纸）。
+   住进正文就跟正文同一层、同一个字色，怎么排都跟着正文走。 */
 var ipeLedgerInlineInside = false;
 function ipeLedgerInlinePut(box, host) {
     if (ipeLedgerInlineInside) host.appendChild(box);
@@ -2313,11 +2317,16 @@ function ipeLedgerInlineFit(box, host) {
         var hr = host.getBoundingClientRect(), br = box.getBoundingClientRect();
         if (!(hr.width || hr.height) || !(br.width || br.height)) return;   // 这楼没画出来（藏着、不在页面上）：先不判，下回再量
         box.__ipeFitHost = host;
-        if (br.top < hr.top - 1) {
+        var hs = w.getComputedStyle(host), bs = w.getComputedStyle(box), hz = String(hs.zIndex || "auto");
+        var why = br.top < hr.top - 1 ? "把楼里的块重新排了序，挂在正文后面会跑到正文上面"
+            : hz !== "auto" ? "给正文单独垫了一层（z-index " + hz + "），挂在正文外面会被楼里的底纹、边框盖住"
+            : (hs.color && bs.color && hs.color !== bs.color) ? "给正文另配了字色，挂在正文外面字色对不上（有的跟底色一个颜色）"
+            : "";
+        if (why) {
             ipeLedgerInlineInside = true;
             box.style.removeProperty("order");
             host.appendChild(box);
-            try { console.log("[IPE] 🐚 这套美化把楼里的块重新排了序，挂在正文后面会跑到正文上面：改回放进正文末尾"); } catch(e) {}
+            try { console.log("[IPE] 🐚 这套美化" + why + "：改回放进正文末尾"); } catch(e) {}
         }
     } catch(e) {}
 }
