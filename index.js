@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.5";
+var IPE_VERSION = "2.27.6";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1809,10 +1809,17 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         else for (var i = chat.length - 1; i >= 0; i--) {
             var m = chat[i];
             // 跳过 user 楼与藏楼/系统楼：刚藏完末楼不该给隐形消息挂账
-            if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { msg = m; msgFloor = i + 1; break; }
+            // 2.27.6 自动挂账认最新那条 AI 楼，空回了也不往回找——不然会给上一楼再记一遍
+            if (m && !m.is_user && m.is_system !== true && (silent || String(m.mes || "").trim())) { msg = m; msgFloor = i + 1; break; }
         }
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
+    var unfinished = silent ? ipeFloorUnfinished(msg) : "";   // 2.27.6 手动「重新挂账」不拦，你点了就跑
+    if (unfinished) {
+        ipeLedgerStatus("第 " + msgFloor + " 楼" + unfinished + "，自动挂账先不跑；重 roll 或点「继续」写完，收到新楼会照常挂。这楼其实写完了的话，点「重新挂账」手动挂", "#c9a227");
+        try { console.log("[IPE] 挂账跳过没写完的楼", { floor: msgFloor, why: unfinished }); } catch(eL) {}
+        return;
+    }
 
     var input = ipeLedgerInput(msg, msgFloor);
     if (silent && (ipeLedgerSameInput(input, ipeLedgerActiveInput)
@@ -4822,6 +4829,31 @@ function parseChatResponse(data) {
     if (data.text) return String(data.text).trim();
     if (data.output_text) return String(data.output_text).trim();
 
+    return "";
+}
+
+/* 2.27.6 这楼像不像没写完：主 AI 空回，或者正文写到一半断了（中转掐断、手动停），酒馆照样当新楼收下，
+   自动挂账、自动生图就拿空的 / 半截的正文跑一遍——白花钱，账本还记进了没发生的剧情。
+   认得出来的：正文是空的（只剩思考、楼尾标记、生图段也算空）；<content> 开了没收尾；<think> 开了没收尾（还在想就断了）。
+   不用标签包正文的预设，写到一半断了跟本来就短分不出来，只能认空回。返回原因，没事返回 ""。 */
+function ipeFloorUnfinished(msg) {
+    if (!msg) return "";
+    var t = String(msg.mes || "");
+    try { t = ipeLedgerStripImageTag(t); } catch(e) {}
+    try { t = ipeLedgerStripModeTag(t); } catch(e2) {}
+    var thinkOpen = (t.match(/<think(?:ing)?(?:\s[^>]*)?>/gi) || []).length;
+    var thinkClose = (t.match(/<\/think(?:ing)?\s*>/gi) || []).length;
+    if (thinkOpen > thinkClose) return "还在思考就断了（<think> 没收尾）";
+    t = t.replace(/<think(?:ing)?(?:\s[^>]*)?>[\s\S]*?<\/think(?:ing)?\s*>/gi, "");
+    if (!t.trim()) return "空回了（正文一个字都没有）";
+    var open = (t.match(/<content(?:\s[^>]*)?>/gi) || []).length;
+    var close = (t.match(/<\/content\s*>/gi) || []).length;
+    if (open > close) return "正文没写完（<content> 开了没收尾）";
+    if (open) {
+        var body = "", re = /<content(?:\s[^>]*)?>([\s\S]*?)<\/content\s*>/gi, m;
+        while ((m = re.exec(t)) !== null) body += m[1];
+        if (!body.trim()) return "空回了（<content> 里一个字都没有）";
+    }
     return "";
 }
 
@@ -9328,7 +9360,7 @@ function onMsgReceived(idx) {
             i = -1;
             for (var k = chat.length - 1; k >= 0; k--) {
                 var m = chat[k];
-                if (m && !m.is_user && m.is_system !== true && String(m.mes || "").trim()) { i = k; msg = m; break; }
+                if (m && !m.is_user && m.is_system !== true) { i = k; msg = m; break; }   // 2.27.6 空回也认这楼（到点再看写没写完），不往回找上一楼
             }
             if (i < 0 || !msg) return;
             try { console.log("[IPE] 生图：事件没带楼号（收到:", idx, "），已自行定位第", i + 1, "楼"); } catch(eLg) {}
@@ -9364,6 +9396,11 @@ function runPendingAutoExtract() {
 
         var msg = ctx().chat[idx];
         if (!msg || msg.is_user) return;
+        var unfinished = ipeFloorUnfinished(msg);   // 2.27.6 空回 / 没写完的楼不提取、不注入
+        if (unfinished) {
+            setStatus("第 " + (idx + 1) + " 楼" + unfinished + "，自动提取先不跑；重 roll 或点「继续」写完，收到新楼会照常提取", "#c9a227");
+            return;
+        }
 
         currentIdx = idx;
         runExtract(msg.mes, "", !!cfg().autoInject, idx);

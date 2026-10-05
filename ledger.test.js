@@ -1903,6 +1903,44 @@ await (async () => {
         "真在酒馆里改了楼（2.27.5）：那份账照常落下、不再重挂，状态行提醒", "calls=" + r.box.calls);
 })();
 
+console.log("\n【53】 空回 / 没写完不跑（2.27.6）：最新那楼空回、<content> 没收尾、<think> 没收尾，自动挂账和自动生图都不跑，也不往回给上一楼再记；写完了（继续 / 重 roll）收到新楼照常跑；手动重新挂账不拦");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    async function receive(mes) {
+        const b = boot(10); const st = withApi(b.tavern, b.F); st.ledgerAutoRun = true; st.autoInjectDelay = 500;
+        b.F("ipeLedgerCommit")("第八楼的账：大家在吃饭，够长够长够长。", 8);
+        const box = { ledger: 0, img: 0 };
+        b.w.fetch = async () => { box.ledger++; return okBody("第十楼的账，够长够长够长够长。"); };
+        b.w.runExtract = async function(){ box.img++; };   // 自动生图走到提取这一步就记一笔
+        b.tavern.chat[9].mes = mes;
+        await b.tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal"); await wait(900);
+        return Object.assign(b, { box, cur: () => b.F("ipeLedgerRead")() });
+    }
+    let r = await receive("");
+    ok(r.box.ledger === 0 && r.box.img === 0 && r.cur().lastFloor === 8, "空回：不挂账、不提取，也不往回给第 8 楼再记一遍", JSON.stringify(r.box));
+    ok(statusText(r.w).indexOf("空回") >= 0 && statusText(r.w).indexOf("先不跑") >= 0, "挂账状态行说这楼空回了、自动挂账先不跑", statusText(r.w));
+    r = await receive("<content>他推开门，外面的雨");
+    ok(r.box.ledger === 0 && r.box.img === 0 && statusText(r.w).indexOf("没写完") >= 0, "<content> 开了没收尾：都不跑，状态行说正文没写完", JSON.stringify(r.box) + " " + statusText(r.w));
+    r = await receive("<think>先想想这一楼要写什么");
+    ok(r.box.ledger === 0 && r.box.img === 0, "<think> 没收尾（还在想就断了）：都不跑", JSON.stringify(r.box));
+    r = await receive("<think>想完了</think>\n<route>normal</route>");
+    ok(r.box.ledger === 0 && r.box.img === 0, "只有思考和楼尾标记、没有正文：算空回", JSON.stringify(r.box));
+    r = await receive("<content>  </content>");
+    ok(r.box.ledger === 0 && r.box.img === 0, "<content> 里一个字都没有：算空回", JSON.stringify(r.box));
+    r = await receive("<content>他推开门，外面的雨");
+    r.tavern.chat[9].mes += "停了。</content>";                                    // 点「继续」写完
+    await r.tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "continue"); await wait(900);
+    ok(r.box.ledger === 1 && r.box.img === 1 && r.cur().lastFloor === 10, "点继续写完以后收到新楼：照常挂账、照常提取", JSON.stringify(r.box));
+    r = await receive("<content>他推开门，外面的雨停了。</content>");
+    ok(r.box.ledger === 1 && r.box.img === 1 && r.cur().lastFloor === 10, "写完的楼：照常挂账、照常提取（对照）", JSON.stringify(r.box));
+    r = await receive("他推开门，外面的雨停了。");
+    ok(r.box.ledger === 1 && r.box.img === 1, "没用 <content> 包的普通正文：照常跑（分不出来，不误拦）", JSON.stringify(r.box));
+    r = await receive("<content>他推开门，外面的雨");
+    await r.w.eval("ipeLedgerRunManual")();
+    ok(r.box.ledger === 1, "手动「重新挂账」不拦：你点了就跑", JSON.stringify(r.box));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
