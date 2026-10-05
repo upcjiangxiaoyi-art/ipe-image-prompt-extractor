@@ -1941,6 +1941,61 @@ await (async () => {
     ok(r.box.ledger === 1, "手动「重新挂账」不拦：你点了就跑", JSON.stringify(r.box));
 })();
 
+console.log("\n【54】 正文标签可以改（2.27.7）：预设不用 <content> 的，填自己的标签——挂账、生图只从这个标签取正文，新楼这个标签没收尾就不自动跑；留空 = 不认标签，照老样子认 <content>、不查写没写完，只拦空回");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    async function receive(mes, bodyTag) {
+        const b = boot(10); const st = withApi(b.tavern, b.F); st.ledgerAutoRun = true; st.autoInjectDelay = 500;
+        if (bodyTag !== undefined) st.bodyTag = bodyTag;
+        b.F("ipeLedgerCommit")("第八楼的账：大家在吃饭，够长够长够长。", 8);
+        const box = { ledger: 0, img: 0, body: "" };
+        b.w.fetch = async (url, opt) => {
+            box.ledger++;
+            try { const u = JSON.parse(opt.body).messages.map(m => String(m.content || "")).join("\n"); box.body = u.slice(u.indexOf("\u3010\u672c\u8f6e\u6b63\u6587\u3011")); } catch (e) {}
+            return okBody("第十楼的账，够长够长够长够长。");
+        };
+        b.w.runExtract = async function(){ box.img++; };
+        b.tavern.chat[9].mes = mes;
+        await b.tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal"); await wait(900);
+        return Object.assign(b, { box, cur: () => b.F("ipeLedgerRead")() });
+    }
+    const STATUS = "<status>体力 10，心情 阴</status>\n";
+    let r = await receive(STATUS + "<正文>他推开门，外面的雨", "正文");
+    ok(r.box.ledger === 0 && r.box.img === 0 && r.cur().lastFloor === 8, "填了「正文」：<正文> 开了没收尾，自动挂账、自动生图都不跑", JSON.stringify(r.box));
+    ok(statusText(r.w).indexOf("<正文> 开了没收尾") >= 0, "状态行点名是 <正文> 没收尾", statusText(r.w));
+    r = await receive(STATUS + "<正文>他推开门，外面的雨停了。</正文>", "正文");
+    ok(r.box.ledger === 1 && r.box.img === 1 && r.cur().lastFloor === 10, "<正文> 写完了：照常挂账、照常提取", JSON.stringify(r.box));
+    ok(r.box.body.indexOf("他推开门，外面的雨停了。") >= 0 && r.box.body.indexOf("体力 10") < 0, "挂账的「本轮正文」只取 <正文> 里那段，状态栏不混进去", r.box.body.slice(0, 120));
+    r = await receive(STATUS + "<正文>  </正文>", "正文");
+    ok(r.box.ledger === 0 && r.box.img === 0 && statusText(r.w).indexOf("<正文> 里一个字都没有") >= 0, "<正文> 里一个字都没有（楼里只剩状态栏）：算空回，都不跑", JSON.stringify(r.box) + " " + statusText(r.w));
+    r = await receive("<正文>他推开门，外面的雨", "content, 正文");
+    ok(r.box.ledger === 0 && r.box.img === 0, "填两个（content, 正文）：哪个没收尾都拦", JSON.stringify(r.box));
+    r = await receive("<content>他推开门，外面的雨停了。</content>", "content, 正文");
+    ok(r.box.ledger === 1 && r.box.img === 1 && r.box.body.indexOf("外面的雨停了") >= 0, "填两个时 <content> 写完的楼照常跑、照常取正文", JSON.stringify(r.box));
+    r = await receive("<正文>他推开门，外面的雨");
+    ok(r.box.ledger === 1 && r.box.img === 1, "对照：没改设置（默认 content）时不认 <正文>，半截照样跑——所以要能改", JSON.stringify(r.box));
+
+    r = await receive("<content>他推开门，外面的雨", "");
+    ok(r.box.ledger === 1 && r.box.img === 1, "留空：不查写没写完，<content> 没收尾也照常跑（和 2.27.6 以前一样）", JSON.stringify(r.box));
+    r = await receive("", "");
+    ok(r.box.ledger === 0 && r.box.img === 0 && statusText(r.w).indexOf("空回") >= 0, "留空：空回照样拦", JSON.stringify(r.box) + " " + statusText(r.w));
+    r = await receive("<think>先想想这一楼要写什么", "");
+    ok(r.box.ledger === 0 && r.box.img === 0, "留空：<think> 没收尾（只想了没写）也算空回，照样拦", JSON.stringify(r.box));
+    r = await receive("<think>想完了</think>\n<content>\n</content>", "");
+    ok(r.box.ledger === 0 && r.box.img === 0, "留空：只剩空标签、没一个字，也算空回", JSON.stringify(r.box));
+    r = await receive(STATUS + "<content>他推开门，外面的雨停了。</content>", "");
+    ok(r.box.ledger === 1 && r.box.body.indexOf("外面的雨停了") >= 0 && r.box.body.indexOf("体力 10") < 0, "留空：取正文照老样子认 <content>", r.box.body.slice(0, 120));
+
+    // 生图提取那边取的也是这一段；思考里顺嘴提到的标签不算
+    const b = boot(10); const st = withApi(b.tavern, b.F); st.bodyTag = "正文";
+    const vp = b.F("buildVisionUserPrompt")("<think>这楼打算写 <正文>开头先下雨</正文> 这种</think>" + STATUS + "<正文>他推开门，外面的雨停了。</正文>", "");
+    const sec = vp.slice(vp.indexOf("【正文内容】"));
+    ok(sec.indexOf("他推开门，外面的雨停了。") >= 0 && sec.indexOf("开头先下雨") < 0 && sec.indexOf("体力 10") < 0, "生图的【正文内容】只取 <正文> 里那段：思考里提到的、状态栏都不混进去", sec.slice(0, 160));
+    const vp2 = b.F("buildVisionUserPrompt")("他推开门，外面的雨停了。", "");
+    ok(vp2.indexOf("【正文内容】\n他推开门，外面的雨停了。") >= 0, "这楼没有正文标签：兜底用整楼（和以前一样）", vp2.slice(-80));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

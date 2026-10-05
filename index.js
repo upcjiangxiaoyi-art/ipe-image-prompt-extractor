@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.6";
+var IPE_VERSION = "2.27.7";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -95,6 +95,7 @@ const DEFAULTS = {
     ledgerCompressPrompt: "",       // 2.19.0 压缩指令，空 = 内置默认
     ledgerCompressWarnChars: 3000,  // 账本超过这么多字提醒可以压缩
     ledgerApiProfile: "",
+    bodyTag: "content",            // 2.27.7 正文标签：挂账、生图从这里取正文，新楼没收尾就不自动跑；留空 = 不认标签（照老样子认 <content>，只拦空回）
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
     ledgerTagOpen: "<ledger>", ledgerTagClose: "</ledger>",
@@ -4832,10 +4833,84 @@ function parseChatResponse(data) {
     return "";
 }
 
+/* 2.27.7 正文标签：主 AI 拿哪个标签包正文。预设各用各的（<content>、<正文>、<main>……），面板上自己填，
+   不用带尖括号，几个就逗号隔开。用在两处：挂账、生图只从这个标签里取正文（这楼没有就兜底用整楼）；
+   新楼这个标签开了没收尾 = 正文没写完，自动挂账 / 自动生图先不跑。
+   留空 = 不认标签：取正文照老样子认 <content>，不查写没写完；空回照样拦。 */
+var IPE_BODY_TAG_BAD = /[^A-Za-z0-9_.:\-\u00C0-\u024F\u0370-\u04FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/g;
+var IPE_THINK_BLOCK_RE = /<think(?:ing)?(?:\s[^>]*)?>[\s\S]*?<\/think(?:ing)?\s*>/gi;
+function ipeBodyTagParse(raw) {
+    // 填成 <content>、</content>、<content></content> 的也认：先把尖括号里的标签名抠出来
+    var s = String(raw == null ? "" : raw).replace(/<\s*\/?\s*([^<>\s\/]+)[^<>]*>/g, " $1 ");
+    var parts = s.split(/[,\s，、|;；]+/), out = [], seen = {};
+    for (var i = 0; i < parts.length; i++) {
+        var t = String(parts[i] || "").replace(IPE_BODY_TAG_BAD, "");
+        var k = t.toLowerCase();
+        if (t && !seen[k]) { seen[k] = true; out.push(t); }
+    }
+    return out;
+}
+function ipeBodyTagNames() {
+    var v = cfg().bodyTag;
+    return ipeBodyTagParse(v == null ? "content" : v);   // 没设过 = content；清空过 = []
+}
+function ipeBodyTagLabel(tags) {
+    return (tags || []).map(function(t){ return "<" + t + ">"; }).join(" / ");
+}
+/* 按正文标签抓出成对的段（按文中先后），顺带数一下哪个标签开了没收尾。tags 为空按 <content>。 */
+function ipeBodyTagScan(text, tags) {
+    if (!tags || !tags.length) tags = ["content"];
+    var t = String(text || ""), parts = [], found = [], seenF = {}, m;
+    var re = new RegExp("<(" + tags.map(ipeEscRe).join("|") + ")(?:\\s[^>]*)?>([\\s\\S]*?)<\\/\\1\\s*>", "gi");
+    while ((m = re.exec(t)) !== null) {
+        parts.push(String(m[2] || ""));
+        var k = String(m[1]).toLowerCase();
+        if (!seenF[k]) { seenF[k] = true; found.push(m[1]); }
+    }
+    var unclosed = "";
+    for (var i = 0; i < tags.length && !unclosed; i++) {
+        var e = ipeEscRe(tags[i]);
+        var o = (t.match(new RegExp("<" + e + "(?:\\s[^>]*)?>", "gi")) || []).length;
+        var c = (t.match(new RegExp("<\\/" + e + "\\s*>", "gi")) || []).length;
+        if (o > c) unclosed = tags[i];
+    }
+    return { parts: parts, found: found, unclosed: unclosed };
+}
+/* 去掉标签记号以后还剩不剩字：<content></content>、<br>、<!-- --> 这种只有记号的算空。颜文字 <( ´・ω・)> 不算记号。 */
+function ipeVisibleText(t) {
+    return String(t || "").replace(/<!--[\s\S]*?-->|<\/?[A-Za-z\u00C0-\uFFFF][^<>]*>/g, "").trim();
+}
+var IPE_BODY_TAG_IDS = ["ipe-body-tag", "iped-body-tag", "ipe-ledger-body-tag", "iped-ledger-body-tag"];
+function ipeBodyTagRefreshUI() {
+    var doc = ipeRootDocument(), v = ipeBodyTagNames().join(", ");
+    IPE_BODY_TAG_IDS.forEach(function(id){
+        var el = q("#" + id); if (!el || doc.activeElement === el) return;
+        if (el.value !== v) el.value = v;
+    });
+}
+function ipeBodyTagBindUI() {
+    IPE_BODY_TAG_IDS.forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            var tags = ipeBodyTagParse(el.value);
+            save("bodyTag", tags.join(", "));
+            el.value = tags.join(", ");
+            ipeBodyTagRefreshUI();
+            var msg = tags.length
+                ? "正文标签改成 " + ipeBodyTagLabel(tags) + "：挂账、生图只从这里取正文；新楼这个标签没收尾，就先不自动跑"
+                : "正文标签清空了：照老样子认 <content> 取正文，不查写没写完，只拦空回";
+            var color = tags.length ? "#6ec577" : "#c9a227";
+            if (id.indexOf("ledger") >= 0) ipeLedgerStatus(msg, color); else setStatus(msg, color);
+        });
+    });
+    ipeBodyTagRefreshUI();
+}
+
 /* 2.27.6 这楼像不像没写完：主 AI 空回，或者正文写到一半断了（中转掐断、手动停），酒馆照样当新楼收下，
    自动挂账、自动生图就拿空的 / 半截的正文跑一遍——白花钱，账本还记进了没发生的剧情。
-   认得出来的：正文是空的（只剩思考、楼尾标记、生图段也算空）；<content> 开了没收尾；<think> 开了没收尾（还在想就断了）。
-   不用标签包正文的预设，写到一半断了跟本来就短分不出来，只能认空回。返回原因，没事返回 ""。 */
+   认得出来的：正文是空的（只剩思考、楼尾标记、生图段、空标签也算空）；<think> 开了没收尾（还在想就断了）；
+   2.27.7 起正文标签看面板「正文标签」（默认 content）：开了没收尾 = 没写完，标签里一个字都没有 = 空回。
+   正文标签留空、或者预设根本不用标签包正文的，写到一半断了跟本来就短分不出来，只能认空回。返回原因，没事返回 ""。 */
 function ipeFloorUnfinished(msg) {
     if (!msg) return "";
     var t = String(msg.mes || "");
@@ -4844,39 +4919,30 @@ function ipeFloorUnfinished(msg) {
     var thinkOpen = (t.match(/<think(?:ing)?(?:\s[^>]*)?>/gi) || []).length;
     var thinkClose = (t.match(/<\/think(?:ing)?\s*>/gi) || []).length;
     if (thinkOpen > thinkClose) return "还在思考就断了（<think> 没收尾）";
-    t = t.replace(/<think(?:ing)?(?:\s[^>]*)?>[\s\S]*?<\/think(?:ing)?\s*>/gi, "");
-    if (!t.trim()) return "空回了（正文一个字都没有）";
-    var open = (t.match(/<content(?:\s[^>]*)?>/gi) || []).length;
-    var close = (t.match(/<\/content\s*>/gi) || []).length;
-    if (open > close) return "正文没写完（<content> 开了没收尾）";
-    if (open) {
-        var body = "", re = /<content(?:\s[^>]*)?>([\s\S]*?)<\/content\s*>/gi, m;
-        while ((m = re.exec(t)) !== null) body += m[1];
-        if (!body.trim()) return "空回了（<content> 里一个字都没有）";
-    }
+    t = t.replace(IPE_THINK_BLOCK_RE, "");
+    if (!ipeVisibleText(t)) return "空回了（正文一个字都没有）";
+    var tags = ipeBodyTagNames();
+    if (!tags.length) return "";                       // 正文标签留空：不认标签，只拦空回
+    var scan = ipeBodyTagScan(t, tags);
+    if (scan.unclosed) return "正文没写完（<" + scan.unclosed + "> 开了没收尾）";
+    if (scan.found.length && !ipeVisibleText(scan.parts.join("\n"))) return "空回了（" + ipeBodyTagLabel(scan.found) + " 里一个字都没有）";
     return "";
 }
 
 function ipeExtractContentText(text) {
     text = String(text || "");
 
-    // 只提取 <content>...</content> 里的正文。
-    // 支持多段 content，全部拼接；不读取思维链、隐藏标签、其他元信息。
-    var parts = [];
-    var re = /<content(?:\s[^>]*)?>([\s\S]*?)<\/content>/gi;
-    var m;
-
-    while ((m = re.exec(text)) !== null) {
-        if (m[1] && String(m[1]).trim()) {
-            parts.push(String(m[1]).trim());
-        }
-    }
+    // 只提取正文标签（面板「正文标签」，默认 <content>；留空也按 <content>）里的正文。
+    // 支持多段，全部拼接；不读取思维链、隐藏标签、其他元信息。思考里提到的标签不算。
+    var parts = ipeBodyTagScan(text.replace(IPE_THINK_BLOCK_RE, ""), ipeBodyTagNames()).parts
+        .map(function(p){ return String(p).trim(); })
+        .filter(function(p){ return !!p; });
 
     if (parts.length > 0) {
         return parts.join("\n\n");
     }
 
-    // 如果这一条消息没有 <content> 标签，兜底使用原文。
+    // 如果这一条消息没有正文标签，兜底使用原文。
     // 这样普通酒馆消息也能手动提取，不会直接空跑。
     return text;
 }
@@ -4889,7 +4955,7 @@ function ipeTrimSourceText(text) {
     var maxLen = 9000;
     if (text.length > maxLen) {
         text = text.slice(text.length - maxLen);
-        text = "【注意：以下为 <content> 正文末尾片段，前文已省略】\n" + text;
+        text = "【注意：以下为正文末尾片段，前文已省略】\n" + text;
     }
 
     return text;
@@ -5144,6 +5210,7 @@ function ipeImgStreamBindUI() {
 function ipeImgBindLayerUI() {
     ipeCastBindUI();
     ipeImgStreamBindUI();
+    ipeBodyTagBindUI();
     ["ipe-layered", "iped-layered"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -6783,7 +6850,9 @@ function createPanel() {
             '<button id="ipe-rule-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-extract-rules" rows="5" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>'+
-        '<div class="ipe-hint">当前选中的提取规则会随提取请求一起发送</div>');
+        '<div class="ipe-hint">当前选中的提取规则会随提取请求一起发送</div>'+
+        '<label style="margin-top:8px">正文标签（主 AI 拿哪个标签包正文）<input type="text" id="ipe-body-tag" placeholder="content"></label>'+
+        '<div class="ipe-hint">生图和挂账都只从这个标签里取正文（这楼没有就用整楼）；新楼这个标签开了没收尾 = 正文没写完，自动生图、自动挂账先不跑。默认 content，你的预设用别的就改成别的，不用带尖括号，几个就逗号隔开（content, 正文）。留空 = 不认标签：取正文照老样子认 &lt;content&gt;，不查写没写完，只拦空回。跟挂账页「高级设置」里那格是同一个。</div>');
 
     h += secHTML("preview","预览", false,
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">显示快捷入口 <input type=\"checkbox\" id=\"ipe-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>'+
@@ -6887,6 +6956,8 @@ function createPanel() {
         '</div>'+
         '<details class="ipe-fold"><summary>\u2699\uFE0F 高级设置（不懂就别动，默认就挺好）</summary><div class="ipe-fold-body">'+
             '<div class="ipe-hint">副 AI 每次能看到：本卡要点 + User 指令 + 最近几楼摘要 + 最近几版账本 + 楼层数 + 这一楼正文。不看角色卡和世界书。</div>'+
+            '<label>正文标签（主 AI 拿哪个标签包正文）<input type="text" id="ipe-ledger-body-tag" placeholder="content"></label>'+
+            '<div class="ipe-hint">「这一楼正文」只从这个标签里取（这楼没有就用整楼）；新楼这个标签开了没收尾 = 正文没写完，自动挂账、自动生图先不跑。默认 content，预设用别的就改成别的，不用带尖括号，几个就逗号隔开。留空 = 不认标签：照老样子认 &lt;content&gt;，不查写没写完，只拦空回。跟生图页「提取规则」里那格是同一个。</div>'+
             '<label>让它往回看几楼（0 = 不看）<input type="text" inputmode="numeric" id="ipe-ledger-rep-floors" placeholder="10"></label>'+
             '<label>摘要起始标签<input type="text" id="ipe-ledger-rep-open" placeholder="&lt;report&gt;"></label>'+
             '<label>摘要结束标签<input type="text" id="ipe-ledger-rep-close" placeholder="&lt;/report&gt;"></label>'+
@@ -7190,6 +7261,8 @@ function createDrawer() {
     h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-add" class="menu_button" value="新增规则"><input type="button" id="iped-rule-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-extract-rules" class="text_pole" rows="4" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>';
+    h += '<label>正文标签（主 AI 拿哪个标签包正文）</label><input type="text" id="iped-body-tag" class="text_pole" placeholder="content">';
+    h += '<small style="color:#888">生图和挂账都只从这个标签里取正文（这楼没有就用整楼）；新楼这个标签没收尾 = 没写完，自动生图、自动挂账先不跑。默认 content，不用带尖括号，几个就逗号隔开。留空 = 不认标签：照老样子认 &lt;content&gt;，只拦空回。跟挂账页「高级设置」里那格是同一个。</small>';
     h += '<hr><small><b>预览</b></small>';
     h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
     h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
@@ -7259,6 +7332,8 @@ function createDrawer() {
     h += '<label>挂账用哪套 API</label><select id="iped-ledger-api" class="text_pole"></select>';
     h += '<div style="display:flex;gap:6px;margin:6px 0;padding-right:6px"><input type="button" id="iped-ledger-test" class="menu_button" style="flex:1" value="测试连接"></div>';
     h += '<details class="ipe-fold"><summary>\u2699\uFE0F 高级设置（不懂就别动）</summary><div class="ipe-fold-body">';
+    h += '<label>正文标签（主 AI 拿哪个标签包正文）</label><input type="text" id="iped-ledger-body-tag" class="text_pole" placeholder="content">';
+    h += '<small style="color:#888">「这一楼正文」只从这个标签里取（这楼没有就用整楼）；新楼这个标签没收尾 = 没写完，自动挂账、自动生图先不跑。默认 content，不用带尖括号，几个就逗号隔开。留空 = 不认标签：照老样子认 &lt;content&gt;，只拦空回。跟生图页「提取规则」里那格是同一个。</small>';
     h += '<label>让它往回看几楼（0=不看）</label><input type="text" inputmode="numeric" id="iped-ledger-rep-floors" class="text_pole" placeholder="10">';
     h += '<label>摘要起始标签</label><input type="text" id="iped-ledger-rep-open" class="text_pole" placeholder="&lt;report&gt;">';
     h += '<label>摘要结束标签</label><input type="text" id="iped-ledger-rep-close" class="text_pole" placeholder="&lt;/report&gt;">';

@@ -234,6 +234,26 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.ui.ipeRefreshAnchorEditors();
         const ancNames = [...d.querySelector('#ipe-anchor-slot').options].map(o => o.textContent);
         check(ancNames.indexOf('阿宝') < ancNames.indexOf('张三'), '锚点下拉同样按拼音排（' + ancNames.join(' ') + '）');
+
+        // 2.27.7 正文标签：浮窗、抽屉的生图页和挂账页各一格，是同一个设置；改一格四格跟着变，清空也存得住
+        w.eval('window.ui.ipeBodyTagBindUI = ipeBodyTagBindUI;');
+        w.ui.ipeBodyTagBindUI();
+        const btIds = ['ipe-body-tag', 'iped-body-tag', 'ipe-ledger-body-tag', 'iped-ledger-body-tag'];
+        const bt = id => d.querySelector('#' + id);
+        check(btIds.every(id => bt(id) && bt(id).value === 'content'), '正文标签四格都在（浮窗 / 抽屉 × 生图 / 挂账），默认都显示 content');
+        check(!!bt('ipe-body-tag').closest('#ipe-section-extract-rules') && !!bt('iped-body-tag').closest('[data-ipe-fold="drawer-image-rules"]'), '生图那格在「提取规则」里');
+        check(['ipe-ledger-body-tag', 'iped-ledger-body-tag'].every(id => { const f = bt(id).closest('details'); return f && f.querySelector('summary').textContent.includes('高级设置') && !!bt(id).closest('.ipe-desk-settings'); }), '挂账那格在副 AI 的「高级设置」里');
+        bt('ipe-body-tag').value = '<正文>， main';
+        bt('ipe-body-tag').dispatchEvent(new w.Event('change'));
+        check(settings.bodyTag === '正文, main' && btIds.every(id => bt(id).value === '正文, main'), '改生图那格：存成「正文, main」（带尖括号、全角逗号都认），四格一起变');
+        check(d.querySelector('#ipe-status').textContent.includes('<正文> / <main>') && d.querySelector('#iped-status').textContent.includes('<正文> / <main>'), '生图状态行说正文标签改成了什么');
+        bt('iped-ledger-body-tag').value = '';
+        bt('iped-ledger-body-tag').dispatchEvent(new w.Event('change'));
+        check(settings.bodyTag === '' && btIds.every(id => bt(id).value === ''), '清空挂账那格：存成空（不会被默认值顶回 content），四格一起空');
+        check(d.querySelector('#ipe-ledger-status').textContent.includes('清空') && d.querySelector('#ipe-ledger-status').textContent.includes('只拦空回'), '挂账状态行说清空了：照老样子认 <content>，只拦空回');
+        bt('ipe-ledger-body-tag').value = '</content>';
+        bt('ipe-ledger-body-tag').dispatchEvent(new w.Event('change'));
+        check(settings.bodyTag === 'content' && btIds.every(id => bt(id).value === 'content'), '填成 </content> 也认得：改回 content');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
