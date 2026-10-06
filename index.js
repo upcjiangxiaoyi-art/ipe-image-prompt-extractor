@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.10";
+var IPE_VERSION = "2.27.11";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -5499,7 +5499,9 @@ function ipeCastRefreshUI() {
 var IPE_CAST_SCAN_HINT = "一键读取当前角色卡（群聊读全部成员）、user 设定和启用的世界书，副 AI 把每个人物（含 NPC）的长相——性别、年龄、发色发型、辨识度特征——整理成一行，存成一套新的锚点预设。之后每楼只贴入镜人物的那一行，写法固定不漂；服装照旧由副 AI 按剧情写。不想用就不点，自己写的锚点照旧能用。";
 var IPE_CAST_SCAN_ENTRY_MAX = 4000;     // 单条世界书条目最多带多少字
 var IPE_CAST_SCAN_HEAD_MAX = 30000;     // 角色卡描述 / user 设定单项最多带多少字（外貌常写在长描述的中后段）
-var IPE_CAST_SCAN_TOTAL_MAX = 60000;    // 一次最多带多少字（世界书动辄几十万字）
+var IPE_CAST_SCAN_TOTAL_MAX = 80000;    // 一次最多带多少字（世界书动辄几十万字）；2.27.11 要提全部 NPC，放宽一些
+/* 2.27.11 全部 NPC 都要提：没写外貌的人物条目也得带上。像人物介绍的条目（性别、年龄、身份、称呼）排在外貌条目之后、其余条目之前 */
+var IPE_CAST_PERSON_RE = /[男女]性|男人|女人|少年|少女|青年|岁|年纪|年龄|性别|身份|职业|性格|父亲|母亲|哥哥|姐姐|弟弟|妹妹|丈夫|妻子|师父|徒弟|管家|侍女|侍卫|公子|小姐|先生|夫人|\b(?:he|she|his|her|male|female|age|years? old)\b/i;
 var IPE_CAST_LOOK_RE = /外貌|长相|容貌|相貌|五官|发色|头发|长发|短发|卷发|瞳|眼睛|眸|身高|身材|体型|肤色|皮肤|脸|眉|appearance|hair|eyes?\b|height|build|skin|face|looks?\b/i;
 var ipeCastScanBusy = false;
 
@@ -5602,7 +5604,7 @@ async function ipeCastGatherSources() {
             ((book && book.entries) || []).forEach(function(e){
                 if (!e || e.enabled === false) return;
                 var t = ipeCastEntryText("「" + nm + "」内嵌世界书 · " + (e.comment || e.name || (e.keys || []).join("/")), e.content);
-                if (t) { wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) }); stat.embedded++; }
+                if (t) { wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) }); stat.embedded++; }
             });
         } catch(e) {}
     });
@@ -5618,14 +5620,16 @@ async function ipeCastGatherSources() {
             var e = ents[k];
             if (!e || e.disable === true) return;
             var t = ipeCastEntryText("世界书「" + names[i] + "」· " + (e.comment || (e.key || []).join("/") || k), e.content);
-            if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t) });
+            if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) });
         });
     }
     var out = head.slice(), used = out.join("\n\n").length, seen = {};
     /* 卡里内嵌的世界书导入后通常又是一本同内容的世界书，按正文去重 */
     wiParts = wiParts.filter(function(p){ var k = p.t.replace(/^###[^\n]*\n/, "").slice(0, 300); if (seen[k]) return false; seen[k] = true; return true; });
     stat.entriesAll = wiParts.length;
-    wiParts.filter(function(p){ return p.look; }).concat(wiParts.filter(function(p){ return !p.look; })).forEach(function(p){
+    wiParts.filter(function(p){ return p.look; })
+        .concat(wiParts.filter(function(p){ return !p.look && p.person; }))
+        .concat(wiParts.filter(function(p){ return !p.look && !p.person; })).forEach(function(p){
         if (used + p.t.length > IPE_CAST_SCAN_TOTAL_MAX) return;
         out.push(p.t); used += p.t.length + 2; stat.entries++;
     });
@@ -5635,17 +5639,17 @@ async function ipeCastGatherSources() {
 function ipeCastScanPrompt(userName) {
     return [
         "你是角色设定整理员。下面是一个角色扮演的全部设定资料（角色卡、user 设定、世界书）。",
-        "找出资料里所有有外貌信息的人物——主角、user（" + (userName || "user") + "）、NPC 都算——为每个人整理生图用的外貌锚点。",
+        "找出资料里出现的所有人物——主角、user（" + (userName || "user") + "）、每一个有名字的 NPC（配角、只出现一次、只有一句介绍的都算）——一个都不能漏，为每个人整理生图用的外貌锚点。",
         "严格按下面格式输出，人物之间空一行，格式外不要写任何字：",
         "【人物名】",
         "外貌: 一行英文，25 到 50 个词，只写长相：性别、年龄（写具体岁数或年龄段）、发色与发型（颜色写具体：jet-black / ash-blonde / chestnut brown，带上深浅、挑染、渐变；再写长度和样式）、瞳色、脸型与五官、肤色、身高体型，以及最有辨识度的特征（痣、疤、纹身、眼镜、耳钉、异色瞳、雀斑等）。肤色用 complexion 写（fair complexion / warm olive complexion），不要出现 skin、bare、naked 这类词。",
         "不写服装、性格、身份、表情、动作；不要别的字段。",
         "规则：",
         "1. 人物名用资料里的原名；user 用「" + (userName || "user") + "」。",
-        "2. 资料里完全没有外貌描写的人物不要输出。",
+        "2. 每个有名字的人物都必须输出，资料里没写外貌也一样：按资料里的性别、年龄、身份、职业、出身、性格推断一个具体、合理、符合人设的长相。只有不是人的条目（地点、组织、物品、势力）和没名字的群体（守卫们、路人们）才不输出。",
         "3. 发色最要紧：资料写了就照写，写具体色号式的颜色；资料里有辨识度特征一定写进去，放在靠前的位置。",
         "4. 资料缺了发色、瞳色这类关键项时，按人物设定补一个具体、合理的值——生图需要确定值才能每次画成同一个人。",
-        "5. 主角、user 和重要人物默认男帅女美：男性写 strikingly handsome，女性写 strikingly beautiful，五官往好看里写具体。只有资料明确写了这个人丑、相貌平平或毁容，才照资料写。",
+        "5. 主角、user 和重要人物默认男帅女美：男性写 strikingly handsome，女性写 strikingly beautiful，五官往好看里写具体。其他 NPC 默认五官端正耐看（attractive, well-proportioned features），按年龄和身份写出区别，别把所有人写成同一张脸。只有资料明确写了这个人丑、相貌平平、凶相或毁容，才照资料写。",
         "6. 眼睛：资料没有特别写眼型（单眼皮、细长眼、狐狸眼、丹凤眼等）时，一律写 large, bright, expressive eyes with double eyelids——生图模型画东亚人容易默认成单眼皮小眼睛，必须锚住；资料写了特定眼型就照资料写。",
         "7. 只写稳定的长相，不写也不放大肮脏、邋遢、贫穷、落魄、疲惫、憔悴、狼狈这类状态或气质；资料里的这类描写是剧情状态，不进外貌锚点。",
         "8. 不要解释，不要标题，不要代码块。"
