@@ -68,7 +68,8 @@ function boot(floors, reuse) {   // reuse：拿同一个聊天再开一个新页
         "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeGetAnchorValue", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
         "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
-        "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerEstimateChars", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh"];
+        "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerEstimateChars", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh",
+        "ipeLedgerSrcMark", "ipeLedgerModeSet", "ipeImgLayersSave", "ipeLedgerModeState"];
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
@@ -2073,6 +2074,41 @@ await (async () => {
     await r.w.eval("ipeLedgerRunManual")();
     ok(r.box.ledger === 1, "手动「重新挂账」不拦：你点了就跑", JSON.stringify(r.box));
 })();
+
+console.log("\n【57】 元数据没变就不叫酒馆存（2.27.12）");
+{
+    const { tavern, F } = boot(10);
+    let saves = 0; tavern.saveMetadataDebounced = () => { saves++; };
+    const meta = () => tavern.chatMetadata;
+    // 账本：同一楼、同一段文字再落一次，不存；文字变了才存
+    F("ipeLedgerCommit")("第十楼的账本内容，够长够长够长够长。", 10);
+    eq(saves, 1, "头一次落账：叫酒馆存一次");
+    meta().ipe_ledger_v2.updatedAt = 12345;
+    F("ipeLedgerCommit")("第十楼的账本内容，够长够长够长够长。", 10);
+    eq(saves, 1, "同一楼同样的账再落一次：内容没变，不叫酒馆存（修好前这条必挂）");
+    eq(meta().ipe_ledger_v2.updatedAt, 12345, "没变就不盖新的 updatedAt（修好前这条必挂）");
+    const st = F("ipeLedgerRead")();
+    eq(st.current, "第十楼的账本内容，够长够长够长够长。", "读回来的账还是那份");
+    F("ipeLedgerCommit")("第十楼改过的账本内容，够长够长够长够长。", 10);
+    eq(saves, 2, "账改了：照常存");
+    // 挂账来源签名
+    const input = { floor: 10, swipe: 0, text: "第十楼正文，够长够长够长够长够长。" };
+    F("ipeLedgerSrcMark")(input); eq(saves, 3, "头一次记来源签名：存");
+    F("ipeLedgerSrcMark")(input); eq(saves, 3, "同样的来源再记一次：不存（修好前这条必挂）");
+    F("ipeLedgerSrcMark")({ floor: 10, swipe: 1, text: input.text }); eq(saves, 4, "换了条 swipe：存");
+    // 场景标记
+    F("ipeLedgerModeSet")("nsfw", 10); eq(saves, 5, "头一次写场景标记：存");
+    F("ipeLedgerModeSet")("nsfw", 10); eq(saves, 5, "同一楼同一个模式再写：不存（修好前这条必挂）");
+    ok(F("ipeLedgerModeState")().mode === "nsfw" && F("ipeLedgerModeState")().floor === 10, "读回来的模式和楼号没变");
+    F("ipeLedgerModeSet")("normal", 11); eq(saves, 6, "模式变了：存");
+    // 四层
+    const layers = { camera: "特写", env: "雨夜的巷子", mood: "压抑", chars: "黑发少年", pose: "靠墙", envFloor: 9, moodFloor: 10 };
+    F("ipeImgLayersSave")(layers, 10); eq(saves, 7, "头一次存四层：存");
+    F("ipeImgLayersSave")(Object.assign({}, layers), 10); eq(saves, 7, "同样的四层再存一次：不存（修好前这条必挂）");
+    ok(F("ipeImgLayersRead")().env === "雨夜的巷子" && F("ipeImgLayersRead")().floor === 10, "读回来的四层没变");
+    F("ipeImgLayersSave")(Object.assign({}, layers, { mood: "松快" }), 10); eq(saves, 8, "有一层变了：存");
+    F("ipeImgLayersSave")(layers, 11); eq(saves, 9, "楼号变了：存");
+}
 
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);

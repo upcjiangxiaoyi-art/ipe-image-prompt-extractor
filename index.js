@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.11";
+var IPE_VERSION = "2.27.12";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -698,6 +698,25 @@ function ipeLedgerReadFresh() {
     return ipeLedgerNormalize(null);
 }
 
+/* 2.27.12 两份元数据除了 skip 里的字段（updatedAt 这类记账字段）是不是一模一样。
+   酒馆的 saveMetadata 就是整份聊天写盘、再生成一份服务器备份；内容没变就别叫它。 */
+function ipeMetaSame(a, b, skip) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    var ka = Object.keys(a).filter(function(k){ return !(skip && skip[k]); });
+    var kb = Object.keys(b).filter(function(k){ return !(skip && skip[k]); });
+    if (ka.length !== kb.length) return false;
+    for (var i = 0; i < ka.length; i++) {
+        var k = ka[i];
+        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+        var x = a[k], y = b[k];
+        if (x && typeof x === "object") { if (!ipeMetaSame(x, y, null)) return false; }
+        else if (x !== y) return false;
+    }
+    return true;
+}
+var IPE_META_SKIP_UPDATED = { updatedAt: true };
 function ipeLedgerSave(state) {
     if (ipeLedgerReadScope) ipeLedgerReadScope.state = null;
     ipeLedgerLastAutoInput = null; // 手动改账、回退、导入后允许重新自动挂账。
@@ -707,11 +726,16 @@ function ipeLedgerSave(state) {
     try {
         var root = ipeMetaRoot();
         if (root) {
-            root[IPE_LEDGER_META_KEY] = clean;
+            var had = root[IPE_LEDGER_META_KEY];
+            if (had && typeof had === "object" && ipeMetaSame(had, clean, IPE_META_SKIP_UPDATED)) {
+                clean = had;   // 2.27.12 账没变：主档原样不动、不盖新时间、不叫酒馆整份存聊天
+            } else {
+                root[IPE_LEDGER_META_KEY] = clean;
+                var c = ctx();
+                if (typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+                else if (typeof c.saveMetadata === "function") c.saveMetadata();
+            }
             metaOk = true;
-            var c = ctx();
-            if (typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
-            else if (typeof c.saveMetadata === "function") c.saveMetadata();
         }
     } catch(eM) { metaOk = false; }
     if (ipeChatKeyReady()) {
@@ -3006,7 +3030,9 @@ function ipeLedgerModeState() {
 function ipeLedgerModeSet(mode, floor) {
     try {
         var r = ipeMetaRoot(); if (!r) return;
-        r[IPE_LEDGER_MODE_META] = { mode: String(mode || "normal").toLowerCase(), floor: Number(floor) || 0, updatedAt: Date.now() };
+        var next = { mode: String(mode || "normal").toLowerCase(), floor: Number(floor) || 0, updatedAt: Date.now() };
+        if (ipeMetaSame(r[IPE_LEDGER_MODE_META], next, IPE_META_SKIP_UPDATED)) return;   // 2.27.12 同楼同模式：不存
+        r[IPE_LEDGER_MODE_META] = next;
         var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
     } catch(e) {}
 }
@@ -3423,7 +3449,9 @@ function ipeLedgerTextSig(text) {   // 剥掉楼尾生图段、去掉首尾空�
 function ipeLedgerSrcMark(input) {
     try {
         var r = ipeMetaRoot(); if (!r || !input) return;
-        r[IPE_LEDGER_SRC_META] = { floor: input.floor, swipe: input.swipe == null ? null : input.swipe, sig: ipeLedgerTextSig(input.text) };
+        var next = { floor: input.floor, swipe: input.swipe == null ? null : input.swipe, sig: ipeLedgerTextSig(input.text) };
+        if (ipeMetaSame(r[IPE_LEDGER_SRC_META], next, null)) return;   // 2.27.12 同楼同条同正文：不存
+        r[IPE_LEDGER_SRC_META] = next;
         var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
     } catch(e) {}
 }
@@ -5088,6 +5116,7 @@ function ipeImgLayersSave(layers, floor) {
         var root = ipeMetaRoot(); if (!root) return;
         var o = { floor: Number(floor) || 0, envFloor: Number(layers && layers.envFloor) || Number(floor) || 0, moodFloor: Number(layers && layers.moodFloor) || Number(floor) || 0, updatedAt: Date.now() };
         IPE_IMG_LAYERS.forEach(function(l){ o[l] = String((layers && layers[l]) || ""); });
+        if (ipeMetaSame(root[IPE_IMG_LAYERS_META_KEY], o, IPE_META_SKIP_UPDATED)) return;   // 2.27.12 五层、楼号都没变：不存
         root[IPE_IMG_LAYERS_META_KEY] = o;
         var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
     } catch(e) {}
