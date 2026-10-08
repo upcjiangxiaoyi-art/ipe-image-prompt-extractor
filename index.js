@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.12";
+var IPE_VERSION = "2.27.13";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -188,6 +188,24 @@ function ipeStripBuiltInAnchorGuide(text) {
 }
 
 function ctx() { return SillyTavern.getContext(); }
+
+/* 2.27.13 贴完生图段存聊天，不再当场叫 saveChat（整份聊天写盘、再备份一份）。正文写完那一瞬间酒馆自己要存、
+   画笺也要存，再叠一份几十 MB 的序列化挤在同一秒，手机上就白屏。酒馆有 saveChatDebounced（改楼、滑动都走它，
+   同一秒里不管谁要存都只写一次）就并进它；没有就自己拖 1 秒再叫 saveChat，期间再贴几楼也只存一次。
+   酒馆的保存自带互斥，同一时刻只有一次在途，这里只管别抢在高峰上。 */
+var ipeSaveChatTimer = null;
+var IPE_SAVE_CHAT_DELAY_MS = 1000;
+function ipeSaveChatSoon() {
+    var c = null;
+    try { c = ctx(); } catch(e) { c = null; }
+    if (c && typeof c.saveChatDebounced === "function") { try { c.saveChatDebounced(); } catch(e) {} return "debounced"; }
+    if (ipeSaveChatTimer) return "queued";
+    ipeSaveChatTimer = setTimeout(function(){
+        ipeSaveChatTimer = null;
+        try { var c2 = ctx(); if (c2 && typeof c2.saveChat === "function") c2.saveChat(); } catch(e) {}
+    }, IPE_SAVE_CHAT_DELAY_MS);
+    return "scheduled";
+}
 
 // 参考“小酒悬浮窗”的方式：优先把悬浮 UI 挂到顶层 SillyTavern 页面，而不是脚本 iframe 内。
 function ipeRootWindow() {
@@ -9076,8 +9094,9 @@ function bindAll() {
                 // 2.25.0 🐚 块先挪到新楼：没撤哨的情形（开场白、非流式）也和酒馆画楼同一轮挪好；楼还没画出来就等观察器看到它再挪
                 try { ipeLedgerRenderInline({ soft: true }); } catch(eP) {}
                 setTimeout(function(){
-                    ipeLedgerSync();
-                    if (cfg().ledgerAutoRun === true) ipeLedgerRun(null, true);
+                    // 2.27.13 定时器里的异常没人接，会直接报到控制台、打断后面的事：都兜住
+                    try { ipeLedgerSync(); } catch(eS) { try { console.warn("[IPE] 收到新楼后同步挂账失败", eS); } catch(e2) {} }
+                    try { if (cfg().ledgerAutoRun === true) ipeLedgerRun(null, true); } catch(eR) { try { console.warn("[IPE] 自动挂账启动失败", eR); } catch(e2) {} }
                 }, 500);
             });
             console.log("[IPE] 挂账已绑定消息事件");
@@ -9187,7 +9206,7 @@ function injectDescToMessage(desc, targetIdx) {
             msg.swipes[msg.swipe_id] = msg.mes;
         }
     } catch(eSw) {}
-    if (typeof c.saveChat === "function") c.saveChat();
+    ipeSaveChatSoon();   // 2.27.13 延后合并存，不抢在流式结束那一瞬间
 
     var el=q('#chat .mes[mesid="'+idx+'"] .mes_text');
     // 2.25.0 贴的还是原来那串文字，只多个类名（换行照原样分行）；贴前贴后钉住视线，楼尾长出一段不把眼前的字顶走
@@ -9261,7 +9280,7 @@ function reinjectDescToMessage(targetIdx, opts) {
             msg.swipes[msg.swipe_id] = msg.mes;
         }
     } catch(eSw) {}
-    if (typeof c.saveChat === "function") c.saveChat();
+    ipeSaveChatSoon();   // 2.27.13 延后合并存
     ipeSwapInjectedParagraph(idx, tag, prevTag, prevEnv, oldTail);
     try { ipeInstallMesButtons([q('#chat .mes[mesid="' + idx + '"]')]); } catch(eB) {}
     return { injected: true, tag: tag, idx: idx, replaced: stripped !== before };

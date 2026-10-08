@@ -1159,7 +1159,10 @@ await (async () => {
     eq(mesText.querySelectorAll("p").length, 1, "旧的注入 <p> 摘掉，只剩新的一段");
     eq(mesText.querySelector("p").textContent, "<draw>INK: new desc</draw>", "新 <p> 是水墨模板拼的那块");
     eq(tavern.chat[9].mes, "正文。\n\n<draw>INK: new desc</draw>", "旧 <draw> 块剥掉，按水墨模板重拼");
-    ok(r.injected && r.replaced, "报告：已注入且替换了旧块"); eq(saved, 1, "存了聊天");
+    ok(r.injected && r.replaced, "报告：已注入且替换了旧块");
+    eq(saved, 0, "2.27.13 不当场存聊天：延后 1 秒合并（修好前这条必挂）");
+    await new Promise(function(resolve){ setTimeout(resolve, 1100); });
+    eq(saved, 1, "1 秒后存了一次聊天");
     // 换画风：快捷下拉选动漫 → 模板预设同步 → 点按钮
     const quick = d.querySelector("#ipe-reinject-tpl"); ok(!!quick && quick.options.length === 2, "预览区有快捷模板下拉，两个模板都在");
     quick.value = "tpl_b"; quick.dispatchEvent(new w.Event("change", { bubbles: true }));
@@ -2109,6 +2112,26 @@ console.log("\n【57】 元数据没变就不叫酒馆存（2.27.12）");
     F("ipeImgLayersSave")(Object.assign({}, layers, { mood: "松快" }), 10); eq(saves, 8, "有一层变了：存");
     F("ipeImgLayersSave")(layers, 11); eq(saves, 9, "楼号变了：存");
 }
+
+/* 2.27.13 注入后不当场存聊天：延后 1 秒合并，1 秒内贴几楼也只存一次；酒馆有 saveChatDebounced 就交给它合并 */
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    let saved = 0; tavern.saveChat = () => { saved++; };
+    tavern.chat[7].mes = "第八楼正文。"; tavern.chat[9].mes = "第十楼正文。";
+    F("injectDescToMessage")("floor eight", 7);
+    F("injectDescToMessage")("floor ten", 9);
+    eq(saved, 0, "贴完当场不叫 saveChat（修好前这条必挂）");
+    ok(tavern.chat[7].mes.indexOf("floor eight") >= 0 && tavern.chat[9].mes.indexOf("floor ten") >= 0, "两楼都贴上了");
+    await new Promise(function(resolve){ setTimeout(resolve, 1100); });
+    eq(saved, 1, "1 秒内贴了两楼，只整份存一次");
+    let debounced = 0; tavern.saveChatDebounced = () => { debounced++; };
+    tavern.chat[5].mes = "第六楼正文。";
+    F("injectDescToMessage")("floor six", 5);
+    eq(debounced, 1, "酒馆有 saveChatDebounced 就并进它的防抖");
+    await new Promise(function(resolve){ setTimeout(resolve, 1100); });
+    eq(saved, 1, "交给酒馆防抖以后不再自己叫 saveChat");
+    delete tavern.saveChatDebounced;
+})();
 
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
