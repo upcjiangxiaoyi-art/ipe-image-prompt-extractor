@@ -22,6 +22,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(JSON.stringify(beforeIDs) === JSON.stringify([...d.querySelectorAll('#ipe-panel [id], #ipe-drawer [id]')].map(el => el.id).sort()), '整理前后所有控件 ID 原样保留');
         check(new Set(beforeIDs).size === beforeIDs.length, '两处入口没有重复控件 ID');
         check(panel.querySelector('.ipe-sections').firstElementChild.id === 'ipe-section-preview', '浮窗预览在生图配置之前');
+        for (const prefix of ['ipe', 'iped']) {
+            const order = d.querySelector('#' + prefix + '-card-order'), sup = d.querySelector('#' + prefix + '-supplement');
+            check(!!order && !!(order.compareDocumentPosition(sup) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !order.closest('details:not([open])'), prefix + ' 本卡长期指令框在补充指令之前、直接可见');
+        }
         check(drawer.querySelector('[data-ipe-tab="image"]').firstElementChild.dataset.ipeFold === 'drawer-image-preview', '抽屉预览在生图配置之前');
         // 2.26.0：以前只看名字，名字错一格也照样过——现在看内容：置顶展开的那张卡里真有状态行和预览框，每张卡名字和标题对得上
         const drawerCards = [...drawer.querySelectorAll('[data-ipe-tab="image"] > details')];

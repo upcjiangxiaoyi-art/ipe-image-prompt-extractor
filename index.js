@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.27.13";
+var IPE_VERSION = "2.28.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -116,6 +116,7 @@ const DEFAULTS = {
     ledgerMaxTokens: 0,            // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
     imgLayered: false,             // 2.11.0 分层生图：一次请求四层输出（镜头 / 环境 / 人物 / 动作）
     imgLockCamera: false, imgLockEnv: false, imgLockMood: false, imgLockChars: false, imgLockPose: false,
+    imgCardOrderJson: "",          // 2.28.0 本卡长期指令：{ 卡键: 文字 }，卡键同「锚点锁到卡」（头像文件名 / 群 id）
     imgCastLock: true,             // 2.20.0 人物锁：锚点里写成人物段的，长相由插件原样贴入
     imgTemperature: 0.2            // 2.20.0 提取温度（原先写死 0.4）；空 = 不发，用模型默认
 };
@@ -4217,6 +4218,55 @@ function ipeRefreshAnchorLockUI() {
     });
 }
 
+/* ============================================================
+   📌 本卡长期指令（2.28.0）
+   每张卡一条，写「顾寒脖子上的纹身必须提取」这种每楼都要守的要求。
+   提取请求、人物锁、自动提取人物外貌都把它放在最前面，标成最高优先级。
+   认卡跟「锚点锁到卡」同一个键（头像文件名 / 群 id），存在扩展设置里：换聊天、手机重载都在。
+   ============================================================ */
+function ipeCardOrders() {
+    var m = ipeSafeJsonParse(cfg().imgCardOrderJson, null);
+    return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
+}
+function ipeCardOrderGet() {
+    var k = ipeAnchorCardKey();
+    return k ? String(ipeCardOrders()[k] || "") : "";
+}
+function ipeCardOrderSet(val) {
+    var k = ipeAnchorCardKey(); if (!k) return false;
+    var m = ipeCardOrders(); val = String(val || "");
+    if (val.trim()) m[k] = val; else delete m[k];
+    save("imgCardOrderJson", JSON.stringify(m));
+    return true;
+}
+/* 放在提取请求最前面的那段；没写就是空串 */
+function ipeCardOrderBlock() {
+    var t = ipeCardOrderGet().trim();
+    if (!t) return "";
+    return "【本卡长期指令 · 最高优先级】\n" + t + "\n以上是用户对这张卡的长期要求，优先于下面的角色锚点、提取规则和其他一切要求；冲突时以这里为准，每一楼都照做。\n\n";
+}
+function ipeCardOrderRefreshUI() {
+    var k = ipeAnchorCardKey(), label = ipeAnchorCardLabel(), v = ipeCardOrderGet();
+    ["ipe-card-order", "iped-card-order"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        if (el !== document.activeElement) el.value = v;
+        el.disabled = !k;
+    });
+    var info = !k ? "没有打开角色卡：先进一张卡的聊天再写。"
+        : "只对「" + (label || "这张卡") + "」生效，每楼提取和「🔍 自动提取人物外貌」都放在最前面，优先于锚点和提取规则。";
+    ["ipe-card-order-info", "iped-card-order-info"].forEach(function(id){ var e = q("#" + id); if (e) e.textContent = info; });
+}
+function ipeCardOrderBindUI() {
+    ["ipe-card-order", "iped-card-order"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("input", function(){
+            ipeCardOrderSet(el.value);
+            var o = q("#" + (id === "ipe-card-order" ? "iped-card-order" : "ipe-card-order")); if (o && o !== el) o.value = el.value;
+        });
+        el.addEventListener("change", function(){ ipeCardOrderSet(el.value); ipeSaveNow(); });
+    });
+}
+
 function ipeGetAnchorPresets() {
     var c = cfg();
     var list = ipeSafeJsonParse(c.anchorPresetsJson, null);
@@ -5304,6 +5354,7 @@ function ipeImgRefreshLayerUI() {
     var st = ipeImgLayersRead();
     ipeImgSetLayerBoxes(st || {});
     try { ipeCastRefreshUI(); } catch(eC) {}
+    try { ipeCardOrderRefreshUI(); } catch(eO) {}   // 本卡长期指令跟着卡走，换聊天一起刷
 }
 
 /* 2.26.0 生图 API 区的「流式接收」「开口时限」（2.26.1 由空闲超时改来） */
@@ -5336,6 +5387,7 @@ function ipeImgStreamBindUI() {
 }
 
 function ipeImgBindLayerUI() {
+    ipeCardOrderBindUI();
     ipeCastBindUI();
     ipeImgStreamBindUI();
     ipeBodyTagBindUI();
@@ -5463,6 +5515,7 @@ function ipeCastContract(cards) {
         "下列人物的固定长相（性别、年龄感、脸、发型发色、瞳色、肤色、体型、标志特征）由插件原样贴进最终提示词。输出里不要再写这些，也不要换说法复述；服装、表情、视线、动作、临时身体状态（湿发、受伤、脸红等）照常写。提到他们时直接用下面的名字：",
         cards.map(function(c){ return c.name + (c.aliases.length ? "（又名 " + c.aliases.join(" / ") + "）" : ""); }).join("、"),
         youLine,
+        ipeCardOrderGet().trim() ? "本卡长期指令里点名必须写的特征（纹身、耳钉、疤等），即使属于固定长相也照写，不算重复。" : "",
         "在全部输出的最后另起一行附上：",
         "<cast>本楼实际入镜的上述人物名，按上面的名字原样写，英文逗号分隔；没有就写 NONE</cast>"
     ].filter(Boolean).join("\n");
@@ -5544,7 +5597,7 @@ function ipeCastRefreshUI() {
    资料再长也只在这一次读；之后每楼只贴入镜人物那一行。
    ============================================================ */
 var IPE_CAST_SCAN_HINT = "一键读取当前角色卡（群聊读全部成员）、user 设定和启用的世界书，副 AI 把每个人物（含 NPC）的长相——性别、年龄、发色发型、辨识度特征——整理成一行，存成一套新的锚点预设。之后每楼只贴入镜人物的那一行，写法固定不漂；服装照旧由副 AI 按剧情写。不想用就不点，自己写的锚点照旧能用。";
-var IPE_CAST_SCAN_ENTRY_MAX = 4000;     // 单条世界书条目最多带多少字
+var IPE_CAST_SCAN_ENTRY_MAX = 12000;    // 单条世界书条目最多带多少字（2.28.0 放宽：一条里写好几个 NPC 的常见，4000 字会截掉后面的人）
 var IPE_CAST_SCAN_HEAD_MAX = 30000;     // 角色卡描述 / user 设定单项最多带多少字（外貌常写在长描述的中后段）
 var IPE_CAST_SCAN_TOTAL_MAX = 80000;    // 一次最多带多少字（世界书动辄几十万字）；2.27.11 要提全部 NPC，放宽一些
 /* 2.27.11 全部 NPC 都要提：没写外貌的人物条目也得带上。像人物介绍的条目（性别、年龄、身份、称呼）排在外貌条目之后、其余条目之前 */
@@ -5650,8 +5703,9 @@ async function ipeCastGatherSources() {
             var book = ch.data && ch.data.character_book;
             ((book && book.entries) || []).forEach(function(e){
                 if (!e || e.enabled === false) return;
-                var t = ipeCastEntryText("「" + nm + "」内嵌世界书 · " + (e.comment || e.name || (e.keys || []).join("/")), e.content);
-                if (t) { wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) }); stat.embedded++; }
+                var ttl = String(e.comment || e.name || (e.keys || []).join("/") || "");
+                var t = ipeCastEntryText("「" + nm + "」内嵌世界书 · " + ttl, e.content);
+                if (t) { wiParts.push({ t: t, title: ttl, keys: (e.keys || []).map(String), look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) }); stat.embedded++; }
             });
         } catch(e) {}
     });
@@ -5666,11 +5720,12 @@ async function ipeCastGatherSources() {
         Object.keys(ents).forEach(function(k){
             var e = ents[k];
             if (!e || e.disable === true) return;
-            var t = ipeCastEntryText("世界书「" + names[i] + "」· " + (e.comment || (e.key || []).join("/") || k), e.content);
-            if (t) wiParts.push({ t: t, look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) });
+            var ttl = String(e.comment || (e.key || []).join("/") || k);
+            var t = ipeCastEntryText("世界书「" + names[i] + "」· " + ttl, e.content);
+            if (t) wiParts.push({ t: t, title: ttl, keys: (e.key || []).map(String), look: IPE_CAST_LOOK_RE.test(t), person: IPE_CAST_PERSON_RE.test(t) });
         });
     }
-    var out = head.slice(), used = out.join("\n\n").length, seen = {};
+    var out = head.slice(), used = out.join("\n\n").length, seen = {}, wiUsed = [];
     /* 卡里内嵌的世界书导入后通常又是一本同内容的世界书，按正文去重 */
     wiParts = wiParts.filter(function(p){ var k = p.t.replace(/^###[^\n]*\n/, "").slice(0, 300); if (seen[k]) return false; seen[k] = true; return true; });
     stat.entriesAll = wiParts.length;
@@ -5678,10 +5733,51 @@ async function ipeCastGatherSources() {
         .concat(wiParts.filter(function(p){ return !p.look && p.person; }))
         .concat(wiParts.filter(function(p){ return !p.look && !p.person; })).forEach(function(p){
         if (used + p.t.length > IPE_CAST_SCAN_TOTAL_MAX) return;
-        out.push(p.t); used += p.t.length + 2; stat.entries++;
+        out.push(p.t); used += p.t.length + 2; stat.entries++; wiUsed.push(p);
     });
     try { console.log("[IPE] 🔍 自动提取人物外貌 · 资料来源", JSON.stringify(stat)); } catch(e) {}
-    return { text: out.join("\n\n"), stat: stat, user: ps.name };
+    return { text: out.join("\n\n"), stat: stat, user: ps.name, wi: wiUsed };
+}
+/* ============================================================
+   2.28.0 世界书 NPC 逐条核对
+   NPC 大多写在世界书里，副 AI 看一大堆资料常常漏人。
+   请求里附一张「世界书条目清单」（标题 + 关键词）让它逐条过；
+   整理完插件自己对一遍：像人物介绍、标题或关键词像人名、却没整理出来的条目，只带这几条再补提一次。
+   ============================================================ */
+function ipeCastWiChecklist(wi) {
+    return (wi || []).slice(0, 300).map(function(p){
+        return "- " + p.title + (p.keys && p.keys.length ? "（关键词：" + p.keys.slice(0, 6).join("/") + "）" : "");
+    }).join("\n");
+}
+/* 条目标题 / 关键词里像人名的部分：去掉「NPC·」「角色：」这类前缀和括号注释，留 1～8 个字的 */
+function ipeCastNameCands(p) {
+    var out = [];
+    [p.title].concat(p.keys || []).forEach(function(x){
+        var n = String(x || "").replace(/^\s*(?:npc|NPC|人物|角色|配角|路人|主角)\s*[·・:：\-|｜\/]\s*/, "")
+            .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, "").trim();
+        if (n && n.length <= 8 && !/[，。,;；!！?？、]/.test(n) && out.indexOf(n) < 0) out.push(n);   // 带标点的是句子，不是名字
+    });
+    return out;
+}
+function ipeCastWiMissing(wi, cards) {
+    var keys = [];
+    cards.forEach(function(c){ [c.name].concat(c.aliases || []).forEach(function(k){ var n = ipeCastNorm(k); if (n) keys.push(n); }); });
+    return (wi || []).filter(function(p){
+        if (!p.person && !p.look) return false;
+        var cands = ipeCastNameCands(p).map(ipeCastNorm).filter(Boolean);
+        if (!cands.length) return false;
+        // 「老陈」对上「陈伯（老陈）」这种互相包含也算；单字名只认完全相同，免得「雨」把谁都对上
+        return !cands.some(function(cn){ return keys.some(function(k){ return k === cn || (k.length >= 2 && cn.length >= 2 && (k.indexOf(cn) >= 0 || cn.indexOf(k) >= 0)); }); });
+    });
+}
+/* 两次整理结果合在一起：同名只留先到的 */
+function ipeCastMergeCards(a, b) {
+    var out = a.slice();
+    b.forEach(function(c){ if (!ipeCastFind(out, c.name)) out.push(c); });
+    return out;
+}
+function ipeCastCardsText(cards) {
+    return cards.map(function(c){ return "【" + c.name + "】\n外貌: " + ipeCastSafeLook(c.look); }).join("\n\n");
 }
 function ipeCastScanPrompt(userName) {
     return [
@@ -5694,6 +5790,7 @@ function ipeCastScanPrompt(userName) {
         "规则：",
         "1. 人物名用资料里的原名；user 用「" + (userName || "user") + "」。",
         "2. 每个有名字的人物都必须输出，资料里没写外貌也一样：按资料里的性别、年龄、身份、职业、出身、性格推断一个具体、合理、符合人设的长相。只有不是人的条目（地点、组织、物品、势力）和没名字的群体（守卫们、路人们）才不输出。",
+        "2A. 世界书是 NPC 的主要来源：对照【世界书条目清单】逐条过一遍，凡是介绍某个人物的条目——哪怕只有名字、身份、一两句话——都要为这个人输出一段；一个条目里写了好几个人，就每人一段。世界书里的 NPC 一个都不能漏。",
         "3. 发色最要紧：资料写了就照写，写具体色号式的颜色；资料里有辨识度特征一定写进去，放在靠前的位置。",
         "4. 资料缺了发色、瞳色这类关键项时，按人物设定补一个具体、合理的值——生图需要确定值才能每次画成同一个人。",
         "5. 主角、user 和重要人物默认男帅女美：男性写 strikingly handsome，女性写 strikingly beautiful，五官往好看里写具体。其他 NPC 默认五官端正耐看（attractive, well-proportioned features），按年龄和身份写出区别，别把所有人写成同一张脸。只有资料明确写了这个人丑、相貌平平、凶相或毁容，才照资料写。",
@@ -5702,13 +5799,19 @@ function ipeCastScanPrompt(userName) {
         "8. 不要解释，不要标题，不要代码块。"
     ].join("\n");
 }
-async function ipeCastScanCall(sourceText, userName, statusText) {
+async function ipeCastScanCall(sourceText, userName, statusText, extra) {
     var c = cfg();
     if (!c.apiEndpoint) throw new Error("请先配置 API 地址");
     if (!c.model) throw new Error("请先加载并选择模型");
+    extra = extra || {};
+    var order = ipeCardOrderGet().trim(), u = "";
+    if (order) u += "【本卡长期指令 · 最高优先级】\n" + order + "\n整理外貌时，这里点名的特征（纹身、耳钉、疤等）必须写进对应人物的外貌行。\n\n";
+    if (extra.done && extra.done.length) u += "【已经整理过的人物】" + extra.done.join("、") + "\n这些人不要再输出。下面资料里还没整理的人物，每人一段；条目其实不是人物就跳过；一个都没有就只输出 NONE。\n\n";
+    u += "【设定资料】\n" + sourceText;
+    if (extra.checklist) u += "\n\n【世界书条目清单】\n" + extra.checklist + "\n逐条核对：上面每一条，凡是介绍人物的，都要有对应的人物段。";
     var body = { model: c.model, messages: [
         { role: "system", content: ipeCastScanPrompt(userName) },
-        { role: "user", content: "【设定资料】\n" + sourceText }
+        { role: "user", content: u }
     ] };
     var temp = ipeCastTemperature(); if (temp != null) body.temperature = temp;
     // 2.26.0 资料一长副 AI 要想好一阵：跟提取一样走流式，状态行报进度、实况框看它整理到谁了
@@ -5766,13 +5869,30 @@ async function ipeCastScan() {
         var summary = ipeCastSourceSummary(src.stat);
         var scanText = "🔍 " + summary + "。副 AI 正在整理人物外貌…";
         setStatus(scanText, "#6ec577");
-        var raw = await ipeCastScanCall(src.text, src.user, scanText);
+        var raw = await ipeCastScanCall(src.text, src.user, scanText, { checklist: ipeCastWiChecklist(src.wi) });
         var norm = ipeCastNormalizeScan(raw);
         if (!norm.cards.length) { setStatus("副 AI 没整理出人物外貌（资料里可能没写外貌），锚点没动。" + summary + "。返回开头：" + String(raw).slice(0, 80), "#d4726a"); return; }
+        var cards = norm.cards, added = [], still = [];
+        /* 2.28.0 世界书里像人物、却没整理出来的条目：只带这几条补提一次 */
+        var miss = ipeCastWiMissing(src.wi, cards);
+        if (miss.length) {
+            var missText = "🔍 世界书里还有 " + miss.length + " 条人物没整理（" + miss.slice(0, 6).map(function(p){ return p.title; }).join("、") + (miss.length > 6 ? "…" : "") + "），补提中…";
+            setStatus(missText, "#6ec577");
+            try {
+                var raw2 = await ipeCastScanCall(miss.map(function(p){ return p.t; }).join("\n\n"), src.user, missText, { done: cards.map(function(c){ return c.name; }) });
+                var more = ipeCastNormalizeScan(raw2).cards;
+                more.forEach(function(c){ if (!ipeCastFind(cards, c.name)) added.push(c.name); });
+                cards = ipeCastMergeCards(cards, more);
+            } catch(e2) { console.warn("[IPE] 补提世界书人物失败", e2); }
+            still = ipeCastWiMissing(miss, cards).map(function(p){ return p.title; });
+        }
         var title = ipeCharName() || (src.stat.chars[0] || "人物");
-        var pname = ipeCastSaveScanPreset(title, norm.text);
+        var pname = ipeCastSaveScanPreset(title, ipeCastCardsText(cards));
         ipeCastRefreshUI();
-        setStatus("🔍 整理出 " + norm.cards.length + " 个人物：" + norm.cards.map(function(c){ return c.name; }).join("、") + "。已存为锚点预设「" + pname + "」并选中，可在锚点框里改。（" + summary + "）", "#6ec577");
+        setStatus("🔍 整理出 " + cards.length + " 个人物：" + cards.map(function(c){ return c.name; }).join("、") + "。"
+            + (added.length ? "（其中 " + added.join("、") + " 是核对世界书后补提的）" : "")
+            + (still.length ? "（这几条世界书像人物但还是没整理出来，可能不是人，或在锚点框里手动补：" + still.slice(0, 8).join("、") + "）" : "")
+            + "已存为锚点预设「" + pname + "」并选中，可在锚点框里改。（" + summary + "）", "#6ec577");
     } catch(e) {
         console.error("[IPE] 自动提取人物外貌", e);
         setStatus("自动提取人物外貌失败：" + ipeErrorText(e), "#d4726a");
@@ -5806,7 +5926,7 @@ function ipeCastBindUI() {
 
 function buildVisionUserPrompt(text, supplement, lockOverride) {
     var c = cfg();
-    var user = "";
+    var user = ipeCardOrderBlock();   // 2.28.0 本卡长期指令打头，最高优先级
 
     var activeAnchors = ipeStripBuiltInAnchorGuide(ipeGetAnchorValue());
     /* 人物锁开着时，锁定人物的外貌行由插件贴，不用再发给副 AI（名字在人物锁约定里）；
@@ -7007,6 +7127,9 @@ function createPanel() {
             '<div class="ipe-hint" style="margin-top:6px">锁住的层不重提，原样沿用框里那段；「只重摇这层」= 其余各层临时锁定。场景没换时环境层、基调没变时氛围层，自动沿用本聊天上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose} 单独放置，{Description} 拿剩下的层；只写 {Description} 就是五层拼成一段。下面这框是拼好的整段，直接改也行。</div>'+
         '</div>'+
         '<textarea id="ipe-preview-text" rows="6" placeholder="生成的 Description 将显示在这里…"></textarea>'+
+        '<label>📌 本卡长期指令（最高优先级，每楼都带）</label>'+
+        '<textarea id="ipe-card-order" rows="2" placeholder="例：顾寒脖子上的纹身必须提取；陆星河左耳的耳钉必须提取"></textarea>'+
+        '<div id="ipe-card-order-info" class="ipe-hint"></div>'+
         '<label>补充指令<input type="text" id="ipe-supplement" placeholder="例：这段是冷战不是撒娇"></label>'+
         '<div class="ipe-preview-actions" style="margin-top:2px;align-items:center"><select id="ipe-supp-presets" style="flex:1;min-width:0"><option value="">常用短语…</option></select>'+
         '<button id="ipe-supp-save" class="ipe-btn" style="flex:none" title="把补充指令框里这句存起来">存为常用</button>'+
@@ -7407,6 +7530,7 @@ function createDrawer() {
     h += '<div id="iped-layers-box" style="display:none">' + ipeImgLayerRowsHTML("iped", true)
        + '<small style="color:#888">锁住的层不重提；「只重摇这层」= 其余各层临时锁定。环境 / 氛围没变时沿用上一楼。模板可用 {Camera} {Env} {Mood} {Chars} {Pose}，{Description} 拿剩下的层。</small></div>';
     h += '<textarea id="iped-preview-text" class="text_pole" rows="5" placeholder="生成的 Description 将显示在这里…"></textarea>';
+    h += '<label>📌 本卡长期指令（最高优先级，每楼都带）</label><textarea id="iped-card-order" class="text_pole" rows="2" placeholder="例：顾寒脖子上的纹身必须提取；陆星河左耳的耳钉必须提取"></textarea><small id="iped-card-order-info" style="color:#888;display:block"></small>';
     h += '<label>补充指令</label><input type="text" id="iped-supplement" class="text_pole" placeholder="例：这段是冷战不是撒娇">';
     h += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center"><select id="iped-supp-presets" class="text_pole" style="flex:1;min-width:0"><option value="">常用短语…</option></select>';
     h += '<input type="button" id="iped-supp-save" class="menu_button" value="存为常用"><input type="button" id="iped-supp-del" class="menu_button" value="删"></div>';
@@ -7846,7 +7970,7 @@ function ipeImgPackImportText(txt, opts) {
    完成、点遮罩、Esc 都关；关的时候补发一次 change。
    ============================================================ */
 var IPE_ZOOM_TITLES = {
-    "ipe-system-prompt": "系统提示", "ipe-base-template": "画风模板", "ipe-common-text": "公共块", "ipe-char-anchors": "角色锚点",
+    "ipe-system-prompt": "系统提示", "ipe-base-template": "画风模板", "ipe-common-text": "公共块", "ipe-char-anchors": "角色锚点", "ipe-card-order": "📌 本卡长期指令",
     "ipe-anchor-guide-editor": "通用锚点规则", "ipe-extract-rules": "提取规则", "ipe-preview-text": "生图描述（整段）",
     "ipe-layer-camera": "📷 镜头层", "ipe-layer-env": "🌆 环境层", "ipe-layer-mood": "🎞️ 氛围层",
     "ipe-layer-chars": "🧍 人物层", "ipe-layer-pose": "🤝 动作层",

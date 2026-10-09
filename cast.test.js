@@ -116,7 +116,8 @@ async function setup(opts) {
         tavern.loadWorldInfo = async n => books[n] || null;
         w.document.body.insertAdjacentHTML('beforeend', '<select id="world_info" multiple><option selected>全局书</option><option>没开的书</option></select>');
         const reply = '```\n【苑无忧】\n外貌: tall woman, late 20s, long straight black hair, grey eyes, pale skin, slender build\n服装: dark trench coat\n别名: 苑老师\n\n【小雨】\n外貌: 18-year-old girl, short black bob, round glasses, petite\n服装:\n别名:\n\n【老陈】\n外貌: \n```';
-        w.fetch = async (u, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: reply } }] }) }; };
+        let calls = 0;   // 2.28.0 起漏了世界书人物会补提一次：这里看第一次请求
+        w.fetch = async (u, o) => { calls++; if (calls === 1) cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: reply } }] }) }; };
         await w.eval('ipeCastScan()');
         const sent = cap.body.messages[1].content;
         check(unshallow === 1, '先让酒馆补全懒加载的角色卡');
@@ -169,6 +170,64 @@ async function setup(opts) {
         api('Close-up of 苑无忧.\n<cast>苑无忧, you</cast>');
         await run();
         check(box('ipe-preview-text').indexOf('小雨: ') > 0, '写 you 也认');
+    }
+    console.log('\n【世界书 NPC】清单逐条核对，漏了的自动补提（2.28.0）');
+    {
+        const { w, tavern, st } = await setup();
+        tavern.name1 = '小雨'; tavern.name2 = '苑无忧';
+        tavern.characters[0] = { name: '苑无忧', avatar: 'yuan.png', description: '苑无忧，高个子女人，黑色长发。', personality: '', scenario: '', data: { extensions: { world: 'NPC书' } } };
+        tavern.chatMetadata = tavern.chatMetadata || {};
+        const books = { 'NPC书': { entries: {
+            1: { comment: '老陈', content: '苑家的管家，六十岁。', key: ['老陈'] },
+            2: { comment: 'NPC·阿福（邻居）', content: '住隔壁、开面馆的男人，爱笑。', key: ['阿福', '福哥'] },
+            3: { comment: '港口城', content: '一座常年下雨的城市。', key: ['港口'] }
+        } } };
+        tavern.loadWorldInfo = async n => books[n] || null;
+        const replies = [
+            '【苑无忧】\n外貌: tall woman, long black hair\n\n【老陈】\n外貌: man in his sixties, grey hair',
+            '【阿福】\n外貌: man in his thirties, round face, short black hair'
+        ];
+        const bodies = [];
+        w.fetch = async (u, o) => { bodies.push(JSON.parse(o.body)); const content = replies.shift() || 'NONE'; return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) }; };
+        await w.eval('ipeCastScan()');
+        const sys0 = bodies[0].messages[0].content, user0 = bodies[0].messages[1].content;
+        check(sys0.indexOf('世界书') >= 0 && sys0.indexOf('逐条') >= 0, '提取提示点明世界书里的 NPC 要逐条提');
+        check(user0.indexOf('【世界书条目清单】') >= 0 && user0.indexOf('NPC·阿福（邻居）') >= 0 && user0.indexOf('阿福/福哥') >= 0, '请求里附世界书条目清单（标题 + 关键词）');
+        check(bodies.length === 2, '第一次漏了阿福 → 自动补提一次', String(bodies.length));
+        const user1 = bodies[1] && bodies[1].messages[1].content || '';
+        check(user1.indexOf('开面馆的男人') >= 0 && user1.indexOf('苑家的管家') < 0 && user1.indexOf('常年下雨') < 0, '补提只带漏掉的那条，不带已整理的和非人物条目');
+        check(user1.indexOf('苑无忧、老陈') >= 0, '补提时告诉副 AI 已经整理过谁');
+        const v = JSON.parse(st.anchorPresetsJson).find(x => x.name === '🔍 苑无忧').value;
+        check(v.indexOf('【老陈】') > 0 && v.indexOf('【阿福】') > 0, '补提的人合进同一套锚点', v);
+        check(w.document.querySelector('#ipe-status').textContent.indexOf('补提') >= 0, '状态行说补提了谁');
+    }
+    console.log('\n【本卡长期指令】按卡存，放在提取请求最前面（2.28.0）');
+    {
+        const { w, tavern, st, cap, api, run } = await setup();
+        const ta = w.document.querySelector('#ipe-card-order');
+        check(!!ta, '面板有本卡长期指令框');
+        ta.value = '顾寒脖子上的纹身必须提取'; ta.dispatchEvent(new w.Event('input')); ta.dispatchEvent(new w.Event('change'));
+        const m = JSON.parse(st.imgCardOrderJson || '{}');
+        check(Object.keys(m).length === 1 && Object.values(m)[0] === '顾寒脖子上的纹身必须提取', '按这张卡存下');
+        api('Lin Yu smiles.\n<cast>Lin Yu</cast>');
+        await run();
+        const u = cap.body.messages[1].content;
+        check(u.indexOf('【本卡长期指令') === 0 && u.indexOf('顾寒脖子上的纹身必须提取') > 0, '提取请求最前面就是本卡长期指令', u.slice(0, 80));
+        check(u.indexOf('最高优先级') >= 0, '标明最高优先级');
+        check(u.indexOf('长期指令里点名必须写的特征') >= 0, '人物锁约定说明：长期指令点名的特征照写');
+        tavern.characterId = 1;
+        w.eval('ipeImgRefreshLayerUI()');
+        check(ta.value === '', '换到别的卡：框里是那张卡自己的（空）');
+        api('Lin Yu smiles.');
+        await run();
+        check(cap.body.messages[1].content.indexOf('本卡长期指令') < 0, '别的卡的提取不带这条');
+        tavern.characterId = 0;
+        w.eval('ipeImgRefreshLayerUI()');
+        check(ta.value === '顾寒脖子上的纹身必须提取', '换回来又是这张卡的');
+        tavern.characters[0].description = '顾寒，二十七岁，脖子上有纹身。';
+        w.fetch = async (u2, o) => { cap.body = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: '【Lin Yu】\n外貌: young man' } }] }) }; };
+        await w.eval('ipeCastScan()');
+        check(cap.body.messages[1].content.indexOf('顾寒脖子上的纹身必须提取') >= 0, '自动提取人物外貌也带本卡长期指令');
     }
     console.log('\n【开关】人物锁关掉 / 温度留空');
     {
