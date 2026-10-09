@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.0";
+var IPE_VERSION = "2.28.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7267,6 +7267,13 @@ function createPanel() {
         '</div>'+
         '<textarea id="ipe-ledger-prompt" rows="7" placeholder="告诉副 AI：这张卡该挂什么"></textarea>'+
         '<div class="ipe-hint">想记什么、分几层、什么格式，随你写。包裹格式插件自己会加，不用管。</div>'+
+        '<div class="ipe-preview-actions" style="margin-top:6px">'+
+            '<button id="ipe-lrule-export" class="ipe-btn" type="button">\u2B07 导出全部规则</button>'+
+            '<button id="ipe-lrule-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
+            '<button id="ipe-lrule-import" class="ipe-btn" type="button">\u2B06 导入规则包</button>'+
+        '</div>'+
+        '<input type="file" id="ipe-lrule-file" accept=".json,application/json" style="display:none">'+
+        '<div class="ipe-hint">包里装：挂账规则、NSFW 挂账规则、本卡要点，「全部」再带上改过的压缩指令；不含账本、API 与密钥。「只导出当前这套」= 当前选中的规则和要点，发给别人用这个，对方导入后直接选中。导入按名字合并，同名覆盖前会问。</div>'+
         '<details class="ipe-fold"><summary>\uD83D\uDD27 插件到底在背后干了什么</summary><div class="ipe-fold-body">'+
             '<pre id="ipe-ledger-protocol" class="ipe-ledger-age" style="max-height:none"></pre>'+
             '<div id="ipe-ledger-tagwarn" class="ipe-hint" style="line-height:1.6"></div>'+
@@ -7634,6 +7641,9 @@ function createDrawer() {
     h += '<label>预设名称</label><input type="text" id="iped-ledger-prompt-name" class="text_pole" placeholder="例：修仙 / 爱情 / 大世界">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-ledger-prompt-add" class="menu_button" value="新增"><input type="button" id="iped-ledger-prompt-del" class="menu_button" value="删除当前"><input type="button" id="iped-ledger-prompt-reset" class="menu_button" value="恢复默认"></div>';
     h += '<textarea id="iped-ledger-prompt" class="text_pole" rows="6" placeholder="告诉副 AI：这张卡该挂什么"></textarea>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-lrule-export" class="menu_button" value="\u2B07 导出全部规则"><input type="button" id="iped-lrule-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-lrule-import" class="menu_button" value="\u2B06 导入规则包"></div>';
+    h += '<input type="file" id="iped-lrule-file" accept=".json,application/json" style="display:none">';
+    h += '<small style="color:#888">包里装挂账规则 / NSFW 规则 / 本卡要点 / 改过的压缩指令，不含账本、API 与密钥；「只导出当前这套」发给别人，对方导入后直接选中。同名覆盖前会问。</small>';
     h += '<details class="ipe-fold"><summary>\uD83D\uDD27 插件到底在背后干了什么</summary><div class="ipe-fold-body">';
     h += '<pre id="iped-ledger-protocol" class="ipe-ledger-age" style="max-height:none"></pre>';
     h += '<div id="iped-ledger-tagwarn" style="color:#888;font-size:12px;line-height:1.6"></div>';
@@ -7961,6 +7971,129 @@ function ipeImgPackImportText(txt, opts) {
     var parts = [fmt("模板", r1), fmt("公共块", r5), fmt("规则", r2), fmt("系统提示", r3), fmt("锚点", r4), guideChange ? "通用锚点规则已替换" : "", (r4.skipped ? "角色锚点 " + r4.skipped + " 套已跳过" : "")].filter(Boolean);
     ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") : "包是空的或与现有内容完全一致，什么都没变", true);
     return sum;
+}
+
+/* ============================================================
+   📦 挂账规则包（2.28.1）
+   跟生图预设包一个路子：写好的挂账规则导出成 JSON 发给别人，对方一键导入。
+   包里装：挂账规则（Normal 槽的库）、NSFW 挂账规则、本卡要点（有内容的）、改过的压缩指令。
+   不装：账本正文、API 与密钥、开关设置。
+   导入按名字合并：新名字追加，同名覆盖前问一句，绝不清空对方已有的；
+   包里只有一套挂账规则时导入后直接选中，拿到就能用。
+   ============================================================ */
+var IPE_LEDGER_PACK_FMT = "ipe-ledger-pack";
+var IPE_LEDGER_PACK_VER = 1;
+function ipeLedgerPackBuild(scope) {
+    var onlyCur = scope === "current";
+    function pick(spec, skipEmpty) {
+        var list = ipePresetList.apply(null, spec), cur = ipePresetItem.apply(null, spec), out = [];
+        list.forEach(function(it){
+            if (!it) return;
+            if (onlyCur && it.id !== cur.id) return;
+            if (skipEmpty && !String(it.value || "").trim()) return;
+            out.push({ id: it.id, name: it.name, value: String(it.value || "") });
+        });
+        return out;
+    }
+    var withNsfw = !onlyCur || cfg().ledgerModeEnabled === true;   // 只导当前：没开场景模式就不带 NSFW 槽
+    return {
+        _fmt: IPE_LEDGER_PACK_FMT, _v: IPE_LEDGER_PACK_VER,
+        exportedAt: new Date().toISOString(), pluginVersion: IPE_VERSION,
+        scope: onlyCur ? "current" : "all",
+        prompts: pick(LP, false),
+        nsfwPrompts: withNsfw ? pick(LPN, true) : [],
+        notes: pick(LN, true),
+        compressPrompt: onlyCur ? "" : String(cfg().ledgerCompressPrompt || "").trim()   // 全局设置，只随「全部」走；只带改过的，没改就空，导入方保留自己的
+    };
+}
+function ipeLedgerPackExport(scope) {
+    var pack = ipeLedgerPackBuild(scope);
+    var name = "ipe-ledger-rules-" + (pack.scope === "current" ? "current-" : "") + new Date().toISOString().slice(0, 10) + ".json";
+    try {
+        var blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob), a = document.createElement("a");
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 200);
+        ipeToast("已导出 " + name + "：挂账规则 " + pack.prompts.length + (pack.nsfwPrompts.length ? " / NSFW 规则 " + pack.nsfwPrompts.length : "")
+            + (pack.notes.length ? " / 本卡要点 " + pack.notes.length : "") + (pack.compressPrompt ? " / 压缩指令" : "") + "（不含账本、API 与密钥）", true);
+        return true;
+    } catch(e) {
+        ipeToast("导出失败：" + (e && e.message ? e.message : String(e)), false);
+        return false;
+    }
+}
+function ipeLedgerPackNormalize(parsed) {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (parsed._fmt && parsed._fmt !== IPE_LEDGER_PACK_FMT) return null;
+    var has = ["prompts", "nsfwPrompts", "notes", "compressPrompt"].some(function(k){ return k in parsed; });
+    return has ? parsed : null;
+}
+function ipeLedgerPackImportText(txt, opts) {
+    opts = opts || {};
+    var parsed;
+    try { parsed = JSON.parse(String(txt || "")); }
+    catch(e) { ipeToast("导入失败：这不是合法 JSON", false); return null; }
+    var pack = ipeLedgerPackNormalize(parsed);
+    if (!pack) {
+        ipeToast(parsed && parsed._fmt === IPE_IMG_PACK_FMT ? "这是生图预设包，请到生图页「⬆ 导入预设包」导入" : "导入失败：这不是小海螺的挂账规则包", false);
+        return null;
+    }
+    function count(spec, incoming) {
+        var cur = ipePresetList.apply(null, spec), byName = {}, add = 0, rep = 0;
+        cur.forEach(function(c){ byName[String(c.name || "").trim()] = c; });
+        (incoming || []).forEach(function(it){
+            if (!it || typeof it !== "object") return;
+            var nm = String(it.name || "").trim(), v = String(it.value == null ? "" : it.value);
+            if (!nm && !v) return;
+            var hit = nm && byName[nm];
+            if (hit) { if (String(hit.value || "") !== v) rep++; } else add++;
+        });
+        return { added: add, replaced: rep };
+    }
+    var pv = { prompts: count(LP, pack.prompts), nsfwPrompts: count(LPN, pack.nsfwPrompts), notes: count(LN, pack.notes) };
+    var cpIn = String(pack.compressPrompt || "").trim();
+    var cpChange = !!cpIn && cpIn !== String(cfg().ledgerCompressPrompt || "").trim();
+    var totalRep = pv.prompts.replaced + pv.nsfwPrompts.replaced + pv.notes.replaced;
+    var totalAdd = pv.prompts.added + pv.nsfwPrompts.added + pv.notes.added;
+    if (!opts.force && (totalRep > 0 || cpChange)) {
+        var msg = "这个包会覆盖你 " + totalRep + " 个同名预设"
+            + (pv.prompts.replaced ? "（挂账规则 " + pv.prompts.replaced + "）" : "")
+            + (pv.nsfwPrompts.replaced ? "（NSFW 规则 " + pv.nsfwPrompts.replaced + "）" : "")
+            + (pv.notes.replaced ? "（本卡要点 " + pv.notes.replaced + "）" : "")
+            + (cpChange ? "，并替换压缩指令" : "")
+            + "；另新增 " + totalAdd + " 个。\n继续吗？（取消 = 什么都不动）";
+        var okc = true;
+        try { var rw = ipeRootWindow(); if (rw && typeof rw.confirm === "function") okc = rw.confirm(msg); } catch(e) {}
+        if (!okc) { ipeToast("已取消导入，什么都没动", false); return null; }
+    }
+    function merge(spec, incoming, prefix) {
+        var list = ipePresetList.apply(null, spec);
+        var r = ipeImgPackMergeList(list, incoming, prefix);
+        save(spec[0], JSON.stringify(list));
+        return { r: r, list: list };
+    }
+    var m1 = merge(LP, pack.prompts, "lp"), m2 = merge(LPN, pack.nsfwPrompts, "lpn"), m3 = merge(LN, pack.notes, "ln");
+    if (cpChange) save("ledgerCompressPrompt", cpIn);
+    /* 包里只有一套挂账规则：别人发来就是让你用这套，直接选中 */
+    var picked = "";
+    if (Array.isArray(pack.prompts) && pack.prompts.length === 1) {
+        var nm = String(pack.prompts[0].name || "").trim();
+        var hit = m1.list.find(function(x){ return String(x.name || "").trim() === nm; });
+        if (hit) { save(LP[1], hit.id); picked = hit.name; }
+    }
+    if (Array.isArray(pack.notes) && pack.notes.length === 1 && pack.scope === "current") {
+        var nn = String(pack.notes[0].name || "").trim();
+        var hn = m3.list.find(function(x){ return String(x.name || "").trim() === nn; });
+        if (hn) save(LN[1], hn.id);
+    }
+    try { ipeSaveNow(); } catch(e) {}
+    try { ipeLedgerRefreshBotEditors(); } catch(e) {}
+    try { ["ipe-ledger-compress-prompt", "iped-ledger-compress-prompt"].forEach(function(id){ var el = q("#" + id); if (el) el.value = String(cfg().ledgerCompressPrompt || ""); }); } catch(e) {}
+    function fmt(label, r) { return (r.added || r.replaced) ? label + " +" + r.added + "/覆盖" + r.replaced : ""; }
+    var parts = [fmt("挂账规则", m1.r), fmt("NSFW 规则", m2.r), fmt("本卡要点", m3.r), cpChange ? "压缩指令已替换" : ""].filter(Boolean);
+    ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") + (picked ? "；已选中「" + picked + "」" : "") : "包是空的或与现有内容完全一致，什么都没变", true);
+    return { prompts: m1.r, nsfwPrompts: m2.r, notes: m3.r, compress: cpChange, picked: picked };
 }
 
 /* ============================================================
@@ -8657,6 +8790,24 @@ function bindAll() {
                 var f = fi.files && fi.files[0]; if (!f) return;
                 var r = new FileReader();
                 r.onload  = function(){ ipeImgPackImportText(r.result); };
+                r.onerror = function(){ ipeToast("读文件失败", false); };
+                r.readAsText(f);
+            });
+        }
+    });
+    // 2.28.1 挂账规则包
+    [["ipe-lrule-export","ipe-lrule-export-cur","ipe-lrule-import","ipe-lrule-file"],
+     ["iped-lrule-export","iped-lrule-export-cur","iped-lrule-import","iped-lrule-file"]].forEach(function(ids){
+        var bA = q("#" + ids[0]), bC = q("#" + ids[1]), bI = q("#" + ids[2]), fi = q("#" + ids[3]);
+        if (bA && !bA.dataset.ipeBound) { bA.dataset.ipeBound = "1"; bA.addEventListener("click", function(){ ipeLedgerPackExport("all"); }); }
+        if (bC && !bC.dataset.ipeBound) { bC.dataset.ipeBound = "1"; bC.addEventListener("click", function(){ ipeLedgerPackExport("current"); }); }
+        if (bI && fi && !bI.dataset.ipeBound) { bI.dataset.ipeBound = "1"; bI.addEventListener("click", function(){ try { fi.value = ""; fi.click(); } catch(e){} }); }
+        if (fi && !fi.dataset.ipeBound) {
+            fi.dataset.ipeBound = "1";
+            fi.addEventListener("change", function(){
+                var f = fi.files && fi.files[0]; if (!f) return;
+                var r = new FileReader();
+                r.onload  = function(){ ipeLedgerPackImportText(r.result); };
                 r.onerror = function(){ ipeToast("读文件失败", false); };
                 r.readAsText(f);
             });

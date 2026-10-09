@@ -2133,6 +2133,56 @@ await (async () => {
     delete tavern.saveChatDebounced;
 })();
 
+console.log("\n【58】 挂账规则包导入导出（2.28.1）：挂账规则 / NSFW 规则 / 本卡要点 按名字合并，分享给别人用");
+await (async () => {
+    const a = boot(10);
+    const sa = a.tavern.extensionSettings[a.F("EXT_NAME")];
+    sa.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp_1", name: "飞地·大事件挂账", value: "默认规则" }, { id: "lp_x", name: "情感脉络与剧情奔涌", value: "# 情感脉络挂账 v1.1\n伤病三轮钟" }]);
+    sa.activeLedgerPrompt = "lp_x";
+    sa.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "本卡要点", value: "" }, { id: "ln_x", name: "707号室", value: "外伤两日即愈" }]);
+    sa.activeLedgerNote = "ln_x";
+    sa.ledgerPromptNsfwPresetsJson = JSON.stringify([{ id: "lpn_1", name: "NSFW 挂账规则", value: "nsfw 规则文字" }]);
+    sa.ledgerCompressPrompt = "我的压缩指令";
+    const all = a.w.eval('ipeLedgerPackBuild("all")');
+    eq(all._fmt, "ipe-ledger-pack", "包格式标记");
+    eq(all.prompts.length, 2, "全部：挂账规则两套都带");
+    eq(all.notes.length, 1, "本卡要点只带有内容的");
+    eq(all.nsfwPrompts.length, 1, "NSFW 规则带上");
+    eq(all.compressPrompt, "我的压缩指令", "自定义压缩指令带上");
+    ok(!JSON.stringify(all).includes("apiKey") && !JSON.stringify(all).includes("ledgerText"), "不带 API、不带账本正文");
+    const cur = a.w.eval('ipeLedgerPackBuild("current")');
+    ok(cur.prompts.length === 1 && cur.prompts[0].name === "情感脉络与剧情奔涌", "只导出当前：只有当前这套规则");
+    ok(cur.notes.length === 1 && cur.notes[0].name === "707号室", "只导出当前：当前本卡要点");
+    const d = a.w.document;
+    ok(!!d.querySelector("#ipe-lrule-export") && !!d.querySelector("#ipe-lrule-export-cur") && !!d.querySelector("#ipe-lrule-import") && !!d.querySelector("#ipe-lrule-file"), "挂账规则区有导出 / 只导出当前 / 导入按钮");
+    ok(!!d.querySelector("#ipe-lrule-export").closest("details") && d.querySelector("#ipe-lrule-export").closest("details") === d.querySelector("#ipe-ledger-prompt").closest("details"), "按钮在挂账规则区里");
+    eq(cur.compressPrompt, "", "只导出当前：不带全局的压缩指令");
+
+    // 朋友那边：导入只含一套规则的包 → 新增并选中
+    const b = boot(10);
+    const sb = b.tavern.extensionSettings[b.F("EXT_NAME")];
+    let asked = 0; b.w.confirm = () => { asked++; return true; };
+    const r1 = b.w.eval('ipeLedgerPackImportText(' + JSON.stringify(JSON.stringify(cur)) + ')');
+    ok(r1 && r1.prompts.added === 1, "导入：新规则追加");
+    const lb = JSON.parse(sb.ledgerPromptPresetsJson);
+    const got = lb.find(x => x.name === "情感脉络与剧情奔涌");
+    ok(got && got.value.includes("伤病三轮钟"), "导入的规则正文完整");
+    eq(sb.activeLedgerPrompt, got && got.id, "包里只有一套规则：导入后直接选中");
+    ok(b.w.document.querySelector("#ipe-ledger-prompt").value.includes("伤病三轮钟"), "编辑框换成导入的规则");
+    eq(asked, 0, "没有同名覆盖就不问");
+    // 再导一次改过的同名规则 → 问一句再覆盖
+    const cur2 = JSON.parse(JSON.stringify(cur)); cur2.prompts[0].value = "# 情感脉络挂账 v1.2";
+    const r2 = b.w.eval('ipeLedgerPackImportText(' + JSON.stringify(JSON.stringify(cur2)) + ')');
+    ok(asked === 1 && r2 && r2.prompts.replaced === 1, "同名规则覆盖前问一句");
+    eq(JSON.parse(sb.ledgerPromptPresetsJson).filter(x => x.name === "情感脉络与剧情奔涌").length, 1, "同名不重复堆");
+    b.w.confirm = () => false;
+    const cur3 = JSON.parse(JSON.stringify(cur)); cur3.prompts[0].value = "v9";
+    eq(b.w.eval('ipeLedgerPackImportText(' + JSON.stringify(JSON.stringify(cur3)) + ')'), null, "取消就什么都不动");
+    ok(JSON.parse(sb.ledgerPromptPresetsJson).find(x => x.name === "情感脉络与剧情奔涌").value === "# 情感脉络挂账 v1.2", "取消后规则没变");
+    eq(b.w.eval('ipeLedgerPackImportText(' + JSON.stringify(JSON.stringify({ _fmt: "ipe-image-pack", templates: [] })) + ')'), null, "生图预设包导不进挂账规则");
+    eq(b.w.eval('ipeLedgerPackImportText("not json")'), null, "坏 JSON 不崩");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
