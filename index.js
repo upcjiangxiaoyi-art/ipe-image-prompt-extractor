@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.1";
+var IPE_VERSION = "2.28.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -116,6 +116,7 @@ const DEFAULTS = {
     ledgerMaxTokens: 0,            // 输出上限；0 = 不发。思考模型发 max_completion_tokens，普通模型发 max_tokens
     imgLayered: false,             // 2.11.0 分层生图：一次请求四层输出（镜头 / 环境 / 人物 / 动作）
     imgLockCamera: false, imgLockEnv: false, imgLockMood: false, imgLockChars: false, imgLockPose: false,
+    imgTplGroupFilter: "",         // 2.28.2 画风分组筛选："" = 全部，"__none__" = 未分组，其余 = 组名
     imgCardOrderJson: "",          // 2.28.0 本卡长期指令：{ 卡键: 文字 }，卡键同「锚点锁到卡」（头像文件名 / 群 id）
     imgCastLock: true,             // 2.20.0 人物锁：锚点里写成人物段的，长相由插件原样贴入
     imgTemperature: 0.2            // 2.20.0 提取温度（原先写死 0.4）；空 = 不发，用模型默认
@@ -3851,10 +3852,10 @@ function ipeGetBaseTemplates() {
         var id = String(item.id || ("tpl_" + (j + 1)));
         var name = String(item.name || ("模板" + (j + 1)));
         var value = String(item.value || "");
-        out.push({ id: id, name: name, value: value, common: String(item.common || "") });
+        out.push({ id: id, name: name, value: value, common: String(item.common || ""), group: String(item.group || "") });
     }
 
-    if (out.length === 0) out.push({ id: "tpl_1", name: "预设1", value: "", common: "" });
+    if (out.length === 0) out.push({ id: "tpl_1", name: "预设1", value: "", common: "", group: "" });
     return out;
 }
 
@@ -3914,7 +3915,8 @@ function ipeSetTemplateName(val) {
 function ipeAddTemplatePreset() {
     var list = ipeGetBaseTemplates();
     var id = ipeMakeId("tpl");
-    list.push({ id: id, name: "新模板" + (list.length + 1), value: IPE_DEFAULT_IMAGE_TEMPLATE });
+    var gf = ipeTplGroupFilter();   // 2.28.2 正筛着某个组：新模板直接归进去
+    list.push({ id: id, name: "新模板" + (list.length + 1), value: IPE_DEFAULT_IMAGE_TEMPLATE, group: (gf && gf !== IPE_TPL_GROUP_NONE) ? gf : "" });
     ipeSaveBaseTemplates(list);
     saveCritical("activeBaseTemplate", id);
     ipeRefreshSystemPromptEditors();
@@ -4636,16 +4638,127 @@ function ipeFillSelect(id, list, active) {
    清空的瞬间存的是兜底名「模板33」，被写回去，iOS 输入法再把「你好」接在后面 = 「模板33你好」；
    写 value 也会打断输入法合成。挂账那边的 ipeLedgerRefreshBotEditors 早有这道守卫，生图这边补齐。
    兜底名只在 change（离开输入框）时写回。 */
+/* ============================================================
+   🗂 画风分组（2.28.2）
+   画风一多（一百五十多个）下拉翻不到。每个模板一个「所属分组」：
+     · 手动指定的优先；没指定的，名字带「古.」「现.」这种短前缀就自动归进「古」「现」
+     · 指定成「未分组」= 存 __none__，带前缀也不再自动归组
+   画风模板区顶上一个分组下拉筛选（记住选了哪组）；「全部」时模板下拉按组分段（optgroup）。
+   筛选只管显示，不会偷偷换掉当前画风：当前那套不在这组，就在组列表顶上标「当前」。
+   ============================================================ */
+var IPE_TPL_GROUP_NONE = "__none__";
+var IPE_TPL_PREFIX_RE = /^\s*([^\s.．·・。]{1,4})\s*[.．·・。]\s*\S/;
+function ipeTplGroupOf(t) {
+    var g = String((t && t.group) || "").trim();
+    if (g === IPE_TPL_GROUP_NONE) return "";
+    if (g) return g;
+    var m = String((t && t.name) || "").match(IPE_TPL_PREFIX_RE);
+    return (m && !/\d/.test(m[1])) ? m[1] : "";   // 「2.5D 厚涂」「v1.2」这种是版本号不是组
+}
+/* [{ name, n }]，按拼音排；未分组不在里面 */
+function ipeTplGroups(list) {
+    var cnt = {}, names = [];
+    (list || ipeGetBaseTemplates()).forEach(function(t){
+        var g = ipeTplGroupOf(t); if (!g) return;
+        if (!cnt[g]) { cnt[g] = 0; names.push(g); }
+        cnt[g]++;
+    });
+    return ipeSortByName(names.map(function(g){ return { id: g, name: g, n: cnt[g] }; }));
+}
+function ipeTplGroupFilter() {
+    var f = String(cfg().imgTplGroupFilter || "");
+    if (!f) return "";
+    var list = ipeGetBaseTemplates();
+    if (f === IPE_TPL_GROUP_NONE) return list.some(function(t){ return !ipeTplGroupOf(t); }) ? f : "";
+    return list.some(function(t){ return ipeTplGroupOf(t) === f; }) ? f : "";   // 组没了（改名 / 删光）就回到全部
+}
+/* 画风下拉：全部 = 有分组时按组分段；某一组 = 只列这组，当前那套不在就顶上标「当前」 */
+function ipeTplFillSelect(id, list, active, filter) {
+    var el = q("#" + id); if (!el) return;
+    var shown = ipeSortByName(list), html = "";
+    function opt(t, label) {
+        return '<option value="' + esc(t.id) + '"' + (String(t.id) === String(active) ? " selected" : "") + '>' + esc(label || t.name) + '</option>';
+    }
+    if (filter) {
+        var inG = shown.filter(function(t){ var g = ipeTplGroupOf(t); return filter === IPE_TPL_GROUP_NONE ? !g : g === filter; });
+        var cur = list.find(function(t){ return String(t.id) === String(active); });
+        if (cur && !inG.some(function(t){ return t.id === cur.id; })) html += opt(cur, "（当前）" + cur.name);
+        inG.forEach(function(t){ html += opt(t); });
+    } else {
+        var groups = ipeTplGroups(list);
+        if (!groups.length) shown.forEach(function(t){ html += opt(t); });
+        else {
+            groups.forEach(function(g){
+                html += '<optgroup label="' + esc(g.name) + '">';
+                shown.forEach(function(t){ if (ipeTplGroupOf(t) === g.name) html += opt(t); });
+                html += '</optgroup>';
+            });
+            var rest = shown.filter(function(t){ return !ipeTplGroupOf(t); });
+            if (rest.length) { html += '<optgroup label="未分组">'; rest.forEach(function(t){ html += opt(t); }); html += '</optgroup>'; }
+        }
+    }
+    el.innerHTML = html;
+    el.value = String(active);
+}
+function ipeTplRefreshGroupUI(list, item) {
+    var groups = ipeTplGroups(list), f = ipeTplGroupFilter();
+    var none = list.filter(function(t){ return !ipeTplGroupOf(t); }).length;
+    var fh = '<option value="">全部（' + list.length + '）</option>';
+    groups.forEach(function(g){ fh += '<option value="' + esc(g.name) + '">' + esc(g.name) + '（' + g.n + '）</option>'; });
+    if (groups.length && none) fh += '<option value="' + IPE_TPL_GROUP_NONE + '">未分组（' + none + '）</option>';
+    ["ipe-template-group-filter", "iped-template-group-filter"].forEach(function(id){
+        var el = q("#" + id); if (!el) return; el.innerHTML = fh; el.value = f;
+    });
+    var g = ipeTplGroupOf(item);
+    var gh = '<option value="">（未分组）</option>';
+    groups.forEach(function(x){ gh += '<option value="' + esc(x.name) + '">' + esc(x.name) + '</option>'; });
+    gh += '<option value="__new__">＋ 新建分组…</option>';
+    if (g) gh += '<option value="__rename__">✎ 给「' + esc(g) + '」这组改名…</option>';
+    ["ipe-template-group", "iped-template-group"].forEach(function(id){
+        var el = q("#" + id); if (!el) return; el.innerHTML = gh; el.value = g;
+    });
+}
+function ipeTplAsk(msg, def) {
+    try { var rw = ipeRootWindow(); if (rw && typeof rw.prompt === "function") return rw.prompt(msg, def || ""); } catch(e) {}
+    return null;
+}
+/* 所属分组下拉的选择：组名 / ""（未分组）/ __new__ / __rename__ */
+function ipeTplSetGroupChoice(v) {
+    var list = ipeGetBaseTemplates(), item = ipeGetActiveTemplateItem(), cur = ipeTplGroupOf(item);
+    var keepFilter = !!ipeTplGroupFilter();
+    if (v === "__rename__") {
+        var nn = String(ipeTplAsk("给「" + cur + "」这组改个名字：", cur) || "").trim();
+        if (!nn || nn === cur) { ipeRefreshTemplateEditors(); return; }
+        list.forEach(function(t){ if (ipeTplGroupOf(t) === cur) t.group = nn; });
+        ipeSaveBaseTemplates(list);
+        if (String(cfg().imgTplGroupFilter || "") === cur) saveCritical("imgTplGroupFilter", nn);
+        setStatus("分组「" + cur + "」改名为「" + nn + "」", "#6ec577");
+    } else {
+        var ng = v;
+        if (v === "__new__") {
+            ng = String(ipeTplAsk("新分组的名字（例：现代 / 古风 / 韩漫）：", "") || "").trim();
+            if (!ng || ng === "__new__" || ng === "__rename__" || ng === IPE_TPL_GROUP_NONE) { ipeRefreshTemplateEditors(); return; }
+        }
+        list.forEach(function(t){ if (t.id === item.id) t.group = ng ? ng : IPE_TPL_GROUP_NONE; });
+        ipeSaveBaseTemplates(list);
+        if (keepFilter) saveCritical("imgTplGroupFilter", ng ? ng : IPE_TPL_GROUP_NONE);   // 正筛着某组：跟着这个画风走，免得它从列表里消失
+        setStatus("「" + item.name + "」" + (ng ? "归进「" + ng + "」" : "设为未分组"), "#6ec577");
+    }
+    ipeSaveNow();
+    ipeRefreshTemplateEditors();
+}
+
 function ipeRefreshTemplateEditors() {
     var list = ipeGetBaseTemplates();
     var active = ipeGetActiveTemplateId();
     var item = ipeGetActiveTemplateItem();
 
-    var shown = ipeSortByName(list);
-    ipeFillSelect("ipe-template-slot", shown, active);
-    ipeFillSelect("iped-template-slot", shown, active);
-    ipeFillSelect("ipe-reinject-tpl", shown, active);     // 预览区的快捷下拉，与模板预设同一份
-    ipeFillSelect("iped-reinject-tpl", shown, active);
+    var filter = ipeTplGroupFilter();
+    ipeTplFillSelect("ipe-template-slot", list, active, filter);
+    ipeTplFillSelect("iped-template-slot", list, active, filter);
+    ipeTplFillSelect("ipe-reinject-tpl", list, active, "");     // 预览区的快捷下拉，与模板预设同一份；不筛，按组分段
+    ipeTplFillSelect("iped-reinject-tpl", list, active, "");
+    try { ipeTplRefreshGroupUI(list, item); } catch(eG) {}
 
     ["ipe-template-name","iped-template-name"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.name || "";
@@ -7028,14 +7141,17 @@ function createPanel() {
         '<div class="ipe-hint">两套固定预设：情感 / 剧情。当前选中的系统提示会用于提取请求</div>');
 
     h += secHTML("base-template","画风模板", true,   // 2.26.2 界面上改叫「画风模板」（原「基础模板」，大家说找不到）；存储键 baseTemplatesJson、控件 id 不变
+        '<label>分组<select id="ipe-template-group-filter"></select></label>'+
         '<label>模板预设<select id="ipe-template-slot"></select></label>'+
         '<label>模板名称<input type="text" id="ipe-template-name" value="" placeholder="例如：乙游CG"></label>'+
+        '<label>所属分组<select id="ipe-template-group"></select></label>'+
         '<label>挂公共块<select id="ipe-template-common"></select></label>'+
         '<div class="ipe-preview-actions" style="margin-top:2px">'+
             '<button id="ipe-template-add" class="ipe-btn" type="button">新增模板</button>'+
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
         '<textarea id="ipe-base-template" rows="6" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>'+
+        '<div class="ipe-hint">画风多了用「分组」筛：名字带「古.」这种短前缀的自动归组，也可以在「所属分组」里手动指定、新建、改名；「全部」时下拉按组分段。</div>'+
         '<div class="ipe-hint">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记描述文本的插入位置；分层模式可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住，挂账时按标签对剥干净。两种都写也行：哪一行的占位符全空，那一整行连标签一起不输出，分层与整段共用一张模板。挂了公共块时，写 {Common} 就放在那里；不写就自动插到 &lt;/draw&gt; 前一行</div>'+
         '<div class="ipe-preview-actions" style="margin-top:8px">'+
             '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
@@ -7494,8 +7610,10 @@ function createDrawer() {
     h += '<textarea id="iped-system-prompt" class="text_pole" rows="4" placeholder="系统提示词"></textarea>';
     h += '<small style="color:#888">两套固定预设：情感 / 剧情</small>';
     h += '<hr><small><b>画风模板</b></small>';
+    h += '<label>分组</label><select id="iped-template-group-filter" class="text_pole"></select>';
     h += '<label>模板预设</label><select id="iped-template-slot" class="text_pole"></select>';
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
+    h += '<label>所属分组</label><select id="iped-template-group" class="text_pole"></select>';
     h += '<label>挂公共块</label><select id="iped-template-common" class="text_pole"></select>';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
     h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>';
@@ -7773,6 +7891,7 @@ function ipeImgPackBuild(scope) {
     tplOut.forEach(function(t){
         var blk = ipeGetCommonBlock((tplSrc[t.id] || {}).common, blocks);
         t.common = blk ? blk.id : ""; t.commonName = blk ? blk.name : "";
+        t.group = String((tplSrc[t.id] || {}).group || "");   // 2.28.2 分组跟着走
         if (blk) used[blk.id] = true;
     });
     var commonsOut = [];
@@ -7847,6 +7966,15 @@ function ipeImgPackMergeList(cur, incoming, prefix, opts) {
 
 /* 包里模板的 common 字段 → 本地公共块 id。dry = 预演：包里新增的公共块还没落地，用 "new:名字" 占位。
    旧包（没有 commons）：模板一律按 legacyCommon 挂，默认空 = 不挂；预演不算它为「覆盖」。 */
+/* 2.28.2 包里模板带 group 就一起认（旧包没有 group 字段，不动本地分组） */
+function ipeImgPackTplOpts(pack, dry, legacyCommon) {
+    var base = ipeImgPackTplCommonOpts(pack, dry, legacyCommon);
+    function hasG(it) { return it && Object.prototype.hasOwnProperty.call(it, "group"); }
+    return {
+        differs: function(hit, it){ return (base.differs ? base.differs(hit, it) : false) || (hasG(it) && String(hit.group || "") !== String(it.group || "")); },
+        apply: function(target, it){ if (base.apply) base.apply(target, it); if (hasG(it)) target.group = String(it.group || ""); }
+    };
+}
 function ipeImgPackTplCommonOpts(pack, dry, legacyCommon) {
     var legacy = !Array.isArray(pack.commons);
     if (legacy) return { apply: function(local){ local.common = String(legacyCommon || ""); } };
@@ -7885,7 +8013,7 @@ function ipeImgPackPreview(pack) {
         return { added: add, replaced: rep };
     }
     return {
-        templates: count(ipeGetBaseTemplates(), pack.templates, ipeImgPackTplCommonOpts(pack, true)),
+        templates: count(ipeGetBaseTemplates(), pack.templates, ipeImgPackTplOpts(pack, true)),
         commons: count(ipeGetCommonBlocks(), pack.commons),
         rules: count(ipeGetRulePresets(), pack.rules),
         systemPrompts: count(ipeGetSystemPromptPresets(), pack.systemPrompts, { matchIdFirst: true, fixedSlots: true }),
@@ -7954,7 +8082,7 @@ function ipeImgPackImportText(txt, opts) {
     var cmn = ipeGetCommonBlocks();
     var r5 = ipeImgPackMergeList(cmn, pack.commons, "common");
     ipeSaveCommonBlocks(cmn);                 // 先落公共块，模板的 common 才对得上本地 id
-    var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl", ipeImgPackTplCommonOpts(pack, false, legacyCommon));
+    var r1 = ipeImgPackMergeList(tpl, pack.templates, "tpl", ipeImgPackTplOpts(pack, false, legacyCommon));
     var r2 = ipeImgPackMergeList(rul, pack.rules, "rule");
     var r3 = ipeImgPackMergeList(sys, pack.systemPrompts, "sys", { matchIdFirst: true, fixedSlots: true });
     var r4 = wantAnchors ? ipeImgPackMergeList(anc, pack.anchors, "anchor") : { added: 0, replaced: 0, skipped: anchorsN };
@@ -8369,6 +8497,19 @@ function bindAll() {
             saveCritical("activeBaseTemplate", el.value);
             ipeRefreshTemplateEditors();
         });
+    });
+
+    // 2.28.2 画风分组
+    ["ipe-template-group-filter","iped-template-group-filter"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("change", function(){
+            saveCritical("imgTplGroupFilter", el.value);
+            ipeRefreshTemplateEditors();
+        });
+    });
+    ["ipe-template-group","iped-template-group"].forEach(function(id){
+        var el=q("#"+id); if(!el) return;
+        el.addEventListener("change", function(){ ipeTplSetGroupChoice(el.value); });
     });
 
     ["ipe-template-name","iped-template-name"].forEach(function(id){

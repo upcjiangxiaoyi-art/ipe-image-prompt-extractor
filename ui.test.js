@@ -239,6 +239,59 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const ancNames = [...d.querySelector('#ipe-anchor-slot').options].map(o => o.textContent);
         check(ancNames.indexOf('阿宝') < ancNames.indexOf('张三'), '锚点下拉同样按拼音排（' + ancNames.join(' ') + '）');
 
+        // 2.28.2 画风分组：名字前缀「古.」自动归组，也能手动指定；分组下拉筛选，「全部」按组分段
+        w.eval('window.ui.ipeImgPackBuild = ipeImgPackBuild; window.ui.ipeImgPackImportText = ipeImgPackImportText; window.ui.ipeTplGroupOf = ipeTplGroupOf;');
+        settings.baseTemplatesJson = JSON.stringify([
+            { id: 'g1', name: '古.烟波唯美', value: 'x' }, { id: 'g2', name: '古.京城繁华', value: 'x' }, { id: 'g3', name: '古. 螺钿漆画', value: 'x' },
+            { id: 'm1', name: '浮光都市', value: 'x', group: '现代' }, { id: 'm2', name: '霓虹九龙', value: 'x', group: '现代' },
+            { id: 'u1', name: '二次动漫', value: 'x' }]);
+        settings.activeBaseTemplate = 'm1'; settings.imgTplGroupFilter = '';
+        w.ui.ipeRefreshTemplateEditors();
+        const gf = d.querySelector('#ipe-template-group-filter'), gfd = d.querySelector('#iped-template-group-filter');
+        const slot = d.querySelector('#ipe-template-slot');
+        const optTexts = sel => [...sel.options].map(o => o.textContent);
+        check(gf && gfd, '浮窗、抽屉都有分组筛选');
+        check(gf.compareDocumentPosition(slot) & w.Node.DOCUMENT_POSITION_FOLLOWING, '分组筛选在模板下拉前面');
+        check(JSON.stringify(optTexts(gf)) === JSON.stringify(['全部（6）', '古（3）', '现代（2）', '未分组（1）']), '分组下拉：全部 + 各组带数量，未分组放最后（' + optTexts(gf).join(' ') + '）');
+        check(w.ui.ipeTplGroupOf({ name: '古. 螺钿漆画', group: '' }) === '古', '「古. 螺钿漆画」带空格也归「古」');
+        check(w.ui.ipeTplGroupOf({ name: '2.5D 厚涂', group: '' }) === '' && w.ui.ipeTplGroupOf({ name: '浮光都市', group: '' }) === '', '「2.5D 厚涂」不当成「2」组；没前缀的不归组');
+        const ogs = [...slot.querySelectorAll('optgroup')].map(g => g.label);
+        check(JSON.stringify(ogs) === JSON.stringify(['古', '现代', '未分组']), '「全部」时模板下拉按组分段（' + ogs.join(' ') + '）');
+        check(slot.value === 'm1', '分段后当前选中不变');
+        check(d.querySelector('#ipe-reinject-tpl').querySelectorAll('optgroup').length === 3, '换画风重注入的快捷下拉也按组分段');
+        gf.value = '古'; gf.dispatchEvent(new w.Event('change'));
+        check(settings.imgTplGroupFilter === '古' && gfd.value === '古', '选「古」：记住筛选，抽屉同步');
+        const names = optTexts(slot);
+        check(names.length === 4 && names[0].includes('当前') && names[0].includes('浮光都市') && names.slice(1).every(n => n.startsWith('古.')), '只列古风三个；当前那套不在这组时顶上标「当前」（' + names.join(' / ') + '）');
+        check(settings.activeBaseTemplate === 'm1', '筛选不会偷偷换掉当前画风');
+        slot.value = 'g2'; slot.dispatchEvent(new w.Event('change'));
+        check(settings.activeBaseTemplate === 'g2' && optTexts(slot).length === 3, '在组里选一个：切过去，「当前」那行消失');
+        const gs = d.querySelector('#ipe-template-group');
+        check(gs && gs.value === '古' && optTexts(gs).some(x => x.includes('新建分组')) && optTexts(gs).some(x => x.includes('改名')), '所属分组下拉：显示「古」，带新建分组、给这组改名');
+        w.prompt = () => '古风';
+        gs.value = '__rename__'; gs.dispatchEvent(new w.Event('change'));
+        const tl = () => JSON.parse(settings.baseTemplatesJson);
+        check(tl().filter(x => x.group === '古风').length === 3 && settings.imgTplGroupFilter === '古风', '「古」改名「古风」：三个都换组，筛选跟着走');
+        check(optTexts(gf).includes('古风（3）') && !optTexts(gf).some(x => x.startsWith('古（')), '分组下拉换成「古风」');
+        w.prompt = () => '韩漫';
+        gs.value = '__new__'; gs.dispatchEvent(new w.Event('change'));
+        check(tl().find(x => x.id === 'g2').group === '韩漫' && settings.imgTplGroupFilter === '韩漫' && slot.value === 'g2', '新建分组「韩漫」：当前画风移过去，筛选跟过去');
+        gs.value = ''; gs.dispatchEvent(new w.Event('change'));
+        check(tl().find(x => x.id === 'g2').group === '__none__' && w.ui.ipeTplGroupOf(tl().find(x => x.id === 'g2')) === '', '设成未分组：带「古.」前缀也不再自动归组');
+        check(settings.imgTplGroupFilter === '__none__', '筛选跟到「未分组」');
+        gf.value = '现代'; gf.dispatchEvent(new w.Event('change'));
+        d.querySelector('#ipe-template-add').click();
+        const added = tl()[tl().length - 1];
+        check(added.group === '现代' && settings.activeBaseTemplate === added.id, '筛着「现代」时新增模板：直接归进现代');
+        // 预设包带分组
+        const pack = w.ui.ipeImgPackBuild('all');
+        check(pack.templates.find(x => x.id === 'm2').group === '现代', '导出预设包带上分组');
+        const pack2 = JSON.parse(JSON.stringify(pack)); pack2.templates.find(x => x.id === 'm2').group = '港风';
+        w.confirm = () => true;
+        w.ui.ipeImgPackImportText(JSON.stringify(pack2));
+        check(tl().find(x => x.id === 'm2').group === '港风', '导入预设包：分组跟着换');
+        gf.value = ''; gf.dispatchEvent(new w.Event('change'));
+
         // 2.27.7 正文标签：浮窗、抽屉的生图页和挂账页各一格，是同一个设置；改一格四格跟着变，清空也存得住
         w.eval('window.ui.ipeBodyTagBindUI = ipeBodyTagBindUI;');
         w.ui.ipeBodyTagBindUI();
