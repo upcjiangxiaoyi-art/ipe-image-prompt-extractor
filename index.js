@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.2";
+var IPE_VERSION = "2.28.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -780,11 +780,17 @@ function ipeLedgerCommit(text, atFloor) {
     ipeLedgerReconcile(Math.max(nowFloor, ipeFloorNo()), { silent: true });  // 落账前先对账，底下全是活楼
     var st = ipeLedgerRead();
     var old = String(st.current || "");
+    // 2.27.11 历史里比现任还新的，只可能是被换掉的那份（2.27.11 以前换回过的老聊天没打标）：翻楼前先补上「换回前」，
+    // 不然现任一往前走，它的楼号就比现任旧了，混进账本历史、重 roll 时还会被顶回来
+    if (old.trim() && st.lastFloor >= 0) ipeLedgerAbandonAfter(st, st.lastFloor);
     if (old.trim() && st.lastFloor >= 0 && st.lastFloor !== nowFloor) {
         // lastFloor < nowFloor：正常翻楼，旧账入历史。
         // lastFloor > nowFloor：预览开着时自动挂账已经落了更新的一楼，现在采用的是旧楼稿——
         // 新账不能就这么被静默覆盖掉，也进历史，后悔药里找得回。
-        st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
+        // 2.27.11 那份是按旧底稿记的，跟「后悔药换回更早那版」一样标「换回前」：不喂副 AI，重 roll / 删楼也不顶回来当现任
+        var back = { floor: st.lastFloor, ts: Date.now(), text: old };
+        if (st.lastFloor > nowFloor) back.tag = ipeLedgerAbandonAfter(st, nowFloor);
+        st.versions.unshift(back);
     }
     st.current   = String(text || "");
     st.lastFloor = nowFloor;
@@ -852,15 +858,35 @@ function ipeLedgerImportText(txt) {
     return true;
 }
 
+/* 2.27.11 换回更早那版 = 那之后记的都不作数了（多半是哪一楼挂歪了，后面几份照着歪的往下记）。
+   比它新的几份标「换回前」：后悔药里留着、能再换回去，但不再喂给副 AI 当账本历史，
+   之后重 roll、删楼退账时也不会被当成「幸存的最新一份」顶回来当现任。
+   以前它们原样留在历史里：换回第 8 楼再重 roll，副 AI 看到的账本历史里第 10 楼那份歪账还排在第 8 楼前面；
+   新这一楼挂完再 roll 一次，现任直接退回第 10 楼的歪账。 */
+var IPE_LEDGER_ABANDON_TAG = "换回前";
+function ipeLedgerAbandonAfter(st, floor) {
+    var n = 0;
+    if (floor >= 0) st.versions.forEach(function(x){
+        if (x.floor > floor && x.tag !== IPE_LEDGER_ABANDON_TAG) { x.tag = IPE_LEDGER_ABANDON_TAG; n++; }
+    });
+    ipeLedgerLastAbandoned = n + 1;   // 连同被顶下来的现任
+    return IPE_LEDGER_ABANDON_TAG;
+}
+var ipeLedgerLastAbandoned = 0;
 function ipeLedgerRollback(idx) {
     var st = ipeLedgerRead();
     var v = st.versions[idx];
     if (!v) return false;
     var old = String(st.current || "");
     st.versions.splice(idx, 1);
+    ipeLedgerLastAbandoned = 0;
     // 一层一账：现任与目标不同楼才把现任送回历史，同楼就是替换
     if (old.trim() && st.lastFloor >= 0 && st.lastFloor !== v.floor) {
-        st.versions.unshift({ floor: st.lastFloor, ts: Date.now(), text: old });
+        var back = { floor: st.lastFloor, ts: Date.now(), text: old };
+        if (v.floor >= 0 && st.lastFloor > v.floor) back.tag = ipeLedgerAbandonAfter(st, v.floor);   // 换回更早的：现任和比目标新的都标「换回前」
+        st.versions.unshift(back);
+    } else if (v.floor >= 0) {
+        ipeLedgerAbandonAfter(st, v.floor); ipeLedgerLastAbandoned--;
     }
     st.current = v.text;
     if (v.floor >= 0) st.lastFloor = v.floor;         // 账跟楼走，回滚后楼号也跟着回去
@@ -904,9 +930,11 @@ function ipeLedgerReconcile(limit, opts) {
     var demoted = false;
     if (String(st.current || "").trim() && st.lastFloor > limit) {
         st.current = ""; st.lastFloor = -1; smashed++; demoted = true;
-        var bi = -1, bf = -1;                          // 幸存者里楼号最大的顶上当现任
+        var bi = -1, bf = -1, br = 0;                  // 幸存者里楼号最大的顶上当现任
         for (var k = 0; k < st.versions.length; k++) {
-            if (st.versions[k].floor > bf) { bf = st.versions[k].floor; bi = k; }
+            // 2.27.11 先挑正常版，没有再挑「压缩前」；「换回前」是你弃掉的，不顶回来
+            var vk = st.versions[k], rk = !vk.tag ? 2 : (vk.tag === IPE_LEDGER_ABANDON_TAG ? 0 : 1);
+            if (rk && (rk > br || (rk === br && vk.floor > bf))) { br = rk; bf = vk.floor; bi = k; }
         }
         if (bi >= 0) {
             var v2 = st.versions.splice(bi, 1)[0];
@@ -1054,11 +1082,16 @@ function ipeLedgerHisHint() {
 function ipeLedgerHistoryBase(st, forFloor) {
     var cur = String(st.current || ""), curFloor = st.lastFloor;
     // 「压缩前」备份不喂：刚压完就把压缩前的全本喂回去，副 AI 会照着重新写长
+    // 2.27.11「换回前」也不喂：后悔药换回更早那版时弃掉的
     var olds = st.versions.filter(function(v){ return !v.tag; });
     if (forFloor > 0 && curFloor === forFloor && cur.trim()) {
-        if (olds.length && olds[0].floor < forFloor) { cur = olds[0].text; curFloor = olds[0].floor; olds = olds.slice(1); }
+        var bi = -1;                                   // 这楼之前最近的那一版
+        for (var i = 0; i < olds.length; i++) if (olds[i].floor < forFloor && (bi < 0 || olds[i].floor > olds[bi].floor)) bi = i;
+        if (bi >= 0) { cur = olds[bi].text; curFloor = olds[bi].floor; }
         else if (!olds.length) { cur = ""; curFloor = -1; }
     }
+    // 2.27.11 账本历史只喂比底稿早的：比底稿新的不是「历史」，是被换掉的（采用旧楼稿顶下来的、老聊天里没打标的）
+    if (curFloor >= 0) olds = olds.filter(function(v){ return v.floor < curFloor; });
     return { cur: cur, curFloor: curFloor, olds: olds };
 }
 function ipeLedgerHistoryBlock(dry, forFloor) {
@@ -3281,7 +3314,8 @@ function ipeLedgerRefreshEditors() {
     });
     ["ipe-ledger-chatkey","iped-ledger-chatkey"].forEach(function(id){
         var el = q("#" + id);
-        if (el) el.textContent = "当前聊天：" + ipeChatKey() + "\u3000楼层：" + ipeFloorNo();
+        if (el) el.textContent = "当前聊天：" + ipeChatKey() + "\u3000楼层：" + ipeFloorNo()
+            + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到第 " + st.lastFloor + " 楼" : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
     });
     // 版本历史下拉
     ["ipe-ledger-vers","iped-ledger-vers"].forEach(function(id){
@@ -9034,7 +9068,13 @@ function bindAll() {
             var sel = q("#" + (id.indexOf("iped") === 0 ? "iped-ledger-vers" : "ipe-ledger-vers"));
             var i = sel ? Number(sel.value) : NaN;
             if (!Number.isFinite(i)) { ipeLedgerStatus("先选一个历史版本", "#c9a227"); return; }
-            if (ipeLedgerRollback(i)) { ipeLedgerSync(); ipeLedgerStatus("已回滚 \u2713 当前版已存入历史", "#6ec577"); }
+            if (ipeLedgerRollback(i)) {
+                ipeLedgerSync();
+                var stR = ipeLedgerRead(), nA = ipeLedgerLastAbandoned;
+                ipeLedgerStatus("已换回第 " + stR.lastFloor + " 楼那版 \u2713 "
+                    + (nA > 0 ? "比它新的 " + nA + " 份标「换回前」留在后悔药里：不再喂给副 AI，重 roll 也不会退回它们；后悔了再换回去就行"
+                              : "原来那份已存进历史"), "#6ec577");
+            }
             else ipeLedgerStatus("回滚失败：找不到该版本", "#d4726a");
         });
     });

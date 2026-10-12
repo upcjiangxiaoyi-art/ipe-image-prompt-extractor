@@ -2183,6 +2183,93 @@ await (async () => {
     eq(b.w.eval('ipeLedgerPackImportText("not json")'), null, "坏 JSON 不崩");
 })();
 
+console.log("\n【59】 歪账换回去再重 roll（2.28.3）：后悔药换回更早那版以后，被弃掉的歪账不再喂给副 AI 当账本历史，之后再重 roll 也不会被顶回来当现任；换回歪账那版改好再 roll 一样干净");
+{
+    const ep = (t, F) => String((t.extensionPrompts[F("IPE_LEDGER_EP_KEY")] || {}).value || "");
+    const verIdx = (F, floor) => F("ipeLedgerRead")().versions.findIndex(v => v.floor === floor);
+    function setup() {
+        const b = boot(12);
+        b.F("ipeLedgerCommit")("第8楼的账：两人在花园散步，一切安好。", 8);
+        b.F("ipeLedgerCommit")("第10楼的账：【歪】主角摔断了腿，卧床不起。", 10);   // 上一楼挂歪了
+        b.F("ipeLedgerCommit")("第12楼的账：【歪】接着歪，主角拄拐。", 12);           // 这一楼照着歪账写、又记了一份
+        return b;
+    }
+    // A：不修上一楼的账，直接重 roll 这一楼——上一楼那份照旧是现任（这是设计：重 roll 只撕被 roll 那楼的账）
+    {
+        const { tavern, F } = setup();
+        tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        ok(ep(tavern, F).indexOf("摔断了腿") >= 0 && F("ipeLedgerRead")().lastFloor === 10, "不修直接重 roll：只撕这一楼的账，上一楼那份歪账照旧贴给主 AI（要修得先换掉它）", ep(tavern, F).slice(0, 80));
+    }
+    // B：后悔药换回第 8 楼那版，再重 roll 这一楼
+    {
+        const { w, tavern, F } = setup();
+        ok(w.eval("ipeLedgerRollback")(verIdx(F, 8)) === true && F("ipeLedgerRead")().lastFloor === 8, "前提：后悔药换回第 8 楼那版");
+        tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        ok(ep(tavern, F).indexOf("花园散步") >= 0 && ep(tavern, F).indexOf("【歪】") < 0, "重 roll 这一楼：主 AI 拿到的是第 8 楼那版，没有歪账");
+        tavern.chat[11].mes = "第 12 楼重 roll 出来的新正文，主角好好的，够长够长。";
+        const u = F("ipeLedgerBuildUser")(tavern.chat[11].mes, "", 12);
+        ok(u.indexOf("【歪】") < 0, "新这一楼挂账：副 AI 的账本历史里没有被弃掉的歪账（以前第 10 楼那份还标着更新的楼号喂进去）", u.slice(0, 300));
+        ok(u.indexOf("花园散步") >= 0, "底稿是换回的第 8 楼那版");
+        F("ipeLedgerRefreshEditors")();
+        const opts2 = [...w.document.querySelectorAll("#ipe-ledger-vers option")].map(o => o.textContent);
+        ok(opts2.some(t => t.indexOf("第 10 楼") >= 0 && t.indexOf("换回前") >= 0), "后悔药里还留着第 10 楼那份（标「换回前」），想撤回换回可以再换回去", JSON.stringify(opts2));
+        F("ipeLedgerCommit")("第12楼的新账：两人散步回来，主角好好的。", 12);
+        tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);           // 新这一楼又不满意，再 roll 一次
+        const st = F("ipeLedgerRead")();
+        ok(st.lastFloor === 8 && ep(tavern, F).indexOf("【歪】") < 0 && ep(tavern, F).indexOf("花园散步") >= 0, "再重 roll 一次：退回第 8 楼那版，不会把弃掉的第 10 楼歪账顶回来当现任", "现任第 " + st.lastFloor + " 楼：" + ep(tavern, F).slice(0, 60));
+        const u3 = F("ipeLedgerBuildUser")(tavern.chat[11].mes, "", 12);
+        ok(u3.indexOf("【歪】") < 0, "再挂这一楼：副 AI 还是看不到歪账");
+        ok(w.eval("ipeLedgerRollback")(verIdx(F, 10)) === true && F("ipeLedgerRead")().current.indexOf("摔断了腿") >= 0, "后悔药撤回：再换回第 10 楼那份也行（你自己选的就用它）");
+        const u4 = F("ipeLedgerBuildUser")(tavern.chat[11].mes, "", 12);
+        ok(u4.indexOf("摔断了腿") >= 0, "换回来以后它就是底稿，照常喂");
+    }
+    // C：后悔药换回第 10 楼（歪的那份），改好再重 roll
+    {
+        const { w, tavern, F } = setup();
+        w.eval("ipeLedgerRollback")(verIdx(F, 10));
+        const st = F("ipeLedgerRead")();
+        st.current = "第10楼的账：主角只是扭了脚，歇一下就好。";                     // 编辑框里改好、保存
+        F("ipeLedgerSave")(st);
+        tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        ok(ep(tavern, F).indexOf("扭了脚") >= 0 && ep(tavern, F).indexOf("【歪】") < 0, "换回歪的那份改好再重 roll：主 AI 拿到改好的");
+        const u = F("ipeLedgerBuildUser")("第 12 楼重 roll 的新正文，够长够长够长。", "", 12);
+        ok(u.indexOf("【歪】") < 0 && u.indexOf("扭了脚") >= 0, "新这一楼挂账：底稿是改好的那份，旧歪账一个字都不喂");
+    }
+    // D：面板上点「换回这版」：状态行说清楚；编辑框上面写明账本记到第几楼
+    {
+        const { w, F } = setup();
+        F("ipeLedgerRefreshEditors")();
+        const d = w.document, key = () => d.querySelector("#ipe-ledger-chatkey").textContent;
+        ok(key().indexOf("账本记到第 12 楼") >= 0, "编辑框上面写着账本记到第 12 楼（改的是这一楼挂完的那份，重 roll 这楼会撕掉它）", key());
+        const sel = d.querySelector("#ipe-ledger-vers");
+        sel.value = String(verIdx(F, 8));
+        d.querySelector("#ipe-ledger-rollback").click();
+        const s = statusText(w);
+        ok(F("ipeLedgerRead")().lastFloor === 8 && s.indexOf("已换回第 8 楼那版") >= 0 && s.indexOf("2 份标「换回前」") >= 0 && s.indexOf("不再喂给副 AI") >= 0, "点「换回这版」：状态行说换回第 8 楼、比它新的 2 份标「换回前」不再喂", s);
+        ok(key().indexOf("账本记到第 8 楼") >= 0, "编辑框上面跟着改成第 8 楼", key());
+    }
+    // E：预览开着时自动挂账落了更新的一楼，又采用了旧楼稿：顶下来的新账也标「换回前」，同楼的老稿也不当历史喂
+    {
+        const { w, F } = setup();
+        F("ipeLedgerCommit")("第10楼的账：重挂的好稿，主角好好的。", 10);
+        const st = F("ipeLedgerRead")();
+        ok(st.lastFloor === 10 && st.versions.some(v => v.floor === 12 && v.tag === "换回前"), "采用第 10 楼的旧楼稿：第 12 楼那份进历史、标「换回前」");
+        const u = F("ipeLedgerBuildUser")("第 12 楼的正文，够长够长够长。", "", 12);
+        ok(u.indexOf("【歪】") < 0 && u.indexOf("重挂的好稿") >= 0, "下一份账：不喂顶下来的第 12 楼，也不喂同楼被换掉的第 10 楼老稿", u.slice(0, 300));
+    }
+    // F：2.27.11 以前换回过的老聊天：弃掉的歪账没打标、还比现任新。落下一份账时补上标，之后重 roll 也顶不回来
+    {
+        const { tavern, F } = boot(12);
+        F("ipeLedgerSave")({ current: "第8楼的账：两人在花园散步，一切安好。", lastFloor: 8, order: "",
+            versions: [{ floor: 10, ts: 2, text: "第10楼的账：【歪】主角摔断了腿。" }, { floor: 6, ts: 1, text: "第6楼的账：初见。" }] });
+        F("ipeLedgerCommit")("第12楼的新账：两人散步回来，主角好好的。", 12);
+        const st = F("ipeLedgerRead")();
+        ok(st.versions.some(v => v.floor === 10 && v.tag === "换回前"), "老聊天里比现任还新的那份：落新账时补上「换回前」", JSON.stringify(st.versions.map(v => v.floor + (v.tag || ""))));
+        tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+        ok(F("ipeLedgerRead")().lastFloor === 8 && ep(tavern, F).indexOf("【歪】") < 0, "再重 roll：退回第 8 楼那版，老歪账顶不回来", ep(tavern, F).slice(0, 60));
+    }
+}
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
