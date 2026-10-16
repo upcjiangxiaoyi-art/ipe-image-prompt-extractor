@@ -324,6 +324,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         // 2.28.4 重新生成（自动注入）：浮窗、抽屉两颗都标着，一开始就能点
         const rr = [d.querySelector('#ipe-btn-reroll'), d.querySelector('#iped-btn-reroll')];
         check(rr[0] && rr[1] && rr[0].textContent === '重新生成（自动注入）' && rr[1].value === '重新生成（自动注入）' && !rr[0].disabled && !rr[1].disabled, '「重新生成（自动注入）」浮窗、抽屉两颗都标着，一开始就能点');
+        // 2.28.5 重 roll 时这一发不带「本轮必须」：浮窗、抽屉各一个开关，贴耳开关底下；关键词格在「贴耳细节」里
+        const rt = [d.querySelector('#ipe-ledger-reroll-trim'), d.querySelector('#iped-ledger-reroll-trim')];
+        const rk = [d.querySelector('#ipe-ledger-reroll-kw'), d.querySelector('#iped-ledger-reroll-kw')];
+        check(rt.every(Boolean) && rk.every(Boolean) && rk.every(el => { const f = el.closest('details'); return f && f.querySelector('summary').textContent.includes('贴耳细节'); }), '「重 roll 时这一发不带本轮必须」浮窗、抽屉都有；关键词格在「贴耳细节」里');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.4";
+var IPE_VERSION = "2.28.5";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -88,6 +88,8 @@ const DEFAULTS = {
     activeTab: "image",
     ledgerEpEnabled: true,
     ledgerEpDepth: 2,
+    ledgerRerollTrim: false,         // 2.28.5 重 roll 那一发，贴耳里标题带关键词的那一段换成「本轮无硬性约束」
+    ledgerRerollTrimKw: "本轮必须",
     ledgerWaitBeforeSend: true,   // 2.18.0 发消息前等挂账跑完（generate_interceptor）
     ledgerWaitMaxSec: 60,
     ledgerRetryOnce: true,        // 2.18.0 网络错 / 5xx / 超时 自动重试一次
@@ -2139,10 +2141,46 @@ function ipeLedgerEpDepth() {
     return Math.round(d);
 }
 
+/* 2.28.5 重 roll 那一发不带「本轮必须」。上一楼挂完的账里给「这一轮」下的硬要求（「本轮须归位至…」「禁止转场」这类），
+   重 roll 几次都是同一份，主 AI 每次都得先满足它，剧情就在同一个点打转。开了开关：重 roll（swipe / regenerate）那一发，
+   标题里含关键词（默认「本轮必须」）的那一段换成「本轮无硬性约束」再贴给主 AI，其余账本照常；这一发生成完、发下一条时恢复原样。
+   插件照旧不认账本格式，只认「段落标题」：一行开头是【…】、# 标题，或者整行加粗；从标题含关键词的那行，到下一个段落标题为止。
+   只改贴给主 AI 的那份，账本本身、副 AI 读到的都不动。 */
+var IPE_LEDGER_REROLL_NOTE = "（这一发是重 roll：本轮无硬性约束）";
+var ipeLedgerEpRerollOn = false;     // 这一发是重 roll，而且开着开关
+var ipeLedgerEpRerollHit = 0;        // 上一次拼贴耳时换掉了几段（状态行报）
+function ipeLedgerRerollKw() { return String(cfg().ledgerRerollTrimKw || "").trim() || "本轮必须"; }
+function ipeLedgerSecHead(line) {
+    var t = String(line || "").replace(/^\s+/, "");
+    var m = t.match(/^(?:#{1,6}\s*)?(?:\*\*\s*)?【[^】\n]*】/);
+    if (m) return m[0];                                    // 【…】标题：只认到右括号为止，同一行后面的字算内容
+    if (/^#{1,6}\s+\S/.test(t) || /^\*\*[^*\n]+\*\*\s*[:：]?\s*$/.test(t)) return t.replace(/\s+$/, "");
+    return "";
+}
+function ipeLedgerTrimReroll(text, kw) {
+    kw = String(kw || "").trim();
+    var lines = String(text || "").split("\n"), out = [], n = 0, skip = false;
+    if (!kw) return { text: String(text || ""), n: 0 };
+    for (var i = 0; i < lines.length; i++) {
+        var head = ipeLedgerSecHead(lines[i]);
+        if (head) {
+            if (skip && out.length && out[out.length - 1].trim()) out.push("");   // 跟下一段之间留个空行
+            skip = false;
+            if (head.indexOf(kw) >= 0) { out.push(head); out.push(IPE_LEDGER_REROLL_NOTE); skip = true; n++; continue; }
+        }
+        if (!skip) out.push(lines[i]);
+    }
+    return { text: out.join("\n"), n: n };
+}
 function ipeLedgerEpText() {
     var st = ipeLedgerRead();
     var order = String(st.order || "").trim();
     var cur   = String(st.current || "").trim();
+    ipeLedgerEpRerollHit = 0;
+    if (cur && ipeLedgerEpRerollOn) {
+        var tr = ipeLedgerTrimReroll(cur, ipeLedgerRerollKw());
+        cur = tr.text; ipeLedgerEpRerollHit = tr.n;
+    }
     if (!order && !cur) return "";
     var out = "";
     if (order) out += "\u3010User \u6307\u4ee4\u3011\n" + order + "\n\n";
@@ -3340,6 +3378,13 @@ function ipeLedgerRefreshEpPreview() {
     });
     ["ipe-ledger-ep-enabled","iped-ledger-ep-enabled"].forEach(function(id){
         var el = q("#" + id); if (el && el.checked !== on) el.checked = on;
+    });
+    ["ipe-ledger-reroll-trim","iped-ledger-reroll-trim"].forEach(function(id){
+        var el = q("#" + id); if (el) el.checked = cfg().ledgerRerollTrim === true;
+    });
+    ["ipe-ledger-reroll-kw","iped-ledger-reroll-kw"].forEach(function(id){
+        var el = q("#" + id), v = String(cfg().ledgerRerollTrimKw || "");
+        if (el && el.value !== v && ipeRootDocument().activeElement !== el) el.value = v;
     });
     ["ipe-ledger-ep-depth","iped-ledger-ep-depth"].forEach(function(id){
         var el = q("#" + id); if (el) el.value = String(ipeLedgerEpDepth());
@@ -7440,6 +7485,8 @@ function createPanel() {
         '<hr style="border:none;border-top:1px solid rgba(255,255,255,.10);margin:12px 0">'+
         '<div style="color:#888;font-size:12px;margin-bottom:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">在楼里显示账本（只进画面，不进存档） <input type="checkbox" id="ipe-ledger-inline"></label></div>'+
         '<div style="color:#888;font-size:12px;margin-bottom:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">贴耳注入（模型读得到，楼里读不到） <input type="checkbox" id="ipe-ledger-ep-enabled"></label></div>'+
+        '<div style="color:#888;font-size:12px;margin-bottom:2px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">重 roll 时这一发不带「本轮必须」 <input type="checkbox" id="ipe-ledger-reroll-trim"></label></div>'+
+        '<div class="ipe-hint" style="margin-bottom:6px">上一楼挂完的账里给「这一轮」下的硬要求，重 roll 几次都是同一份，剧情就老在同一个点打转。开了以后：重 roll 那一发，标题带「本轮必须」的那一段换成「本轮无硬性约束」再贴给主 AI，其余账本照常；roll 完、发下一条时恢复原样。只改贴给主 AI 的，账本不动。你的预设用别的标题，去「贴耳细节」里改关键词。</div>'+
         '<details class="ipe-fold"><summary>\uD83D\uDDDC 压缩账本（合并没用的支线、精简语言）</summary><div class="ipe-fold-body">'+
             '<div class="ipe-hint">账本只增不减，跑到几百楼贴耳好几千字。点账本区的「压缩一版」，副 AI 按下面的指令重写一版更短的，先进预览，你看过点采用才落账；压缩前那版进历史可回滚。插件不会自动压。</div>'+
             '<label>压缩指令（留空用内置默认）<textarea id="ipe-ledger-compress-prompt" rows="6" placeholder="' + esc(IPE_LEDGER_COMPRESS_DEFAULT).replace(/\n/g, "&#10;") + '"></textarea></label>'+
@@ -7450,6 +7497,8 @@ function createPanel() {
         '<details class="ipe-fold"><summary>\uD83C\uDFA7 贴耳细节（想看模型到底读到什么）</summary><div class="ipe-fold-body">'+
             '<label>注入深度<select id="ipe-ledger-ep-depth"></select></label>'+
             '<div class="ipe-hint">数字越小越靠近最新一楼。默认 2 就挺好。</div>'+
+            '<label style="margin-top:6px">重 roll 时去掉的段落：标题里含<input type="text" id="ipe-ledger-reroll-kw" placeholder="本轮必须"></label>'+
+            '<div class="ipe-hint">段落标题 = 一行开头是【…】、# 标题，或者整行加粗；从标题含这几个字的那行，到下一个段落标题为止。留空 = 本轮必须。</div>'+
             '<div style="color:#888;font-size:12px;margin:8px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><input type="checkbox" id="ipe-ledger-wait"> <span>发消息前等挂账跑完，最多</span> <input type="number" id="ipe-ledger-wait-sec" min="5" max="600" step="5" style="width:64px;padding:3px 6px"> <span>秒</span></div>'+
             '<div class="ipe-hint">副 AI 还在挂账时你发了下一条，酒馆会先等账落下、贴耳换新再送出去；超时就照发并提醒。重 roll 不等。</div>'+
             '<div style="color:#888;font-size:12px;margin:8px 0 2px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ipe-ledger-retry"> <span>挂账失败自动重试一次（网络错 / 5xx / 超时）</span></div>'+
@@ -7808,10 +7857,13 @@ function createDrawer() {
     h += '<hr>';
     h += '<div style="margin-bottom:6px"><label>在楼里显示账本（只进画面，不进存档） <input type="checkbox" id="iped-ledger-inline"></label></div>';
     h += '<div style="margin-bottom:6px"><label>贴耳注入（模型读得到，楼里读不到） <input type="checkbox" id="iped-ledger-ep-enabled"></label></div>';
+    h += '<div style="margin-bottom:2px"><label>重 roll 时这一发不带「本轮必须」 <input type="checkbox" id="iped-ledger-reroll-trim"></label></div>';
+    h += '<small style="color:#888;display:block;margin-bottom:6px">重 roll 那一发，标题带「本轮必须」的那一段换成「本轮无硬性约束」再贴给主 AI，其余照常；roll 完恢复。关键词在「贴耳细节」里改。</small>';
     h += '<details class="ipe-fold"><summary>\uD83C\uDFA7 贴耳细节（想看模型到底读到什么）</summary><div class="ipe-fold-body">';
     h += '<label>压缩指令（留空用内置默认）</label><textarea id="iped-ledger-compress-prompt" class="text_pole" rows="5"></textarea>';
     h += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center"><input type="button" id="iped-ledger-compress-reset" class="menu_button" value="还原内置默认"> 账本超过 <input type="number" id="iped-ledger-compress-warn" class="text_pole" min="0" step="500" style="width:80px;display:inline-block"> 字提醒</div>';
     h += '<label>注入深度</label><select id="iped-ledger-ep-depth" class="text_pole"></select>';
+    h += '<label>重 roll 时去掉的段落：标题里含</label><input type="text" id="iped-ledger-reroll-kw" class="text_pole" placeholder="本轮必须">';
     h += '<div style="margin-top:6px"><input type="checkbox" id="iped-ledger-wait"> 发消息前等挂账跑完，最多 <input type="number" id="iped-ledger-wait-sec" class="text_pole" min="5" max="600" step="5" style="width:64px;display:inline-block"> 秒</div>';
     h += '<div style="margin-top:6px"><input type="checkbox" id="iped-ledger-retry"> 挂账失败自动重试一次（网络错 / 5xx / 超时）</div>';
     h += '<label>模型实际读到的原文</label>';
@@ -9394,6 +9446,26 @@ function bindAll() {
         });
     });
 
+    // 2.28.5 重 roll 那一发不带「本轮必须」
+    ["ipe-ledger-reroll-trim","iped-ledger-reroll-trim"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.checked = cfg().ledgerRerollTrim === true;
+        el.addEventListener("change", function(){
+            save("ledgerRerollTrim", !!el.checked);
+            ipeLedgerRefreshEpPreview();
+            ipeLedgerStatus(el.checked ? "重 roll 那一发，贴给主 AI 的账本不带「" + ipeLedgerRerollKw() + "」那一段（换成本轮无硬性约束），roll 完恢复"
+                                       : "重 roll 时照常整份贴账本", "#6ec577");
+        });
+    });
+    ["ipe-ledger-reroll-kw","iped-ledger-reroll-kw"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.value = String(cfg().ledgerRerollTrimKw || "");
+        el.addEventListener("change", function(){
+            save("ledgerRerollTrimKw", String(el.value || "").trim());
+            ipeLedgerRefreshEpPreview();
+            ipeLedgerStatus("重 roll 时去掉标题里含「" + ipeLedgerRerollKw() + "」的那一段", "#6ec577");
+        });
+    });
     ["ipe-ledger-ep-enabled","iped-ledger-ep-enabled"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
         el.checked = cfg().ledgerEpEnabled !== false;
@@ -9507,13 +9579,19 @@ function bindAll() {
                     if ((t === "swipe" || t === "regenerate") && dryRun !== true) {
                         try {
                             ipeLedgerReconcile(Math.max(0, ipeFloorNo() - 1), { silent: true });
+                            ipeLedgerEpRerollOn = cfg().ledgerRerollTrim === true;   // 2.28.5 这一发不带「本轮必须」
                             ipeLedgerApplyEP();          // 无条件重贴，不赌 reconcile 的返回值
+                            if (ipeLedgerEpRerollOn) ipeLedgerStatus(ipeLedgerEpRerollHit
+                                ? "重 roll：这一发贴给主 AI 的账本里，「" + ipeLedgerRerollKw() + "」那一段换成了「本轮无硬性约束」，其余照常；roll 完恢复"
+                                : "重 roll：账本里没找到标题带「" + ipeLedgerRerollKw() + "」的段落，这一发照常整份贴", ipeLedgerEpRerollHit ? "#6ec577" : "#c9a227");
                         } catch(eSw) {}
                         // 2.25.0 🐚 块挂在正文外面，流式重写正文不再把它抹掉：这里就把块里的字换成对账后的那份，别在重 roll 期间挂着被撕掉的账
                         try { ipeLedgerRenderInline({ soft: true }); } catch(eIl) {}
                     } else {
                         // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
-                        try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true })) ipeLedgerApplyEP(); } catch(eR) {}
+                        var wasReroll = ipeLedgerEpRerollOn && dryRun !== true;   // 2.28.5 上一发是重 roll：这一发恢复整份
+                        if (wasReroll) ipeLedgerEpRerollOn = false;
+                        try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true }) || wasReroll) ipeLedgerApplyEP(); } catch(eR) {}
                     }
                     if (!ipeLedgerBusy || ipeLedgerStaleWarned) return;
                     ipeLedgerStaleWarned = true;
@@ -9535,6 +9613,11 @@ function bindAll() {
                     ipeChatObsPause();
                 });
             }
+            // 2.28.5 重 roll 那一发生成完 / 停了 / 换了聊天：贴耳恢复整份
+            ["GENERATION_ENDED", "GENERATION_STOPPED", "CHAT_CHANGED"].forEach(function(n){
+                var ev = cg.event_types[n]; if (!ev) return;
+                cg.eventSource.on(ev, function(){ if (!ipeLedgerEpRerollOn) return; ipeLedgerEpRerollOn = false; try { ipeLedgerApplyEP(); } catch(eE) {} });
+            });
             ["GENERATION_ENDED", "GENERATION_STOPPED", "MESSAGE_RECEIVED", "CHAT_CHANGED"].forEach(function(n){
                 var ev = cg.event_types[n]; if (!ev) return;
                 cg.eventSource.on(ev, function(){ ipeGenAt = 0; ipeChatObsResume(n); });

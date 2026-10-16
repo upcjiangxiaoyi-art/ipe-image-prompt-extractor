@@ -2311,6 +2311,93 @@ await (async () => {
     ok(retryArgs && retryArgs[2] === "replace", "请求失败要自动重试时，带着「换掉原来那段」去重试（不会重试成追加第二段）", JSON.stringify(retryArgs && retryArgs[2]));
 })();
 
+console.log("\n【61】 重 roll 时这一发不带「本轮必须」（2.28.5）：开了开关，重 roll 那一发贴给主 AI 的账本里，标题带「本轮必须」的那一段换成「本轮无硬性约束」，其余照常；生成完、停了、发下一条时恢复整份；账本本身不动；关键词能改");
+await (async () => {
+    const LEDGER10 = [
+        "情感脉络与剧情奔涌・锚点与状态追踪",
+        "（【本轮必须】为硬门槛，正文须先满足；其余各层为已发生事实。）",
+        "（【本轮必须】为\"本轮无硬性约束\"时，正文按本职承接玩家最新输入并让剧情向前流。）",
+        "",
+        "【本轮必须・正文模型硬性约束】",
+        "- [来源：情感] 本轮须归位至玩家尚未表态的已成立落点",
+        "- [来源：转场] 禁止转场",
+        "",
+        "【楼层状态】",
+        "当前楼层数：620",
+        "",
+        "【核心锚点】",
+        "- 体况：韩川央：正常"].join("\n");
+    const setup = () => {
+        const b = boot(12);
+        b.F("ipeLedgerCommit")(LEDGER10, 10);
+        b.F("ipeLedgerCommit")("第12楼挂完的账\n【本轮必须】第12楼给下一楼的新要求", 12);
+        const st = b.F("ipeLedgerRead")(); st.order = "伤先别好"; b.F("ipeLedgerSave")(st);
+        b.F("ipeLedgerApplyEP")();
+        return Object.assign(b, { ep: () => String((b.tavern.extensionPrompts[b.F("IPE_LEDGER_EP_KEY")] || {}).value || ""), st: b.tavern.extensionSettings[b.F("EXT_NAME")] });
+    };
+    let r = setup();
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    ok(r.ep().indexOf("禁止转场") >= 0, "开关默认关：重 roll 照旧整份贴（跟以前一样）");
+
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    let e = r.ep();
+    ok(e.indexOf("禁止转场") < 0 && e.indexOf("归位至玩家尚未表态") < 0, "开了：重 roll 那一发，「本轮必须」那几条不贴了", e);
+    ok(e.indexOf("【本轮必须・正文模型硬性约束】\n（这一发是重 roll：本轮无硬性约束）") >= 0, "标题留着，内容换成「本轮无硬性约束」（正好对上预设里写好的那条规则）");
+    ok(e.indexOf("【楼层状态】\n当前楼层数：620") >= 0 && e.indexOf("【核心锚点】") >= 0 && e.indexOf("体况：韩川央：正常") >= 0 && e.indexOf("正文须先满足") >= 0, "其余各段、开头的说明照常贴");
+    ok(e.indexOf("【User 指令】\n伤先别好") >= 0, "User 指令照常贴");
+    ok(e.indexOf("第12楼") < 0, "这一楼的账照旧撕掉了");
+    ok(r.F("ipeLedgerRead")().current === LEDGER10, "账本本身一个字没动（只改贴给主 AI 的那份）");
+    ok(statusText(r.w).indexOf("换成了「本轮无硬性约束」") >= 0, "状态行说这一发换掉了那一段", statusText(r.w));
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, true);
+    ok(r.ep().indexOf("禁止转场") < 0, "中途酒馆干跑算 token（dryRun）不打断：还是去掉的");
+    await r.tavern.eventSource.emit("GENERATION_ENDED");
+    ok(r.ep().indexOf("禁止转场") >= 0, "这一发生成完：恢复整份");
+
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.tavern.eventSource.emit("GENERATION_STARTED", "regenerate", {}, false);
+    ok(r.ep().indexOf("禁止转场") < 0, "「重新生成」（regenerate）也一样");
+    await r.tavern.eventSource.emit("GENERATION_STOPPED");
+    ok(r.ep().indexOf("禁止转场") >= 0, "中途停了：恢复整份");
+
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, false);
+    ok(r.ep().indexOf("禁止转场") >= 0, "没等到结束事件就发了下一条：这一发照样整份贴");
+
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.tavern.eventSource.emit("GENERATION_STARTED", "continue", {}, false);
+    ok(r.ep().indexOf("第12楼给下一楼的新要求") >= 0, "「继续」不是重 roll：不动");
+
+    // 别的写法
+    const T = r.w.eval("ipeLedgerTrimReroll");
+    let x = T("## 本轮必须\n- 禁止转场\n\n## 楼层状态\n620", "本轮必须");
+    ok(x.n === 1 && x.text.indexOf("禁止转场") < 0 && x.text.indexOf("## 楼层状态\n620") >= 0, "# 标题的写法也认", x.text);
+    x = T("【本轮必须】禁止转场\n【伤势】左肩刀伤", "本轮必须");
+    ok(x.text === "【本轮必须】\n（这一发是重 roll：本轮无硬性约束）\n\n【伤势】左肩刀伤", "标题同一行后面跟着的要求也去掉", JSON.stringify(x.text));
+    x = T("**本轮必须**\n- 禁止转场\n**楼层状态**\n620", "本轮必须");
+    ok(x.n === 1 && x.text.indexOf("禁止转场") < 0 && x.text.indexOf("**楼层状态**\n620") >= 0, "整行加粗的标题也认");
+    x = T("【楼层状态】\n620", "本轮必须");
+    ok(x.n === 0 && x.text === "【楼层状态】\n620", "没有这一段：原样不动");
+
+    r = setup(); r.st.ledgerRerollTrim = true; r.st.ledgerRerollTrimKw = "楼层状态";
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    e = r.ep();
+    ok(e.indexOf("当前楼层数：620") < 0 && e.indexOf("禁止转场") >= 0, "关键词能改：改成「楼层状态」就去掉那一段", e.slice(-200));
+    r = setup(); r.st.ledgerRerollTrim = true; r.st.ledgerRerollTrimKw = "不存在的标题";
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    ok(r.ep().indexOf("禁止转场") >= 0 && statusText(r.w).indexOf("没找到") >= 0, "找不到这一段：照常整份贴，状态行说没找到", statusText(r.w));
+
+    // 面板开关
+    r = setup();
+    const cb = r.w.document.querySelector("#ipe-ledger-reroll-trim"), kw = r.w.document.querySelector("#ipe-ledger-reroll-kw");
+    ok(cb && !cb.checked && kw, "面板上有开关（默认关）和关键词格");
+    cb.checked = true; cb.dispatchEvent(new r.w.Event("change"));
+    ok(r.st.ledgerRerollTrim === true && statusText(r.w).indexOf("不带「本轮必须」") >= 0, "打开开关：存下来，状态行说清楚", statusText(r.w));
+    kw.value = "  硬性约束 "; kw.dispatchEvent(new r.w.Event("change"));
+    ok(r.st.ledgerRerollTrimKw === "硬性约束", "关键词存下来（去掉首尾空格）");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
