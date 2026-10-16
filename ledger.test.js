@@ -2270,6 +2270,47 @@ console.log("\n【59】 歪账换回去再重 roll（2.28.3）：后悔药换回
     }
 }
 
+console.log("\n【60】 重新生成（自动注入）（2.28.4）：重提这一楼，提完直接换掉楼尾原来那段 <draw>，楼里只留一段；不用再点确认注入；注入完按钮还能点；页面刚载入也能点；旧那段不喂回给副 AI");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const cap = {};
+    let desc = "A girl under the plum tree, first take.";
+    imgApi(w, tavern, F, () => desc, cap);
+    const d = w.document, mes = () => String(tavern.chat[9].mes || ""), draws = () => (mes().match(/<draw>/g) || []).length;
+    const bp = d.querySelector("#ipe-btn-reroll");
+    ok(bp && bp.textContent === "重新生成（自动注入）", "按钮标着「重新生成（自动注入）」（抽屉那颗在界面测试里查）", bp && bp.textContent);
+    ok(!bp.disabled, "页面刚载入就能点（还没提取过也行）");
+    w.eval("currentIdx = -1");
+    await w.eval("onReroll")();
+    ok(draws() === 1 && mes().indexOf("first take") >= 0, "还没提取过：重提最后一条 AI 楼，直接贴上一段", mes().slice(-80));
+    ok(imgStatus(w).indexOf("重新生成完成并已注入") >= 0, "状态行说已注入", imgStatus(w));
+    ok(!bp.disabled && d.querySelector("#ipe-btn-inject").disabled, "注入完「重新生成」还能点，「确认注入」灰着（没东西要注）");
+    desc = "A girl under the plum tree, second take.";
+    await w.eval("onReroll")();
+    ok(draws() === 1 && mes().indexOf("second take") >= 0 && mes().indexOf("first take") < 0, "再点：换掉原来那段，楼里只留新的一段（不会两段出两张图）", mes().slice(-120));
+    ok(imgStatus(w).indexOf("已换掉这楼原来那段") >= 0, "状态行说换掉了原来那段", imgStatus(w));
+    const sent = String(cap.body.messages[1].content || "");
+    ok(sent.indexOf("first take") < 0 && sent.indexOf("第 10 层正文") >= 0, "重提时楼尾旧那段不当正文喂给副 AI（不照着旧提示词抄）", sent.slice(-160));
+    await w.eval("onReroll")();
+    ok(draws() === 1 && imgStatus(w).indexOf("一字不差") >= 0, "提出来跟原来一字不差：楼里不动，状态行说清楚", imgStatus(w));
+    // 自动提取 + 自动注入以后，「重新生成」也还能点
+    w.eval("setBtns(false,false)");
+    desc = "A girl under the plum tree, auto take.";
+    await F("runExtract")(tavern.chat[9].mes, "", true, 9);
+    ok(!bp.disabled, "自动注入完「重新生成」不再灰掉，画得不满意直接点");
+    // 「手动提取」照旧：只进预览框，不碰楼里
+    const before = mes();
+    desc = "A girl under the plum tree, manual take.";
+    await w.eval("onExtract")();
+    ok(mes() === before && String(box(w, "ipe-preview-text")).indexOf("manual take") >= 0, "「手动提取」照旧只进预览框，楼里不动，等你点确认注入");
+    // 请求失败自动重试：重试也按「换掉原来那段」
+    let retryArgs = null;
+    w.ipeScheduleApiRetry = function(){ retryArgs = Array.prototype.slice.call(arguments); };
+    w.fetch = async () => ({ ok: false, status: 503, text: async () => "busy" });
+    await w.eval("onReroll")();
+    ok(retryArgs && retryArgs[2] === "replace", "请求失败要自动重试时，带着「换掉原来那段」去重试（不会重试成追加第二段）", JSON.stringify(retryArgs && retryArgs[2]));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

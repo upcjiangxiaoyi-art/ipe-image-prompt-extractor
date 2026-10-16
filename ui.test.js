@@ -321,6 +321,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.imgAutoGreeting === false && !gd.checked && d.querySelector('#ipe-status').textContent.includes('开场白不自动出图'), '关掉浮窗那个：存下来，抽屉那个跟着关，状态行说开场白不自动出图了');
         gd.checked = true; gd.dispatchEvent(new w.Event('change'));
         check(settings.imgAutoGreeting === true && gp.checked, '打开抽屉那个：浮窗那个跟着开');
+        // 2.28.4 重新生成（自动注入）：浮窗、抽屉两颗都标着，一开始就能点
+        const rr = [d.querySelector('#ipe-btn-reroll'), d.querySelector('#iped-btn-reroll')];
+        check(rr[0] && rr[1] && rr[0].textContent === '重新生成（自动注入）' && rr[1].value === '重新生成（自动注入）' && !rr[0].disabled && !rr[1].disabled, '「重新生成（自动注入）」浮窗、抽屉两颗都标着，一开始就能点');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

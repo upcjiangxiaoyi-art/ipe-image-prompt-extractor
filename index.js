@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.3";
+var IPE_VERSION = "2.28.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6086,7 +6086,7 @@ function buildVisionUserPrompt(text, supplement, lockOverride) {
     var activeRules = ipeGetRuleValue();
     if (activeRules) user += "【提取规则】\n" + activeRules + "\n\n";
 
-    user += "【正文内容】\n" + ipeTrimSourceText(text);
+    user += "【正文内容】\n" + ipeTrimSourceText(ipeLedgerStripImageTag(text));   // 2.28.4 楼尾那段旧 <draw> 不算正文，重提时副 AI 不照着旧提示词抄
 
     if (supplement) user += "\n\n【补充指令】\n" + supplement;
 
@@ -7287,7 +7287,7 @@ function createPanel() {
         '<div class="ipe-preview-actions">'+
         '<button id="ipe-btn-save-now" class="ipe-btn">保存设置</button><button id="ipe-btn-extract" class="ipe-btn">手动提取</button>'+
         '<button id="ipe-btn-stop" class="ipe-btn" disabled>打断请求</button>'+
-        '<button id="ipe-btn-reroll" class="ipe-btn" disabled>重新生成</button>'+
+        '<button id="ipe-btn-reroll" class="ipe-btn" title="重提这一楼，提完直接换掉楼尾原来那段 &lt;draw&gt;，不用再点确认注入">重新生成<small class="ipe-btn-sub">（自动注入）</small></button>'+
         '<button id="ipe-btn-inject" class="ipe-btn ipe-btn-primary" disabled>确认注入</button></div>'+
         '<div class="ipe-preview-actions" style="margin-top:6px;align-items:center"><select id="ipe-reinject-tpl" style="flex:1;min-width:0"></select>'+
         '<button id="ipe-btn-reinject" class="ipe-btn" style="flex:none">换画风重注入</button></div>'+
@@ -7693,11 +7693,11 @@ function createDrawer() {
     h += '<label>补充指令</label><input type="text" id="iped-supplement" class="text_pole" placeholder="例：这段是冷战不是撒娇">';
     h += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center"><select id="iped-supp-presets" class="text_pole" style="flex:1;min-width:0"><option value="">常用短语…</option></select>';
     h += '<input type="button" id="iped-supp-save" class="menu_button" value="存为常用"><input type="button" id="iped-supp-del" class="menu_button" value="删"></div>';
-    h += '<div style="display:flex;gap:6px;margin-top:6px">';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">';   // 2.28.4「重新生成（自动注入）」变长了，窄屏放不下就换行
     h += '<input type="button" id="iped-btn-save-now" class="menu_button" value="保存设置">';
     h += '<input type="button" id="iped-btn-extract" class="menu_button" value="手动提取">';
     h += '<input type="button" id="iped-btn-stop" class="menu_button" value="打断请求" disabled>';
-    h += '<input type="button" id="iped-btn-reroll" class="menu_button" value="重新生成" disabled>';
+    h += '<input type="button" id="iped-btn-reroll" class="menu_button" value="重新生成（自动注入）" title="重提这一楼，提完直接换掉楼尾原来那段 &lt;draw&gt;，不用再点确认注入">';
     h += '<input type="button" id="iped-btn-inject" class="menu_button" value="确认注入" disabled>';
     h += '</div>';
     h += '<div style="display:flex;gap:6px;margin-top:6px;align-items:center"><select id="iped-reinject-tpl" class="text_pole" style="flex:1;min-width:0"></select>';
@@ -9709,7 +9709,8 @@ function reinjectDescToMessage(targetIdx, opts) {
             }
         }
     };
-    if (previewFirst) fromPreview();
+    if (opts.payload && String(opts.payload.desc || "").trim()) p = { desc: String(opts.payload.desc), layers: opts.payload.layers || null };   // 2.28.4 重新生成刚提出来的
+    else if (previewFirst) fromPreview();
     if (!p.desc && rec) p = { desc: rec.desc, layers: rec.layers };
     if (!p.desc) throw new Error(previewFirst ? "预览框是空的，先提取一次" : "这楼没有提取记录，先提取一次");
 
@@ -10157,15 +10158,18 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         currentDesc = desc; setPreview(desc);
 
         if (autoInjectNow) {
-            var result = injectDescToMessage(desc, typeof targetIdx === "number" ? targetIdx : currentIdx);
+            var injIdx = typeof targetIdx === "number" ? targetIdx : currentIdx;
+            var replaceOld = autoInjectNow === "replace";   // 2.28.4 重新生成：先摘这楼原来那段，再贴新的，楼里只留一段
+            var result = replaceOld ? reinjectDescToMessage(injIdx, { payload: ipeResolveInjectPayload(desc) })
+                                    : injectDescToMessage(desc, injIdx);
             if (result && result.injected) {
-                setStatus("提取完成并已自动注入 ✓" + layerNote,"#6ec577");
-                setBtns(false,false);
+                setStatus((replaceOld ? (result.replaced ? "重新生成完成，已换掉这楼原来那段 ✓" : "重新生成完成并已注入 ✓") : "提取完成并已自动注入 ✓") + layerNote,"#6ec577");
+                setBtns(true,false);   // 2.28.4 注入完「重新生成」还能点，不满意直接再来
                 var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
                 if(s1)s1.value=""; if(s2)s2.value="";
                 if(ball) ball.classList.remove("has-result");
             } else {
-                setStatus("提取完成，跳过自动注入（可能已注入）" + layerNote,"#6ec577");
+                setStatus((replaceOld ? "重新生成完成：跟这楼原来那段一字不差，楼里没动" : "提取完成，跳过自动注入（可能已注入）") + layerNote,"#6ec577");
                 setBtns(true,true);
                 if(ball) ball.classList.add("has-result");
             }
@@ -10185,7 +10189,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         setBtns(true,false); if(ball)ball.classList.remove("processing");
 
         if (ipeShouldRetryApiError(e, userAbort)) {
-            ipeScheduleApiRetry(text, supplement || "", !!autoInjectNow, targetIdx, retryAttempt, msg, lockOverride, e);
+            ipeScheduleApiRetry(text, supplement || "", autoInjectNow, targetIdx, retryAttempt, msg, lockOverride, e);   // 2.28.4 原样带过去：重试也按「换掉原来那段」
         }
     }
     ipeAbortController = null;
@@ -10194,11 +10198,17 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
     processing = false;
 }
 
+/* 2.28.4 重新生成（自动注入）：重提这一楼，提完直接换掉楼尾原来那段 <draw>（没有就贴上），不用再点「确认注入」。
+   以前提完只放进预览框，跟「手动提取」没两样。还没提取过（页面刚重新载入）就盯最后一条 AI 楼。 */
 async function onReroll() {
-    if(processing||currentIdx<0) return;
+    if (processing) return;
+    if (currentIdx < 0) {
+        try { var ch = ctx().chat || []; for (var i = ch.length - 1; i >= 0; i--) { if (ch[i] && !ch[i].is_user && ch[i].is_system !== true) { currentIdx = i; break; } } } catch(e0) {}
+        if (currentIdx < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }
+    }
     try{var msg=ctx().chat[currentIdx];if(!msg)return;
     var sup=q("#ipe-supplement");var supd=q("#iped-supplement");
-    await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", false, currentIdx);}catch(e){}
+    await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", "replace", currentIdx);}catch(e){}
 }
 
 async function onRerollLayer(layer) {
@@ -10223,7 +10233,7 @@ function onInject() {
     try {
         var result = injectDescToMessage("", currentIdx);
         if (result && result.injected) {
-            setStatus("已注入 ✓","#6ec577"); setBtns(false,false);
+            setStatus("已注入 ✓","#6ec577"); setBtns(true,false);   // 2.28.4 不满意还能点「重新生成」直接换掉
             var ball=q("#ipe-chat-quick-entry"); if(ball)ball.classList.remove("has-result");
             var s1=q("#ipe-supplement"),s2=q("#iped-supplement");
             if(s1)s1.value=""; if(s2)s2.value="";

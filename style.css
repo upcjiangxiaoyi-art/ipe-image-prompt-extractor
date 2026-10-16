@@ -2580,3 +2580,6 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 }
 .ipe-live-think { opacity: .72; font-style: italic; margin-bottom: 6px; }
 .ipe-live-out:empty::before { content: "（还没开始写）"; opacity: .45; }
+
+/* 2.28.4 重新生成（自动注入）：括号那句另起一行、小一号，手机上不再折成「自动注 / 入）」 */
+.ipe-btn .ipe-btn-sub { display: block; font-size: .8em; line-height: 1.25; opacity: .75; margin-top: 1px; }
