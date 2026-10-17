@@ -328,6 +328,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const rt = [d.querySelector('#ipe-ledger-reroll-trim'), d.querySelector('#iped-ledger-reroll-trim')];
         const rk = [d.querySelector('#ipe-ledger-reroll-kw'), d.querySelector('#iped-ledger-reroll-kw')];
         check(rt.every(Boolean) && rk.every(Boolean) && rk.every(el => { const f = el.closest('details'); return f && f.querySelector('summary').textContent.includes('贴耳细节'); }), '「重 roll 时这一发不带本轮必须」浮窗、抽屉都有；关键词格在「贴耳细节」里');
+        // 2.28.6 生图段不发给主 AI：浮窗、抽屉各一个，都在「开场白也自动出图」下面，默认开着
+        const sp = [d.querySelector('#ipe-img-strip-prompt'), d.querySelector('#iped-img-strip-prompt')];
+        check(sp.every(el => el && el.checked) && sp[0].closest('label').parentElement.previousElementSibling.querySelector('#ipe-auto-greeting') && sp[1].closest('label').parentElement.previousElementSibling.querySelector('#iped-auto-greeting'), '「生图段不发给主 AI」浮窗、抽屉都有，在「开场白也自动出图」下面，默认开着');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

@@ -2398,6 +2398,53 @@ await (async () => {
     ok(r.st.ledgerRerollTrimKw === "硬性约束", "关键词存下来（去掉首尾空格）");
 })();
 
+console.log("\n【62】 生图段不发给主 AI（2.28.6）：酒馆组提示词前，插件自己把每条 AI 楼楼尾的生图段去掉（按全部画风模板认，含老聊天 image###），不用另装正则；只改酒馆交过来的副本，楼里存的不动；关掉就原样发");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_a", name: "水墨", value: "<draw>INK: {Description}</draw>" }, { id: "tpl_b", name: "别的包裹", value: "<pic>{Description}</pic>" }]);
+    st.activeBaseTemplate = "tpl_a";
+    F("injectDescToMessage")("a girl under the plum tree", 9);                    // 第 10 楼：<draw>
+    st.activeBaseTemplate = "tpl_b";
+    F("injectDescToMessage")("two people in the rain", 7);                         // 第 8 楼：<pic>
+    tavern.chat[5].mes += "\n\nimage###old style prompt###";                       // 第 6 楼：老聊天的 image###
+    tavern.chat[4].mes = "我说：你看这个 <draw>不是插件贴的</draw>";                 // 第 5 楼是 user 楼
+    const keep = tavern.chat.map(m => m.mes);
+    ok(keep[9].indexOf("<draw>INK: a girl") >= 0 && keep[7].indexOf("<pic>two people") >= 0, "前提：楼里贴着生图段");
+    const copy = () => tavern.chat.map(m => m);                                       // 酒馆交给拦截器的是聊天的副本（数组是新的）
+    let c = copy();
+    await w.ipeGenerateInterceptor(c, 0, () => {}, "normal");
+    ok(c[9].mes.indexOf("<draw>") < 0 && c[9].mes.indexOf("第 10 层正文") >= 0, "第 10 楼的 <draw> 去掉了，正文还在", c[9].mes);
+    ok(c[7].mes.indexOf("<pic>") < 0 && c[5].mes.indexOf("image###") < 0, "别的包裹标签、老聊天的 image### 也认");
+    ok(c[4] === tavern.chat[4] && c[4].mes.indexOf("<draw>不是插件贴的</draw>") >= 0, "user 楼不碰");
+    ok(c[3] === tavern.chat[3], "没有生图段的楼原样（同一个对象，不白拷贝）");
+    ok(tavern.chat.every((m, i) => m.mes === keep[i]) && c[9] !== tavern.chat[9], "楼里存的一个字没动：换成拷贝再改的");
+    F("ipeLedgerInspectEP")();
+    const out = String(w.document.querySelector("#ipe-ledger-ep-out").textContent || "");
+    ok(out.indexOf("【生图段】不发给主 AI，上一发从 3 楼里去掉了") >= 0, "看贴耳自检报：上一发从 3 楼里去掉了生图段", out.slice(0, 400));
+    // 一次生成只算一次「怎么剥」
+    const realPlan = w.ipeImgStripPlan; let plans = 0;
+    w.ipeImgStripPlan = function(){ plans++; return realPlan.apply(this, arguments); };
+    await w.ipeGenerateInterceptor(copy(), 0, () => {}, "swipe");
+    w.ipeImgStripPlan = realPlan;
+    ok(plans === 1, "一次生成只按模板算一次「怎么剥」，不是每楼都从头算（算了 " + plans + " 次）");
+    // 交过来的就是聊天本身：一个字都不碰
+    await w.ipeGenerateInterceptor(tavern.chat, 0, () => {}, "normal");
+    ok(tavern.chat[9].mes === keep[9] && tavern.chat[9].mes.indexOf("<draw>") >= 0, "万一酒馆交过来的就是聊天本身：不碰，楼里的生图段不会被抹掉");
+    // 关掉
+    st.imgStripFromPrompt = false;
+    c = copy();
+    await w.ipeGenerateInterceptor(c, 0, () => {}, "normal");
+    ok(c[9].mes.indexOf("<draw>") >= 0 && c.every((m, i) => m === tavern.chat[i]), "关掉：原样发");
+    // 面板开关
+    st.imgStripFromPrompt = true;
+    const cb = w.document.querySelector("#ipe-img-strip-prompt");
+    w.eval("ipeImgStripBindUI")();                                                   // 界面初始化 120ms 后才绑，这里直接绑上
+    ok(cb && cb.checked, "面板上有开关，默认开着");
+    cb.checked = false; cb.dispatchEvent(new w.Event("change"));
+    ok(st.imgStripFromPrompt === false && imgStatus(w).indexOf("原样发给主 AI") >= 0, "关掉开关：存下来，状态行说会原样发", imgStatus(w));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

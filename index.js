@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.5";
+var IPE_VERSION = "2.28.6";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -97,6 +97,7 @@ const DEFAULTS = {
     ledgerCompressPrompt: "",       // 2.19.0 压缩指令，空 = 内置默认
     ledgerCompressWarnChars: 3000,  // 账本超过这么多字提醒可以压缩
     ledgerApiProfile: "",
+    imgStripFromPrompt: true,      // 2.28.6 生图段不发给主 AI（插件自己拦，不用另装正则）
     imgAutoGreeting: true,         // 2.27.8 开场白也自动出图：关掉 = 开场白不自动提取，要图点「手动提取」
     bodyTag: "content",            // 2.27.7 正文标签：挂账、生图从这里取正文，新楼没收尾就不自动跑；留空 = 不认标签（照老样子认 <content>，只拦空回）
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
@@ -1123,8 +1124,12 @@ function ipeLedgerHistoryBlock(dry, forFloor) {
    前缀 = 第一个占位符之前，后缀 = 最后一个占位符之后（以前这种模板整段当字面量找，永远找不到，
    几千字的风格正文就原样喂进了挂账）。
    模板整体是 <xxx>…</xxx> 一对标签包着的，直接按标签对剥：模板正文后来改过、旧楼是老版模板注入的，一样认得。 */
-function ipeLedgerStripImageTag(text) {
-    var out = String(text || "");
+/* 2.28.6 剥生图段分两步：先按全部画风模板把「怎么剥」算好一份（ipeImgStripPlan），再拿去剥每一段正文。
+   发给主 AI 前要把几百楼都过一遍，画风模板一百多个，每楼都从头算一遍手机上吃不消；一次生成只算一次。
+   剥法跟以前一字不差：同样的模板、同样的先后，包裹标签一样的只留一条（第一条就把整段里的都剥干净了）。 */
+function ipeLedgerStripImageTag(text) { return ipeImgStripPlan()(text); }
+function ipeImgStripPlan() {
+    var ops = [], seenEnv = {};
     var tpls = [];
     try {
         var list = ipeGetBaseTemplates(), blocks = ipeGetCommonBlocks();
@@ -1157,13 +1162,13 @@ function ipeLedgerStripImageTag(text) {
         var phs = ipeImgTemplatePlaceholders(t);
         if (!phs.length) {
             // buildInjectTag 对无占位符模板是 tpl + desc 直接拼接：整个模板字面量就是前缀
-            if (t.trim()) out = stripTail(out, t);
+            if (t.trim()) ops.push({ tail: t });
             continue;
         }
         var envTag = ipeImgTemplateEnvelope(t);
         if (envTag) {
             // <draw>…</draw> 这类整体包裹：按标签对剥，不依赖中间那几千字风格正文一字不差
-            try { out = out.replace(new RegExp("\\s*<" + esc(envTag) + "\\s*>[\\s\\S]*?<\\/" + esc(envTag) + "\\s*>", "g"), ""); } catch(e) {}
+            if (!seenEnv[envTag]) { seenEnv[envTag] = true; try { ops.push({ re: new RegExp("\\s*<" + esc(envTag) + "\\s*>[\\s\\S]*?<\\/" + esc(envTag) + "\\s*>", "g") }); } catch(e) {} }
             continue;
         }
         var pre = t.slice(0, phs[0].i), suf = t.slice(phs[phs.length - 1].e);
@@ -1176,18 +1181,28 @@ function ipeLedgerStripImageTag(text) {
         }
         if (!pre && !suf) continue;
         if (pre && suf) {
-            var was = out;
-            try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
             // 2.23.0 后缀对不上（模板后半段或公共块改过，老楼是旧文本注入的）：注入永远在楼尾，退回按前缀剥到楼尾
-            if (out === was) out = stripTail(out, pre);
+            var rp = null;
+            try { rp = new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"); } catch(e) {}
+            ops.push({ re: rp, orTail: pre });
         } else if (pre) {
-            out = stripTail(out, pre);
+            ops.push({ tail: pre });
         } else {
             // 只有后缀：desc + suf 追加在楼尾，没有可靠起点，只能剥掉最后一段（最后一个空行之后到后缀）
-            try { out = out.replace(new RegExp("\\n\\n(?:(?!\\n\\n)[\\s\\S])*?" + esc(suf) + "\\s*$"), ""); } catch(e) {}
+            try { ops.push({ re: new RegExp("\\n\\n(?:(?!\\n\\n)[\\s\\S])*?" + esc(suf) + "\\s*$") }); } catch(e) {}
         }
     }
-    return out;
+    return function(text) {
+        var out = String(text || "");
+        for (var j = 0; j < ops.length; j++) {
+            var op = ops[j];
+            if (op.tail) { out = stripTail(out, op.tail); continue; }
+            var was = out;
+            if (op.re) { try { out = out.replace(op.re, ""); } catch(e) {} }
+            if (op.orTail && out === was) out = stripTail(out, op.orTail);
+        }
+        return out;
+    };
 }
 
 /* 段落按「多久变一次」排，越稳越靠前：副 AI 那头的前缀缓存只认从头起一字不差的那一段，
@@ -2034,7 +2049,28 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
    这是「贴耳落后一楼」的根治——以前只能喊一句提醒。
    ============================================================ */
 var ipeLedgerWaitedMs = 0;
+/* 2.28.6 生图段不发给主 AI：酒馆组提示词之前，把每条 AI 楼楼尾的生图段去掉（按你全部画风模板认，含老聊天的 image###）。
+   以前得另装一条酒馆正则（仅格式提示词），手滑删了主 AI 就每楼读几百词的英文提示词，还会学着自己往正文里写 <draw>。
+   只改酒馆交过来的那份副本，而且是换成拷贝再改：楼里存的、显示的都不动，生图插件照样画。万一交过来的就是聊天本身，一个字都不碰。
+   原来那条正则留着也没事，两边一起只是多剥一遍。 */
+var ipeImgStripLast = null;   // { n, at }：上一发去掉了几楼，看贴耳自检里报
+function ipeStripImageFromPrompt(chat) {
+    if (cfg().imgStripFromPrompt === false || !Array.isArray(chat) || !chat.length) return 0;
+    try { if (chat === ctx().chat) return 0; } catch(e) {}
+    var strip = ipeImgStripPlan(), n = 0;
+    for (var i = 0; i < chat.length; i++) {
+        var m = chat[i];
+        if (!m || m.is_user === true || typeof m.mes !== "string" || !m.mes) continue;
+        var t = strip(m.mes);
+        if (t.trim() === m.mes.trim()) continue;
+        chat[i] = Object.assign({}, m, { mes: t });
+        n++;
+    }
+    ipeImgStripLast = { n: n, at: Date.now() };
+    return n;
+}
 async function ipeGenerateInterceptor(chat, contextSize, abort, type) {
+    try { ipeStripImageFromPrompt(chat); } catch(eS) {}
     try {
         if (!ipeLedgerBusy) return;
         var t = String(type || "").toLowerCase();
@@ -2236,7 +2272,10 @@ function ipeLedgerInspectEP() {
             : "\n\u26A0\uFE0F 贴耳内容与账本现任对不上——这就是 roll 抢跑那类问题的现场")
         + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
 
-    head += ipeLedgerInlineReport() + "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
+    head += ipeLedgerInlineReport() + "\n";
+    head += "【生图段】" + (cfg().imgStripFromPrompt === false ? "关着：楼尾的生图段原样发给主 AI（要拦得另装正则）"
+        : "不发给主 AI" + (ipeImgStripLast ? "，上一发从 " + ipeImgStripLast.n + " 楼里去掉了" : "（还没发过）")) + "\n";
+    head += "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n";
 
     /* 只往只读框里写。绝不碰 #ipe-ledger-preview——那个框旁边就是「采用」，
        也绝不碰 #ipe-ledger-text——那是账本正文。自检文本一旦有被采用的可能，
@@ -5584,6 +5623,7 @@ function ipeImgBindLayerUI() {
     ipeImgStreamBindUI();
     ipeBodyTagBindUI();
     ipeGreetingBindUI();
+    ipeImgStripBindUI();
     ["ipe-layered", "iped-layered"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -7307,6 +7347,7 @@ function createPanel() {
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="ipe-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="开新聊天时，开场白也会被当成新楼自动提取出图。关掉 = 开场白不自动提取，要图点「手动提取」">开场白也自动出图 <input type="checkbox" id="ipe-auto-greeting"'+(c.imgAutoGreeting!==false?' checked':'')+'></label></div>'+
+        '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="发给主 AI 之前插件自己去掉楼尾的生图段，楼里存的、显示的都不动；不用再另装正则">生图段不发给主 AI（不用另装正则） <input type="checkbox" id="ipe-img-strip-prompt"'+(c.imgStripFromPrompt!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
         '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
         /* 2.26.0 实况：流式收到的思考与输出边收边显示，跑完也留着；第一次请求前藏着 */
@@ -7669,6 +7710,7 @@ function createDrawer() {
     h += '<div style="margin-bottom:6px"><label title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="iped-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label>自动注入 <input type="checkbox" id="iped-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label title="开新聊天时，开场白也会被当成新楼自动提取出图。关掉 = 开场白不自动提取，要图点「手动提取」">开场白也自动出图 <input type="checkbox" id="iped-auto-greeting"'+(c.imgAutoGreeting!==false?' checked':'')+'></label></div>';
+    h += '<div style="margin-bottom:6px"><label title="发给主 AI 之前插件自己去掉楼尾的生图段，楼里存的、显示的都不动；不用再另装正则">生图段不发给主 AI（不用另装正则） <input type="checkbox" id="iped-img-strip-prompt"'+(c.imgStripFromPrompt!==false?' checked':'')+'></label></div>';
     h += '<div style="margin:8px 0;display:flex;gap:6px"><input type="button" id="iped-open-panel" class="menu_button" value="打开 IPE 小面板"><input type="button" id="iped-reset-entry" class="menu_button" value="重置入口位置"></div>';
     h += '<div class="ipe-tabs" style="margin:8px 0">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
@@ -10112,6 +10154,18 @@ function ipeIsGreetingFloor(idx, type) {
 }
 function ipeGreetingRefreshUI() {
     ["ipe-auto-greeting", "iped-auto-greeting"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().imgAutoGreeting !== false; });
+}
+function ipeImgStripBindUI() {
+    ["ipe-img-strip-prompt", "iped-img-strip-prompt"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.checked = cfg().imgStripFromPrompt !== false;
+        el.addEventListener("change", function(){
+            save("imgStripFromPrompt", !!el.checked);
+            ["ipe-img-strip-prompt", "iped-img-strip-prompt"].forEach(function(o){ var x = q("#" + o); if (x) x.checked = !!el.checked; });
+            setStatus(el.checked ? "生图段不发给主 AI：发出去之前插件自己去掉楼尾的生图段，楼里存的、显示的都不动（原来装的正则留着也没事）"
+                                 : "生图段会原样发给主 AI：要拦就装正则，或者把这个打开", el.checked ? "#6ec577" : "#c9a227");
+        });
+    });
 }
 function ipeGreetingBindUI() {
     ["ipe-auto-greeting", "iped-auto-greeting"].forEach(function(id){
