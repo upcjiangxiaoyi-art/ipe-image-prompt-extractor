@@ -2442,11 +2442,46 @@ await (async () => {
     ok(["https://api.anthropic.com/v1", "https://API.Anthropic.com", "api.anthropic.com/v1/", "https://api.anthropic.com:443/v1"].every(x => OFF(x)), "官方地址几种写法都认");
     ok(!["http://x.test/v1", "https://api.anthropic.com.evil.example/v1", "https://relay.example/api.anthropic.com/v1", "https://xapi.anthropic.com/v1", ""].some(x => OFF(x)), "中转、长得像的地址都不算官方");
     ok(JSON.stringify(H(R, "k", true)) === JSON.stringify({ "Content-Type": "application/json", Authorization: "Bearer k" }) && JSON.stringify(H(R, "", false)) === "{}", "中转的请求头跟以前一模一样");
-    ok(JSON.stringify(H(A, "", false)) === JSON.stringify({ "anthropic-dangerous-direct-browser-access": "true" }), "官方没填 key：只带直连头，不发空的 x-api-key");
+    ok(JSON.stringify(H(A, "", false)) === JSON.stringify({ "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }), "官方没填 key：不发空的 x-api-key");
     ok(["claude-opus-5-5", "claude-sonnet-5", "claude-opus-4-7", "claude-fable-5-1", "claude-haiku-5-5"].every(m => !TOK(A, m)), "官方 + Claude 4.7 起：不发温度");
     ok(["claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514", "claude-opus-4-1-20250805", "claude-3-5-haiku-20241022", "claude-opus-4-6"].every(m => TOK(A, m)) && TOK(R, "claude-opus-5-5"), "官方老模型、中转：温度照发");
     eq(w.eval("buildChatUrl")("https://api.anthropic.com/v1/messages"), A + "/chat/completions", "照着文档填了 /v1/messages：也回退到 /v1");
     eq(w.eval("buildModelsUrl")("https://api.anthropic.com"), A + "/models", "只填域名：补 /v1");
+})();
+
+console.log("\n【63】 官方地址带上 anthropic-version（2.28.9）：官方规定每个请求都必须带，2.28.8 漏了，拉模型回 400；接口报错只留原因（type + message），认得的补一句中文");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const A = "https://api.anthropic.com/v1";
+    const st = withApi(tavern, F, "claude-opus-5-5");
+    st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "t", endpoint: A, key: "sk-ant-x", model: "claude-opus-5-5" }]);
+    let hd = {};
+    w.fetch = async (u, o) => { hd = o.headers || {}; return { ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>带版本头挂的账，够长够长够长够长够长够长。</ledger>"}}]}\n\n', 'data: [DONE]\n\n']) }; };
+    await F("ipeLedgerRun")(9, false);
+    ok(hd["anthropic-version"] === "2023-06-01" && hd["x-api-key"] === "sk-ant-x" && hd["anthropic-dangerous-direct-browser-access"] === "true", "挂账：官方地址三个头都带（跟官方 SDK 在浏览器里带的一样）", JSON.stringify(hd));
+    st.apiEndpoint = A; st.apiKey = "sk-ant-x"; st.model = "claude-sonnet-5-5"; st.imgStream = false;
+    const NATIVE400 = JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "anthropic-version: header is required" }, request_id: "req_011abc" });
+    w.fetch = async (u, o) => { hd = o.headers || {}; return { ok: false, status: 400, text: async () => NATIVE400 }; };
+    let err = null;
+    try { await w.eval("ipeImgChat")({ model: "claude-sonnet-5-5", messages: [{ role: "user", content: "x" }] }, {}); } catch (e) { err = e; }
+    ok(hd["anthropic-version"] === "2023-06-01", "生图请求也带版本头", JSON.stringify(hd));
+    ok(err && err.message === "API 400：invalid_request_error：anthropic-version: header is required（缺版本头：把插件更新到最新版）", "生图报错只留原因，前面的 JSON 壳去掉了", err && err.message);
+    st.apiEndpoint = "http://x.test/v1";
+    try { await w.eval("ipeImgChat")({ model: "claude-sonnet-5-5", messages: [{ role: "user", content: "x" }] }, {}); } catch (e) {}
+    ok(!("anthropic-version" in hd) && hd.Authorization === "Bearer sk-ant-x", "中转：不带版本头，照旧 Bearer", JSON.stringify(hd));
+
+    const B = w.eval("ipeApiErrBody");
+    eq(B(400, JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits." } })),
+       "invalid_request_error：Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.（余额不够：去官方后台充值）", "余额不够：补一句去充值");
+    eq(B(401, JSON.stringify({ error: { code: "authentication_error", message: "Invalid Anthropic API Key", type: "invalid_request_error", param: null } })),
+       "invalid_request_error：Invalid Anthropic API Key（key 不对：看看复制全了没有、是不是这个地址的 key）", "OpenAI 格式的报错也认，401 补一句 key 不对");
+    eq(B(404, JSON.stringify({ type: "error", error: { type: "not_found_error", message: "model: claude-opus-9" } })),
+       "not_found_error：model: claude-opus-9（没有这个模型：先点「加载模型」，从列表里选）", "模型名不对：补一句去列表里选");
+    eq(B(403, JSON.stringify({ error: "Forbidden" })), "Forbidden", "{\"error\":\"…\"} 这种也认");
+    eq(B(502, "bad gateway"), "bad gateway", "不是 JSON：照旧截原文");
+    eq(B(500, "x".repeat(400), 100).length, 100, "不是 JSON：按给的长度截");
+    eq(B(400, JSON.stringify({ choices: [] })), JSON.stringify({ choices: [] }), "是 JSON 但没有 message：照旧原文");
+    eq(B(400, JSON.stringify({ error: { message: "y".repeat(500) } })).length, 300, "message 太长：截到 300 字");
 })();
 
 console.log("\n" + "\u2500".repeat(46));

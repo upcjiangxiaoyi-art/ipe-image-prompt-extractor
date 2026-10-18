@@ -357,6 +357,22 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(cardWith('https://api.anthropic.com/v1/models?limit=1000').indexOf('api.anthropic.com（官方有地区限制）') >= 0, '官方地址还是 Load failed：卡片提醒看手机网络能不能连上官方');
         d.querySelector('#ipe-btn-test').click(); await delay(50);
         check(d.querySelector('#ipe-status').textContent.indexOf('连接失败：Load failed') === 0 && d.querySelector('#ipe-status').textContent.indexOf('跨域') >= 0, '「测试连接」Load failed 也补一句');
+        // 2.28.9 官方地址带上 anthropic-version；报错卡片第一行先说原因（A 社的 JSON 报错只留 type 和 message），请求地址放后面
+        anthropicUp = true;
+        d.querySelector('#ipe-btn-models').click(); await delay(50);
+        check(lastCall().headers['anthropic-version'] === '2023-06-01', '官方地址：拉模型带上 anthropic-version');
+        d.querySelector('#ipe-btn-test').click(); await delay(50);
+        check(lastCall().headers['anthropic-version'] === '2023-06-01', '「测试连接」也带');
+        w.fetch = async (url, opts) => {
+            calls3.push({ url, headers: (opts && opts.headers) || {} });
+            return { ok: false, status: 400, text: async () => JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.' }, request_id: 'req_011x' }) };
+        };
+        d.querySelector('#ipe-btn-models').click(); await delay(50);
+        const creditCard = cardWith('credit balance');
+        check(creditCard.indexOf('HTTP 400：invalid_request_error：Your credit balance is too low') === 0 && creditCard.indexOf('余额不够') > 0 && creditCard.indexOf('{"type"') < 0 && creditCard.indexOf('请求地址：https://api.anthropic.com/v1/models?limit=1000') > 0, '报错卡片第一行就是原因（余额不够），不再是半截 JSON 壳；请求地址挪到后面');
+        check(d.querySelector('#ipe-models-status').textContent.indexOf('余额不够') >= 0, '按钮下方那行也看得到原因');
+        d.querySelector('#ipe-btn-test').click(); await delay(50);
+        check(d.querySelector('#ipe-status').textContent.indexOf('连接失败：HTTP 400：invalid_request_error：Your credit balance') === 0, '「测试连接」的报错也只留原因');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

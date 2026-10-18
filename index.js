@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.8";
+var IPE_VERSION = "2.28.9";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1451,7 +1451,7 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
         dog.kick();
         if (!res.ok) {
             var errRaw = await res.text();
-            throw new Error("API " + res.status + "：" + errRaw.slice(0, 180));
+            throw new Error("API " + res.status + "：" + ipeApiErrBody(res.status, errRaw, 180));
         }
         var out, finish = "", reasonChars = 0;
         if (useStream) {
@@ -4874,6 +4874,8 @@ function ipeRefreshAnchorEditors() {
    官方就回「Disallowed CORS origin」，插件连回应都看不到。带上这个头就放行。
    key 也得换个头发：浏览器里发 Authorization: Bearer，官方根本收不到（实测同一个 key，curl 发认，Chromium 里发回「x-api-key header is required」），
    所以官方地址改发 x-api-key——官方文档写的就是它，/v1/models 和 /v1/chat/completions（OpenAI 兼容层）都认，请求体照旧是 OpenAI 格式。
+   2.28.9 还得带 anthropic-version：官方规定每个请求都必须带（官方 SDK 自动带，模型列表那页写的 optional 指的是 SDK 会替你填）；
+   2.28.8 漏了它，拉模型回 400 invalid_request_error。现在三个头跟官方 SDK 在浏览器里带的一模一样。
    只认官方域名：中转的头跟以前一模一样，有的中转跨域只放行固定几个头，多一个反而被拦。 */
 function ipeIsAnthropicOfficial(endpoint) {
     var m = String(endpoint || "").trim().match(/^(?:https?:\/\/)?([^\/?#:]+)/i);
@@ -4886,6 +4888,7 @@ function ipeApiHeaders(endpoint, key, json) {
         return h;
     }
     if (key) h["x-api-key"] = key;
+    h["anthropic-version"] = "2023-06-01";
     h["anthropic-dangerous-direct-browser-access"] = "true";
     return h;
 }
@@ -4906,6 +4909,36 @@ function ipeIsNetworkError(e) {
         && /load failed|failed to fetch|networkerror|network connection|network request failed|could not be found|offline/i.test(String(e.message || ""));
 }
 var IPE_NET_ERR_SHORT = "（浏览器没让插件看到任何回应：多半是跨域被拦，或网络到不了这个地址）";
+
+/* 2.28.9 接口报错以前把原文前一两百字直接塞进状态行和卡片，手机上卡片又只露前几行。
+   A 社这类 JSON 报错 {"type":"error","error":{"type":"…","message":"…"}}，原因在 message 里，前面全是壳，看到的永远是半截壳。
+   现在认出是 JSON 报错（A 社格式、OpenAI 格式 {"error":{"message":…}}、{"error":"…"} 都认），只留 type 和 message，认得的再补一句中文；
+   不是 JSON 的照旧截原文。 */
+function ipeApiErrBody(status, raw, max) {
+    var s = String(raw == null ? "" : raw), msg = "", type = "";
+    try {
+        var j = JSON.parse(s);
+        if (j && typeof j === "object") {
+            var e = (j.error && typeof j.error === "object") ? j.error : j;
+            if (typeof e.message === "string") { msg = e.message; type = String(e.type || e.code || ""); }
+            else if (typeof j.error === "string") msg = j.error;
+        }
+    } catch(_e) {}
+    if (!msg.trim()) return s.slice(0, max || 180);
+    if (type === "error") type = "";
+    var hint = ipeApiErrHint(status, msg);
+    return (type ? type + "：" : "") + msg.slice(0, 300) + (hint ? "（" + hint + "）" : "");
+}
+function ipeApiErrHint(status, msg) {
+    var m = String(msg || "").toLowerCase();
+    if (/credit balance is too low/.test(m)) return "余额不够：去官方后台充值";
+    if (/anthropic-version/.test(m)) return "缺版本头：把插件更新到最新版";
+    if (status === 401 || /invalid x-api-key|invalid anthropic api key|invalid api key|incorrect api key/.test(m)) return "key 不对：看看复制全了没有、是不是这个地址的 key";
+    if (status === 404 && /model/.test(m)) return "没有这个模型：先点「加载模型」，从列表里选";
+    if (status === 429) return "请求太快或额度到顶了，等一会儿再试";
+    if (status === 529 || /overloaded/.test(m)) return "那边现在太忙，过一会儿再试";
+    return "";
+}
 
 function normalizeApiBase(base) {
     var url = (base || "").trim();
@@ -5062,7 +5095,7 @@ async function fetchModels() {
         var raw = await res.text();
 
         if (!res.ok) {
-            throw new Error("HTTP " + res.status + "：" + raw.slice(0, 180));
+            throw new Error("HTTP " + res.status + "：" + ipeApiErrBody(res.status, raw, 180));
         }
 
         var data;
@@ -5126,7 +5159,7 @@ async function fetchModels() {
             ipeNotice({
                 kind: "error",
                 title: "小海螺 · 拉取模型失败",
-                body: "请求地址：" + url + "\n" + msg
+                body: msg + "\n请求地址：" + url
                     + "\n下拉里旧 API 的列表已清空。"
                     + (net
                         ? "「" + msg + "」是浏览器说：一个回应都没让插件看到。多半是这个地址不让网页直接调（跨域被拦），或者手机网络到不了它；具体原因浏览器不告诉插件。"
@@ -5170,7 +5203,7 @@ async function testConnection() {
         var raw = await res.text();
 
         if (!res.ok) {
-            throw new Error("HTTP " + res.status + "：" + raw.slice(0, 180));
+            throw new Error("HTTP " + res.status + "：" + ipeApiErrBody(res.status, raw, 180));
         }
 
         setStatus("连接成功 ✓", "#6ec577");
@@ -6351,7 +6384,7 @@ async function ipeImgChat(body, opts) {
         connected = true; paint(true);
         if (!res.ok) {
             var errRaw = await res.text();
-            throw new Error("API " + res.status + "：" + errRaw.slice(0, 220));
+            throw new Error("API " + res.status + "：" + ipeApiErrBody(res.status, errRaw, 220));
         }
         var text = "", finish = "";
         if (useStream) {
@@ -9383,7 +9416,7 @@ function bindAll() {
                     body: JSON.stringify({ model: it.model, messages: [{ role: "user", content: "ping" }], stream: false })
                 }, 30000);
                 var raw = await res.text();
-                if (!res.ok) { ipeLedgerStatus("连接失败 " + res.status + "：" + raw.slice(0, 100), "#d4726a"); return; }
+                if (!res.ok) { ipeLedgerStatus("连接失败 " + res.status + "：" + ipeApiErrBody(res.status, raw, 100), "#d4726a"); return; }
                 ipeLedgerStatus("连接正常 \u2713 模型 " + (it.model || "?"), "#6ec577");
             } catch(e) { ipeLedgerStatus("连接失败：" + (e && e.message ? e.message : e) + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a"); }
         });

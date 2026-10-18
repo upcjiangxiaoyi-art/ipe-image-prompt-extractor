@@ -2,6 +2,14 @@
 
 SillyTavern 双管线辅助插件：**生图提取** + **挂账账本**。
 
+## 2.28.9 · A 社官方 API 补上版本头
+
+- 2.28.8 修好 Load failed 之后，ripple 实测「加载模型」回「HTTP 400 invalid_request_error」。原因是漏了一个头：A 社规定每个请求都必须带 `anthropic-version`，官方 SDK 会自动带。2.28.8 照着模型列表那页写的「optional」把它省了，那页的 optional 指的是 SDK 会替你填。
+- 现在官方地址的请求带上 `anthropic-version: 2023-06-01`。三个头（`x-api-key`、`anthropic-version`、`anthropic-dangerous-direct-browser-access`）跟官方 TypeScript SDK 在浏览器里带的一模一样，对过 SDK 源码。中转照旧。
+- 报错看得懂了：以前把接口回的原文前一两百字直接塞进卡片和状态行。A 社的 JSON 报错前面全是壳，手机上卡片又只露前几行，原因正好被截掉。现在认出是 JSON 报错（A 社格式、OpenAI 格式都认），只留类型和原因；余额不够、缺版本头、key 不对、没有这个模型、请求太快、那边太忙，这几种再补一句中文。不是 JSON 的报错照旧截原文。拉模型、测试连接、挂账、生图提取、外貌整理的报错都一样。
+- 拉模型失败的卡片把原因放第一行，请求地址挪到后面。
+- 验证：`npm test` 新增【63】（共 715 项），`npm run test:ui` 加 5 项（共 145 项），在 2.28.8 上都不过；其余五套照常通过。真浏览器从网页里带这三个头直连官方，跨域照样放行，假 key 读得到官方回的「invalid x-api-key」。
+
 ## 2.28.8 · A 社官方 API 能直连
 
 - 预设地址填 `https://api.anthropic.com/v1`（A 社官方），以前一点「加载模型」就报「Load failed」。不是内容审核，也不是 key：A 社官方接口默认不让网页里的脚本直接调。浏览器先发一个跨域预检，请求头里没带 `anthropic-dangerous-direct-browser-access`，官方直接回「Disallowed CORS origin」，浏览器连回应都不给插件看，Safari 只显示一句 Load failed。
@@ -409,8 +417,9 @@ SillyTavern 双管线辅助插件：**生图提取** + **挂账账本**。
 
 ## 版本
 
-当前版本：`2.28.8`
+当前版本：`2.28.9`
 
+- 2.28.9 A 社官方 API 补上版本头：补上漏掉的 anthropic-version，拉模型不再 400；报错只留原因，常见的补一句中文。
 - 2.28.8 A 社官方 API 能直连：地址填 api.anthropic.com 时请求带上浏览器直连要的请求头、key 走 x-api-key，不再 Load failed；Claude 4.7 起的模型不发温度；中转照旧。
 - 2.28.7 撤回 2.28.6：内置的「生图段不发给主 AI」在手机上没生效，撤回；照旧用酒馆正则（仅格式提示词）。
 - 2.28.5 重 roll 不带本轮必须：开了开关，重 roll 那一发把账本里「本轮必须」那一段换成「本轮无硬性约束」再贴给主 AI，roll 完恢复；账本不动。
