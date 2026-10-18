@@ -2398,6 +2398,57 @@ await (async () => {
     ok(r.st.ledgerRerollTrimKw === "硬性约束", "关键词存下来（去掉首尾空格）");
 })();
 
+console.log("\n【62】 A 社官方地址能直连（2.28.8）：api.anthropic.com 带上浏览器直连要的请求头（不带的话跨域预检被拒，Safari 只报 Load failed）；Claude 4.7 起的模型不发温度；中转一个头都不多加");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const A = "https://api.anthropic.com/v1", R = "http://x.test/v1", DH = "anthropic-dangerous-direct-browser-access";
+    const st = withApi(tavern, F, "claude-opus-5-5");
+    const useLedgerApi = (endpoint, model) => { st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "t", endpoint, key: "sk-ant-x", model }]); };
+    let url = "", hd = {}, sent = {};
+    w.fetch = async (u, o) => { url = u; hd = o.headers || {}; sent = JSON.parse(o.body); return { ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>官方直连挂的账，够长够长够长够长够长够长。</ledger>"}}]}\n\n', 'data: [DONE]\n\n']) }; };
+    useLedgerApi(A, "claude-opus-5-5");
+    await F("ipeLedgerRun")(9, false);
+    ok(url === A + "/chat/completions" && hd[DH] === "true" && hd["x-api-key"] === "sk-ant-x" && !("Authorization" in hd), "挂账：打到官方的 OpenAI 兼容口，带着直连头，key 走 x-api-key（浏览器里发 Bearer 官方收不到）", url + " " + JSON.stringify(hd));
+    ok(!("temperature" in sent), "挂账：claude-opus-5-5 不发温度（发 0.2 官方直接 400）", JSON.stringify(sent).slice(0, 160));
+    ok(F("ipeLedgerRead")().current.indexOf("官方直连挂的账") >= 0, "账照常落下", statusText(w));
+    useLedgerApi(R, "claude-opus-5-5");
+    await F("ipeLedgerRun")(9, false);
+    ok(url === R + "/chat/completions" && !(DH in hd) && !("x-api-key" in hd) && hd.Authorization === "Bearer sk-ant-x" && sent.temperature === 0.2, "同一个模型走中转：照旧 Bearer、不加头、温度照发 0.2，跟以前一样", JSON.stringify(hd));
+    useLedgerApi(A, "claude-sonnet-4-5-20250929");
+    await F("ipeLedgerRun")(9, false);
+    ok(hd[DH] === "true" && sent.temperature === 0.2, "官方的老模型（4.5）：带头，温度照发");
+
+    // 生图提取、外貌整理都走 ipeImgChat
+    st.apiEndpoint = A; st.apiKey = "sk-ant-x"; st.model = "claude-sonnet-5-5"; st.imgStream = false;
+    w.fetch = async (u, o) => { url = u; hd = o.headers || {}; sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "a girl by the window" } }] }) }; };
+    const out = await w.eval("ipeImgChat")({ model: "claude-sonnet-5-5", messages: [{ role: "user", content: "x" }], temperature: 0.2 }, {});
+    ok(url === A + "/chat/completions" && hd[DH] === "true" && hd["x-api-key"] === "sk-ant-x" && !("Authorization" in hd) && !("temperature" in sent), "生图请求：官方直连带头、key 走 x-api-key、不发温度", JSON.stringify(sent).slice(0, 160));
+    ok(String(out).indexOf("a girl by the window") >= 0, "正文照常拿回来", String(out));
+    st.apiEndpoint = R;
+    await w.eval("ipeImgChat")({ model: "claude-sonnet-5-5", messages: [{ role: "user", content: "x" }], temperature: 0.2 }, {});
+    ok(url === R + "/chat/completions" && !(DH in hd) && sent.temperature === 0.2, "生图走中转：不加头、温度照发");
+
+    // 挂账页「测试连接」：也带头；Load failed 时状态行说清楚
+    useLedgerApi(A, "claude-opus-5-5");
+    hd = {};
+    w.fetch = async (u, o) => { url = u; hd = o.headers || {}; throw new TypeError("Load failed"); };
+    w.document.querySelector("#ipe-ledger-test").click();
+    await new Promise(r => setTimeout(r, 30));
+    ok(hd[DH] === "true" && hd["x-api-key"] === "sk-ant-x", "挂账页「测试连接」也带直连头、key 走 x-api-key", JSON.stringify(hd));
+    ok(statusText(w).indexOf("Load failed") >= 0 && statusText(w).indexOf("跨域") >= 0, "Load failed：状态行补一句，是浏览器没让插件看到回应（跨域被拦 / 网络不通）", statusText(w));
+
+    // 认地址、认模型
+    const OFF = w.eval("ipeIsAnthropicOfficial"), TOK = w.eval("ipeApiTempOk"), H = w.eval("ipeApiHeaders");
+    ok(["https://api.anthropic.com/v1", "https://API.Anthropic.com", "api.anthropic.com/v1/", "https://api.anthropic.com:443/v1"].every(x => OFF(x)), "官方地址几种写法都认");
+    ok(!["http://x.test/v1", "https://api.anthropic.com.evil.example/v1", "https://relay.example/api.anthropic.com/v1", "https://xapi.anthropic.com/v1", ""].some(x => OFF(x)), "中转、长得像的地址都不算官方");
+    ok(JSON.stringify(H(R, "k", true)) === JSON.stringify({ "Content-Type": "application/json", Authorization: "Bearer k" }) && JSON.stringify(H(R, "", false)) === "{}", "中转的请求头跟以前一模一样");
+    ok(JSON.stringify(H(A, "", false)) === JSON.stringify({ "anthropic-dangerous-direct-browser-access": "true" }), "官方没填 key：只带直连头，不发空的 x-api-key");
+    ok(["claude-opus-5-5", "claude-sonnet-5", "claude-opus-4-7", "claude-fable-5-1", "claude-haiku-5-5"].every(m => !TOK(A, m)), "官方 + Claude 4.7 起：不发温度");
+    ok(["claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514", "claude-opus-4-1-20250805", "claude-3-5-haiku-20241022", "claude-opus-4-6"].every(m => TOK(A, m)) && TOK(R, "claude-opus-5-5"), "官方老模型、中转：温度照发");
+    eq(w.eval("buildChatUrl")("https://api.anthropic.com/v1/messages"), A + "/chat/completions", "照着文档填了 /v1/messages：也回退到 /v1");
+    eq(w.eval("buildModelsUrl")("https://api.anthropic.com"), A + "/models", "只填域名：补 /v1");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

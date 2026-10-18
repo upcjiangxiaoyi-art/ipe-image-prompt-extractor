@@ -328,6 +328,35 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const rt = [d.querySelector('#ipe-ledger-reroll-trim'), d.querySelector('#iped-ledger-reroll-trim')];
         const rk = [d.querySelector('#ipe-ledger-reroll-kw'), d.querySelector('#iped-ledger-reroll-kw')];
         check(rt.every(Boolean) && rk.every(Boolean) && rk.every(el => { const f = el.closest('details'); return f && f.querySelector('summary').textContent.includes('贴耳细节'); }), '「重 roll 时这一发不带本轮必须」浮窗、抽屉都有；关键词格在「贴耳细节」里');
+        // 2.28.8 A 社官方地址：拉模型、测试连接都带上浏览器直连要的头，模型一次拉全；Load failed 时卡片说清楚是浏览器没让看到回应，别再让人去查 /models 和 key
+        const calls3 = [];
+        let anthropicUp = true;
+        w.fetch = async (url, opts) => {
+            calls3.push({ url, headers: (opts && opts.headers) || {} });
+            if (anthropicUp && url.indexOf('api.anthropic.com') >= 0) return { ok: true, status: 200, text: async () => JSON.stringify({ data: [{ type: 'model', id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5' }, { type: 'model', id: 'claude-sonnet-5-5', display_name: 'Claude Sonnet 5.5' }], has_more: false, first_id: 'claude-opus-5-5', last_id: 'claude-sonnet-5-5' }) };
+            throw new TypeError('Load failed');
+        };
+        const lastCall = () => calls3[calls3.length - 1] || { url: '', headers: {} };
+        const cardWith = s => [...d.querySelectorAll('#ipe-notice-stack .ipe-notice-body')].map(el => el.textContent).find(t => t.indexOf(s) >= 0) || '';
+        endpoint.value = 'https://api.anthropic.com/v1'; endpoint.dispatchEvent(new w.Event('input', { bubbles: true }));
+        key.value = 'sk-ant-x'; key.dispatchEvent(new w.Event('input', { bubbles: true }));
+        d.querySelector('#ipe-btn-models').click(); await delay(50);
+        check(lastCall().url === 'https://api.anthropic.com/v1/models?limit=1000' && lastCall().headers['anthropic-dangerous-direct-browser-access'] === 'true' && lastCall().headers['x-api-key'] === 'sk-ant-x' && !('Authorization' in lastCall().headers), 'A 社官方地址：拉模型带上直连头、key 走 x-api-key、一次拉全（limit=1000）');
+        check(JSON.stringify(options(modelSel)) === JSON.stringify(['', 'claude-opus-5-5', 'claude-sonnet-5-5']), '官方的模型列表照常进下拉');
+        d.querySelector('#ipe-btn-test').click(); await delay(50);
+        check(lastCall().url === 'https://api.anthropic.com/v1/chat/completions' && lastCall().headers['anthropic-dangerous-direct-browser-access'] === 'true' && d.querySelector('#ipe-status').textContent.indexOf('连接成功') === 0, '「测试连接」也带直连头');
+        endpoint.value = 'https://relay.example/v1'; endpoint.dispatchEvent(new w.Event('input', { bubbles: true }));
+        d.querySelector('#ipe-btn-models').click(); await delay(50);
+        check(lastCall().url === 'https://relay.example/v1/models' && !('anthropic-dangerous-direct-browser-access' in lastCall().headers) && lastCall().headers.Authorization === 'Bearer sk-ant-x' && !('x-api-key' in lastCall().headers), '中转：地址、请求头都跟以前一样（照旧 Bearer）');
+        const relayCard = cardWith('https://relay.example/v1/models');
+        check(relayCard.indexOf('一个回应都没让插件看到') >= 0 && relayCard.indexOf('跨域') >= 0 && relayCard.indexOf('常见原因：这个中转不提供 /models') < 0 && relayCard.indexOf('官方有地区限制') < 0, 'Load failed：卡片说是浏览器没让插件看到回应（跨域 / 网络），不再让人去查 /models 和 key');
+        check(d.querySelector('#ipe-models-status').textContent.indexOf('跨域') >= 0, '按钮下方那行也补了一句');
+        anthropicUp = false;
+        endpoint.value = 'https://api.anthropic.com/v1'; endpoint.dispatchEvent(new w.Event('input', { bubbles: true }));
+        d.querySelector('#ipe-btn-models').click(); await delay(50);
+        check(cardWith('https://api.anthropic.com/v1/models?limit=1000').indexOf('api.anthropic.com（官方有地区限制）') >= 0, '官方地址还是 Load failed：卡片提醒看手机网络能不能连上官方');
+        d.querySelector('#ipe-btn-test').click(); await delay(50);
+        check(d.querySelector('#ipe-status').textContent.indexOf('连接失败：Load failed') === 0 && d.querySelector('#ipe-status').textContent.indexOf('跨域') >= 0, '「测试连接」Load failed 也补一句');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

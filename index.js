@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.7";
+var IPE_VERSION = "2.28.8";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1399,8 +1399,7 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
     if (!item.model) throw new Error("这套 API 预设没有选模型");
     if (userOverride == null) ipeLedgerModeIngest(text, atFloor);      // 先读这楼的场景标记，再拼 system；压缩账本不读楼，沿用当前模式
 
-    var headers = { "Content-Type": "application/json" };
-    if (item.key) headers["Authorization"] = "Bearer " + item.key;
+    var headers = ipeApiHeaders(item.endpoint, item.key, true);
 
     var useStream = cfg().ledgerStream !== false;
 
@@ -1413,7 +1412,7 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
         ],
         stream: useStream
     };
-    if (!ipeLedgerIsReasoningModel(item.model)) body.temperature = 0.2;
+    if (!ipeLedgerIsReasoningModel(item.model) && ipeApiTempOk(item.endpoint, item.model)) body.temperature = 0.2;
     var eff = String(cfg().ledgerReasoningEffort || "").trim();
     if (eff) body.reasoning_effort = eff;
     var maxT = Math.floor(Number(cfg().ledgerMaxTokens) || 0);
@@ -4869,6 +4868,45 @@ function ipeRefreshAnchorEditors() {
     try { ipeRefreshAnchorLockUI(); } catch(eL) {}
 }
 
+/* ---- A 社官方地址直连（2.28.8） ----
+   预设地址填 https://api.anthropic.com/v1，以前拉模型只报一句「Load failed」——不是内容审核，也不是 key：
+   官方接口默认不让网页里的脚本直接调，浏览器先发一个跨域预检，请求头里没有 anthropic-dangerous-direct-browser-access，
+   官方就回「Disallowed CORS origin」，插件连回应都看不到。带上这个头就放行。
+   key 也得换个头发：浏览器里发 Authorization: Bearer，官方根本收不到（实测同一个 key，curl 发认，Chromium 里发回「x-api-key header is required」），
+   所以官方地址改发 x-api-key——官方文档写的就是它，/v1/models 和 /v1/chat/completions（OpenAI 兼容层）都认，请求体照旧是 OpenAI 格式。
+   只认官方域名：中转的头跟以前一模一样，有的中转跨域只放行固定几个头，多一个反而被拦。 */
+function ipeIsAnthropicOfficial(endpoint) {
+    var m = String(endpoint || "").trim().match(/^(?:https?:\/\/)?([^\/?#:]+)/i);
+    return !!m && m[1].toLowerCase() === "api.anthropic.com";
+}
+function ipeApiHeaders(endpoint, key, json) {
+    var h = json ? { "Content-Type": "application/json" } : {};
+    if (!ipeIsAnthropicOfficial(endpoint)) {
+        if (key) h["Authorization"] = "Bearer " + key;
+        return h;
+    }
+    if (key) h["x-api-key"] = key;
+    h["anthropic-dangerous-direct-browser-access"] = "true";
+    return h;
+}
+/* Claude 4.7 起（还有 Fable、Mythos）只收默认温度，发 0.2 官方直接 400。官方直连遇到这些就不发温度，用模型默认；
+   中转照旧，不动用得好好的配置。 */
+function ipeApiTempOk(endpoint, model) {
+    if (!ipeIsAnthropicOfficial(endpoint)) return true;
+    var r = String(model || "").trim().toLowerCase().match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
+    if (!r) return true;
+    if (r[1] === "fable" || r[1] === "mythos") return false;
+    var major = Number(r[2]), minor = r[3] ? Number(r[3]) : 0;
+    return major < 4 || (major === 4 && minor < 7);
+}
+/* fetch 自己抛的 TypeError（Safari「Load failed」、Chrome「Failed to fetch」）= 浏览器没让插件看到任何回应：
+   多半是这个地址不让网页直接调（跨域被拦），或者网络到不了。具体原因浏览器不告诉插件。 */
+function ipeIsNetworkError(e) {
+    return !!e && e.name === "TypeError"
+        && /load failed|failed to fetch|networkerror|network connection|network request failed|could not be found|offline/i.test(String(e.message || ""));
+}
+var IPE_NET_ERR_SHORT = "（浏览器没让插件看到任何回应：多半是跨域被拦，或网络到不了这个地址）";
+
 function normalizeApiBase(base) {
     var url = (base || "").trim();
     if (!url) return "";
@@ -4885,6 +4923,11 @@ function normalizeApiBase(base) {
     // 用户如果填了 /models，回退到基础 /v1
     if (url.indexOf("/models") >= 0) {
         url = url.replace(/\/models\/?$/, "");
+    }
+
+    // 2.28.8 照着 A 社文档填了完整的 /v1/messages，也回退到 /v1
+    if (/\/v1\/messages\/?$/.test(url)) {
+        url = url.replace(/\/messages\/?$/, "");
     }
 
     // 用户只填域名时，补 /v1
@@ -5002,8 +5045,8 @@ async function fetchModels() {
     }
 
     var url = buildModelsUrl(c.apiEndpoint);
-    var headers = {};
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    if (ipeIsAnthropicOfficial(c.apiEndpoint)) url += "?limit=1000";   // 官方一页默认只给 20 个
+    var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, false);
     var profileId = ipeGetActiveApiProfileId();
 
     try {
@@ -5069,6 +5112,7 @@ async function fetchModels() {
     } catch(e) {
         console.error("[IPE] fetchModels:", e);
         var msg = (e && e.name === "AbortError") ? "30 秒没回应，超时" : String((e && e.message) || e);
+        var net = ipeIsNetworkError(e);
         /* 2.19.4：失败以前只改预览区那行小字，下拉里旧 API 的列表原样挂着——
            手机上按钮在下面、状态行在上面，人看不到报错，只看到「还是旧列表」。
            现在：清掉旧列表、按钮旁边直接写失败、再弹一张常驻错误卡把请求地址写明。 */
@@ -5076,14 +5120,19 @@ async function fetchModels() {
         ["ipe-model", "iped-model"].forEach(function(sid) {
             ipeResetModelSelect(sid, saved, "拉取失败，旧列表已清空");
         });
-        setStatus("拉取模型失败：" + msg, "#d4726a");
-        ipeSetModelsStatus("拉取失败：" + msg, "#d4726a");
+        setStatus("拉取模型失败：" + msg + (net ? IPE_NET_ERR_SHORT : ""), "#d4726a");
+        ipeSetModelsStatus("拉取失败：" + msg + (net ? IPE_NET_ERR_SHORT : ""), "#d4726a");
         try {
             ipeNotice({
                 kind: "error",
                 title: "小海螺 · 拉取模型失败",
                 body: "请求地址：" + url + "\n" + msg
-                    + "\n下拉里旧 API 的列表已清空。常见原因：这个中转不提供 /models 接口、地址多写或少写了 /v1、key 不对。",
+                    + "\n下拉里旧 API 的列表已清空。"
+                    + (net
+                        ? "「" + msg + "」是浏览器说：一个回应都没让插件看到。多半是这个地址不让网页直接调（跨域被拦），或者手机网络到不了它；具体原因浏览器不告诉插件。"
+                          + "内容被拦、key 不对这类，正常都会带 HTTP 状态码回来，不是这一句。"
+                          + (ipeIsAnthropicOfficial(c.apiEndpoint) ? "\nA 社官方地址：插件已经带上直连要的请求头；还是这样，就看手机网络能不能连上 api.anthropic.com（官方有地区限制）。" : "")
+                        : "常见原因：这个中转不提供 /models 接口、地址多写或少写了 /v1、key 不对。"),
                 sticky: true
             });
         } catch(_e) {}
@@ -5098,8 +5147,7 @@ async function testConnection() {
     }
 
     var url = buildChatUrl(c.apiEndpoint);
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, true);
 
     var model = c.model || "gpt-4o-mini";
 
@@ -5128,7 +5176,7 @@ async function testConnection() {
         setStatus("连接成功 ✓", "#6ec577");
     } catch(e) {
         console.error("[IPE] testConnection:", e);
-        setStatus("连接失败：" + e.message, "#d4726a");
+        setStatus("连接失败：" + e.message + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a");
     }
 }
 
@@ -6237,8 +6285,8 @@ async function ipeImgChat(body, opts) {
     var c = cfg();
     var useStream = c.imgStream !== false;
     body.stream = useStream;
-    var headers = { "Content-Type": "application/json" };
-    if (c.apiKey) headers["Authorization"] = "Bearer " + c.apiKey;
+    var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, true);
+    if (!ipeApiTempOk(c.apiEndpoint, body.model)) delete body.temperature;   // 2.28.8 官方直连 + Claude 4.7 起：发了就 400
     var controller = opts.controller || (typeof AbortController !== "undefined" ? new AbortController() : null);
     /* 2.26.1 开口时限（opts.openLimit，提取用）：从发请求起算 N 秒还没写出正文第一个字就掐——思考、中转心跳都不算数，
        这类「连接活着、就是不出字」的，只看字节的看门狗永远判不死。开口之后不再卡时限，只防中途断流：连续 2N 秒没字节才掐。
@@ -9329,8 +9377,7 @@ function bindAll() {
             if (!it || !it.endpoint) { ipeLedgerStatus("先选一套 API 预设", "#d4726a"); return; }
             ipeLedgerStatus("正在测试…", "#6ec577");
             try {
-                var hd = { "Content-Type": "application/json" };
-                if (it.key) hd["Authorization"] = "Bearer " + it.key;
+                var hd = ipeApiHeaders(it.endpoint, it.key, true);
                 var res = await ipeFetchWithTimeout(buildChatUrl(it.endpoint), {
                     method: "POST", headers: hd,
                     body: JSON.stringify({ model: it.model, messages: [{ role: "user", content: "ping" }], stream: false })
@@ -9338,7 +9385,7 @@ function bindAll() {
                 var raw = await res.text();
                 if (!res.ok) { ipeLedgerStatus("连接失败 " + res.status + "：" + raw.slice(0, 100), "#d4726a"); return; }
                 ipeLedgerStatus("连接正常 \u2713 模型 " + (it.model || "?"), "#6ec577");
-            } catch(e) { ipeLedgerStatus("连接失败：" + (e && e.message ? e.message : e), "#d4726a"); }
+            } catch(e) { ipeLedgerStatus("连接失败：" + (e && e.message ? e.message : e) + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a"); }
         });
     });
 
