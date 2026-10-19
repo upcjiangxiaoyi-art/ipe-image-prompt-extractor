@@ -2484,6 +2484,47 @@ await (async () => {
     eq(B(400, JSON.stringify({ error: { message: "y".repeat(500) } })).length, 300, "message 太长：截到 300 字");
 })();
 
+console.log("\n【64】 自动提取关着会说（2.28.10）：以前开关一关，收到新楼一声不吭，状态行一直停在「等待新消息…」，看着像在等；现在直说关着、这楼没提取；挂账照常");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const { w, tavern, F } = boot(10);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.apiEndpoint = "http://x.test/v1"; st.apiKey = "k"; st.model = "gpt-4.1"; st.imgStream = false;
+    st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "t", endpoint: "http://x.test/v1", key: "k", model: "gpt-4.1" }]);
+    st.ledgerApiProfile = "api_1"; st.ledgerAutoRun = true;
+    let img = 0, led = 0;
+    w.fetch = async (u, o) => {
+        const isLedger = String(JSON.parse(o.body).messages[1].content).indexOf("【本轮正文】") >= 0;
+        if (isLedger) led++; else img++;
+        const content = isLedger ? "<ledger>开关关着也照挂的账，够长够长够长够长够长够长。</ledger>" : "a girl by the window, soft light";
+        return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) };
+    };
+    const status = () => w.document.querySelector("#ipe-status").textContent;
+    const cb = w.document.querySelector("#ipe-enabled");
+    cb.checked = false; cb.dispatchEvent(new w.Event("change"));
+    ok(st.enabled === false && status().indexOf("自动提取关着") === 0, "关掉开关：存下来，状态行马上说关着", status());
+    tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal");
+    await wait(50);
+    ok(status().indexOf("自动提取关着，第 10 楼没提取") === 0 && status().indexOf("手动提取") >= 0 && status().indexOf("挂账不受影响") >= 0, "收到新楼：直说关着、这楼没提取、要图点手动提取（不再停在「等待新消息…」）", status());
+    await wait(2600);
+    ok(img === 0 && status().indexOf("自动提取关着，第 10 楼没提取") === 0, "等过自动提取的延时：生图一个请求都没发", "生图请求 " + img);
+    ok(led >= 1 && F("ipeLedgerRead")().current.indexOf("开关关着也照挂的账") >= 0, "挂账照常跑、照常落账", "挂账请求 " + led);
+    cb.checked = true; cb.dispatchEvent(new w.Event("change"));
+    ok(st.enabled === true && status().indexOf("自动提取打开了") === 0, "打开开关：状态行说打开了", status());
+    tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal");
+    await wait(50);
+    ok(status().indexOf("已捕捉新正文") === 0, "开着：照旧捕捉新正文", status());
+    await wait(2600);
+    ok(img === 1, "开着：照旧自动提取", "生图请求 " + img);
+    // 页面重新载入（Safari 切后台常有）：一打开就看得出开关关着
+    st.enabled = false;
+    const r2 = boot(10, tavern);
+    ok(r2.w.document.querySelector("#ipe-status").textContent.indexOf("自动提取关着") === 0, "开关关着时重新载入：状态行一打开就说关着，不是「等待新消息…」", r2.w.document.querySelector("#ipe-status").textContent);
+    st.enabled = true;
+    const r3 = boot(10, tavern);
+    eq(r3.w.document.querySelector("#ipe-status").textContent, "等待新消息…", "开着重新载入：照旧「等待新消息…」");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

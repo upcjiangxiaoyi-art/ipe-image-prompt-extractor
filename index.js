@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.9";
+var IPE_VERSION = "2.28.10";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -6793,7 +6793,7 @@ function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAt
         ipeRetryTimer = null;
         try {
             if (!cfg().enabled) {
-                setStatus("自动重试已取消：插件已关闭", "#888");
+                setStatus("自动重试已取消：自动提取关了", "#888");
                 return;
             }
             if (processing) {
@@ -7270,7 +7270,7 @@ function createPanel() {
 
     var h = '<div class="ipe-panel-header">';
     h += '<span class="ipe-panel-title">🐚 小海螺 · IPE</span>';
-    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle"><input type="checkbox" id="ipe-enabled"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
+    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle" title="自动提取（只管生图，挂账有自己的开关）"><input type="checkbox" id="ipe-enabled" aria-label="自动提取"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
     h += '</div>';
     h += '<div class="ipe-tabs">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
@@ -7389,7 +7389,7 @@ function createPanel() {
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">自动注入 <input type="checkbox" id="ipe-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="开新聊天时，开场白也会被当成新楼自动提取出图。关掉 = 开场白不自动提取，要图点「手动提取」">开场白也自动出图 <input type="checkbox" id="ipe-auto-greeting"'+(c.imgAutoGreeting!==false?' checked':'')+'></label></div>'+
         '<div style="margin-bottom:6px;color:#888;font-size:12px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="ipe-layered"></label></div>'+
-        '<div id="ipe-status" class="ipe-preview-status">等待新消息…</div>'+
+        '<div id="ipe-status" class="ipe-preview-status">'+ipeIdleStatusText()+'</div>'+
         /* 2.26.0 实况：流式收到的思考与输出边收边显示，跑完也留着；第一次请求前藏着 */
         '<details id="ipe-live" class="ipe-fold ipe-live" data-ipe-fold="panel-image-live" open style="display:none">'+
             '<summary><span id="ipe-live-title">🛰 实况</span><span id="ipe-live-meta" class="ipe-live-meta"></span></summary>'+
@@ -7745,7 +7745,7 @@ function createDrawer() {
     h += '<div class="inline-drawer-toggle inline-drawer-header"><b>\uD83D\uDC1A 小海螺 · IPE</b>';
     h += '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>';
     h += '<div class="inline-drawer-content">';
-    h += '<div style="margin-bottom:6px"><label>启用 <input type="checkbox" id="iped-enabled"'+(c.enabled?' checked':'')+'></label></div>';
+    h += '<div style="margin-bottom:6px"><label>自动提取 <input type="checkbox" id="iped-enabled"'+(c.enabled?' checked':'')+'></label></div>';
     h += '<div style=\"margin-bottom:6px\"><label>显示快捷入口 <input type=\"checkbox\" id=\"iped-show-quick-entry\"'+(c.showQuickEntry?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label title="关掉 = 浮标不再泛波纹、不带阴影；挂账 / 生图时的脉冲和小灯照常">浮标动效（波纹 + 阴影） <input type="checkbox" id="iped-quick-motion"'+(c.quickEntryMotion!==false?' checked':'')+'></label></div>';
     h += '<div style="margin-bottom:6px"><label>自动注入 <input type="checkbox" id="iped-auto-inject"'+(c.autoInject?' checked':'')+'></label></div>';
@@ -7812,7 +7812,7 @@ function createDrawer() {
     h += '<small style="color:#888">生图和挂账都只从这个标签里取正文（这楼没有就用整楼）；新楼这个标签没收尾 = 没写完，自动生图、自动挂账先不跑。默认 content，不用带尖括号，几个就逗号隔开。留空 = 不认标签：照老样子认 &lt;content&gt;，只拦空回。跟挂账页「高级设置」里那格是同一个。</small>';
     h += '<hr><small><b>预览</b></small>';
     h += '<div style="margin:6px 0"><label>分层提取（镜头 / 环境 / 氛围 / 人物 / 动作） <input type="checkbox" id="iped-layered"></label></div>';
-    h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">等待新消息…</div>';
+    h += '<div id="iped-status" style="color:#888;font-size:12px;margin:4px 0">'+ipeIdleStatusText()+'</div>';
     h += '<details id="iped-live" class="ipe-fold ipe-live" data-ipe-fold="drawer-image-live" open style="display:none"><summary><span id="iped-live-title">🛰 实况</span><span id="iped-live-meta" class="ipe-live-meta"></span></summary><div class="ipe-fold-body">'
        + '<div id="iped-live-think-wrap" style="display:none"><div class="ipe-live-label">💭 思考</div><div id="iped-live-think" class="ipe-live-think"></div></div>'
        + '<div class="ipe-live-label">✍️ 输出</div><div id="iped-live-out" class="ipe-live-out"></div></div></details>';
@@ -8921,6 +8921,7 @@ function bindAll() {
             save("enabled", el.checked);
             var o=q("#"+(id==="ipe-enabled"?"iped-enabled":"ipe-enabled"));
             if(o) o.checked=el.checked;
+            setStatus(el.checked ? "自动提取打开了：收到新楼会自动提取" : IPE_AUTO_OFF_TEXT, el.checked ? "#6ec577" : "#888");
         });
     });
 
@@ -10204,8 +10205,13 @@ function ipeGreetingBindUI() {
     ipeGreetingRefreshUI();
 }
 
+/* 2.28.10 自动提取（浮窗右上角那个小开关、抽屉里「自动提取」那个勾）关着时，以前收到新楼一声不吭，
+   状态行一直停在「等待新消息…」，看着像在等，其实是开关关了。现在关着就直说。
+   不弹窗，只是生图页那行小字：只挂账、不用生图的人碰不到它。这个开关只管生图，挂账有自己的「自动挂账」。 */
+var IPE_AUTO_OFF_TEXT = "自动提取关着：收到新楼不会自动出图，要图点「手动提取」（只管生图，挂账不受影响）";
+function ipeIdleStatusText() { return cfg().enabled ? "等待新消息…" : IPE_AUTO_OFF_TEXT; }
+
 function onMsgReceived(idx, type) {
-    if (!cfg().enabled) return;
     try {
         var chat = ctx().chat || [];
         var i = Number(idx);
@@ -10220,6 +10226,10 @@ function onMsgReceived(idx, type) {
             }
             if (i < 0 || !msg) return;
             try { console.log("[IPE] 生图：事件没带楼号（收到:", idx, "），已自行定位第", i + 1, "楼"); } catch(eLg) {}
+        }
+        if (!cfg().enabled) {
+            setStatus("自动提取关着，第 " + (i + 1) + " 楼没提取：要图点「手动提取」，要自动出图把浮窗右上角的小开关打开（只管生图，挂账不受影响）", "#888");
+            return;
         }
         if (cfg().imgAutoGreeting === false && ipeIsGreetingFloor(i, type)) {
             setStatus("第 " + (i + 1) + " 楼是开场白，「开场白也自动出图」关着，这楼不自动提取；要图点「手动提取」", "#c9a227");

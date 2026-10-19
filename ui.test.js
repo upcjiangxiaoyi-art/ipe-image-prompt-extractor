@@ -373,6 +373,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(d.querySelector('#ipe-models-status').textContent.indexOf('余额不够') >= 0, '按钮下方那行也看得到原因');
         d.querySelector('#ipe-btn-test').click(); await delay(50);
         check(d.querySelector('#ipe-status').textContent.indexOf('连接失败：HTTP 400：invalid_request_error：Your credit balance') === 0, '「测试连接」的报错也只留原因');
+        // 2.28.10 自动提取开关说清楚自己管什么：抽屉里那个勾叫「自动提取」（以前叫「启用」，像总开关）；浮窗的小开关带说明；关上时两处状态行都直说
+        const en = [d.querySelector('#ipe-enabled'), d.querySelector('#iped-enabled')];
+        check(en[1].closest('label').textContent.trim() === '自动提取' && String(en[0].closest('label').getAttribute('title')).indexOf('自动提取') === 0, '抽屉里的勾叫「自动提取」，浮窗的小开关带说明');
+        en[1].checked = false; en[1].dispatchEvent(new w.Event('change'));
+        check(settings.enabled === false && !en[0].checked && d.querySelector('#ipe-status').textContent.indexOf('自动提取关着') === 0 && d.querySelector('#iped-status').textContent.indexOf('自动提取关着') === 0, '关掉抽屉那个：浮窗那个跟着关，两处状态行都说关着');
+        en[0].checked = true; en[0].dispatchEvent(new w.Event('change'));
+        check(settings.enabled === true && en[1].checked && d.querySelector('#ipe-status').textContent.indexOf('自动提取打开了') === 0, '打开浮窗那个：抽屉那个跟着开，状态行说打开了');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
