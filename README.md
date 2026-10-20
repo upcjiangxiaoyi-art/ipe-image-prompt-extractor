@@ -8,7 +8,7 @@ SillyTavern 双管线辅助插件：**生图提取** + **挂账账本**。
 - 发什么参数看地址：中转、OpenAI 发 `reasoning_effort`（跟以前一样）。A 社官方地址（api.anthropic.com）发官方自己的 `output_config.effort`：官方的 OpenAI 兼容层不认 `reasoning_effort`，文档写明忽略，以前选了也等于没选。Claude 没有 minimal，官方按 low 发；xhigh、max 只有 Claude 认。
 - 只给认 effort 的模型发：Opus 4.5 起、Sonnet 4.6 起、Haiku 5.5 起、Fable、Mythos。Sonnet 4.5、Haiku 4.5 这些老的发了官方 400，就不发。
 - 改了档位，状态行说一声发的是什么。存了不认识的值不发。
-- 验证：`npm test` 新增【65】（共 742 项），`npm run test:ui` 加 3 项（共 151 项），在 2.28.10 上都不过；其余五套照常通过。官方兼容层对 `output_config` 的处理没法在这边拿假 key 验（认证在前），等 ripple 实测。
+- 验证：`npm test` 新增【65】（共 742 项），`npm run test:ui` 加 3 项（共 151 项），在 2.28.10 上都不过；其余五套照常通过。官方兼容层收 `output_config.effort`：ripple 用官方地址选 low 实测，提取正常出图；提取生图词 low 就够。
 
 ## 2.28.10 · 自动提取关着会说
 
