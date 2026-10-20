@@ -380,6 +380,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.enabled === false && !en[0].checked && d.querySelector('#ipe-status').textContent.indexOf('自动提取关着') === 0 && d.querySelector('#iped-status').textContent.indexOf('自动提取关着') === 0, '关掉抽屉那个：浮窗那个跟着关，两处状态行都说关着');
         en[0].checked = true; en[0].dispatchEvent(new w.Event('change'));
         check(settings.enabled === true && en[1].checked && d.querySelector('#ipe-status').textContent.indexOf('自动提取打开了') === 0, '打开浮窗那个：抽屉那个跟着开，状态行说打开了');
+        // 2.28.11 思考强度：浮窗、抽屉各一个下拉（生图在人物锁「更多」里，挂账在高级设置里），改一个另一个跟着变
+        const ef = [d.querySelector('#ipe-img-effort'), d.querySelector('#iped-img-effort')];
+        check(ef.every(Boolean) && ef.every(s => s.options.length === 7 && s.value === '') && ef[1].closest('details').querySelector('summary').textContent.indexOf('思考强度') >= 0, '生图思考强度下拉浮窗、抽屉各一个，默认自动');
+        ef[1].value = 'medium'; ef[1].dispatchEvent(new w.Event('change'));
+        check(settings.imgReasoningEffort === 'medium' && ef[0].value === 'medium' && d.querySelector('#ipe-status').textContent.indexOf('思考强度 = medium') === 0, '改抽屉那个：存下来，浮窗那个跟着变，状态行说一声');
+        const lef = [d.querySelector('#ipe-ledger-effort'), d.querySelector('#iped-ledger-effort')];
+        check(lef.every(s => s && s.options.length === 7 && s.options[0].textContent === '自动（模型默认）'), '挂账那两个下拉的档位一样，第一项「自动」');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

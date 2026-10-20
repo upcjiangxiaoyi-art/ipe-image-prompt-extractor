@@ -2525,6 +2525,69 @@ await (async () => {
     eq(r3.w.document.querySelector("#ipe-status").textContent, "等待新消息…", "开着重新载入：照旧「等待新消息…」");
 })();
 
+console.log("\n【65】 思考强度可选（2.28.11）：生图提取 / 外貌整理也有了，默认「自动」= 不发；中转发 reasoning_effort，A 社官方地址发 output_config.effort（官方兼容层不认 reasoning_effort）；老模型不认就不发");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const A = "https://api.anthropic.com/v1", M = "http://x.test/v1";
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.imgStream = false; st.apiKey = "k";
+    let sent = null;
+    w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "a girl by the window" } }] }) }; };
+    const img = async (ep, model) => { st.apiEndpoint = ep; st.model = model; sent = null; await w.eval("ipeImgChat")({ model, messages: [{ role: "user", content: "x" }], temperature: 0.2 }, {}); return sent; };
+    let b = await img(M, "gpt-5");
+    ok(!("reasoning_effort" in b) && !("output_config" in b), "默认自动：中转什么都不发");
+    b = await img(A, "claude-opus-5-5");
+    ok(!("reasoning_effort" in b) && !("output_config" in b), "默认自动：官方也什么都不发");
+    st.imgReasoningEffort = "low";
+    b = await img(M, "gpt-5");
+    ok(b.reasoning_effort === "low" && !("output_config" in b), "中转 + low：发 reasoning_effort", JSON.stringify(b));
+    b = await img(A, "claude-opus-5-5");
+    ok(b.output_config && b.output_config.effort === "low" && !("reasoning_effort" in b), "官方 + claude-opus-5-5 + low：发 output_config.effort，不发 reasoning_effort（官方兼容层不认）", JSON.stringify(b));
+    st.imgReasoningEffort = "minimal";
+    b = await img(A, "claude-sonnet-5-5");
+    ok(b.output_config && b.output_config.effort === "low", "官方 + minimal：Claude 没有 minimal，按 low 发", JSON.stringify(b.output_config));
+    b = await img(M, "gpt-5-mini");
+    ok(b.reasoning_effort === "minimal", "中转 + minimal：原样发（GPT 认）");
+    st.imgReasoningEffort = "high";
+    b = await img(A, "claude-sonnet-4-5-20250929");
+    ok(!("output_config" in b) && !("reasoning_effort" in b), "官方 + 老模型（Sonnet 4.5 不认 effort）：不发，免得 400", JSON.stringify(b));
+    st.imgReasoningEffort = "banana";
+    b = await img(M, "gpt-5");
+    ok(!("reasoning_effort" in b) && !("output_config" in b), "存了个不认识的值：不发");
+
+    // 挂账那边同一套
+    st.imgReasoningEffort = "";
+    const led = async (ep, model, eff) => {
+        st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "t", endpoint: ep, key: "k", model }]); st.ledgerApiProfile = "api_1"; st.ledgerReasoningEffort = eff;
+        sent = null;
+        w.fetch = async (u, o) => { sent = JSON.parse(o.body); return { ok: true, status: 200, body: sseBody(['data: {"choices":[{"delta":{"content":"<ledger>强度测试的账，够长够长够长够长够长够长。</ledger>"}}]}\n\n', 'data: [DONE]\n\n']) }; };
+        await F("ipeLedgerRun")(9, false); return sent;
+    };
+    b = await led(A, "claude-opus-5-5", "high");
+    ok(b.output_config && b.output_config.effort === "high" && !("reasoning_effort" in b), "挂账 官方 + high：output_config.effort", JSON.stringify(b).slice(0, 200));
+    b = await led(M, "claude-opus-5-5", "high");
+    ok(b.reasoning_effort === "high" && !("output_config" in b), "挂账 中转 + high：reasoning_effort（跟以前一样）");
+    b = await led(A, "claude-opus-5-5", "");
+    ok(!("reasoning_effort" in b) && !("output_config" in b), "挂账 自动：不发");
+
+    // 认模型
+    const OK = w.eval("ipeApiEffortOk");
+    ok(["claude-opus-4-5-20251101", "claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-5", "claude-haiku-5-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5"].every(OK), "Opus 4.5 起、Sonnet 4.6 起、Haiku 5.5、Fable、Mythos 认 effort");
+    ok(!["claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001", "claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "gpt-5", ""].some(OK), "更老的 Claude、不是 Claude 的都不认");
+
+    // 面板：生图那格在人物锁的「更多」里，默认自动，改了存下来、状态行说一声（档位和事件在页面载入 120ms 后才装上）
+    await new Promise(r => setTimeout(r, 300));
+    const sel = w.document.querySelector("#ipe-img-effort");
+    ok(sel && sel.options.length === 7 && sel.options[0].value === "" && sel.options[0].textContent === "自动（模型默认）" && sel.value === "", "生图页有思考强度下拉：自动 + 6 档，默认自动", sel && [...sel.options].map(o => o.value).join(","));
+    ok(sel.closest("details") && sel.closest("details").querySelector("summary").textContent.indexOf("思考强度") >= 0, "在人物锁那张卡的「更多：提取温度 · 思考强度」里");
+    sel.value = "low"; sel.dispatchEvent(new w.Event("change"));
+    ok(st.imgReasoningEffort === "low" && w.document.querySelector("#ipe-status").textContent.indexOf("思考强度 = low") === 0, "选 low：存下来，状态行说清楚", w.document.querySelector("#ipe-status").textContent);
+    sel.value = ""; sel.dispatchEvent(new w.Event("change"));
+    ok(st.imgReasoningEffort === "" && w.document.querySelector("#ipe-status").textContent.indexOf("思考强度：自动") === 0, "改回自动：存空，状态行说自动");
+    const lsel = w.document.querySelector("#ipe-ledger-effort");
+    ok(lsel && lsel.options[0].textContent === "自动（模型默认）" && [...lsel.options].map(o => o.value).join(",") === ",minimal,low,medium,high,xhigh,max", "挂账那格的档位跟生图一样，第一项叫「自动」");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

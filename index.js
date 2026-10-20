@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.10";
+var IPE_VERSION = "2.28.11";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -121,7 +121,8 @@ const DEFAULTS = {
     imgTplGroupFilter: "",         // 2.28.2 画风分组筛选："" = 全部，"__none__" = 未分组，其余 = 组名
     imgCardOrderJson: "",          // 2.28.0 本卡长期指令：{ 卡键: 文字 }，卡键同「锚点锁到卡」（头像文件名 / 群 id）
     imgCastLock: true,             // 2.20.0 人物锁：锚点里写成人物段的，长相由插件原样贴入
-    imgTemperature: 0.2            // 2.20.0 提取温度（原先写死 0.4）；空 = 不发，用模型默认
+    imgTemperature: 0.2,           // 2.20.0 提取温度（原先写死 0.4）；空 = 不发，用模型默认
+    imgReasoningEffort: ""         // 2.28.11 生图提取 / 外貌整理的思考强度；空 = 自动（不发，模型自己定）
 };
 let currentDesc = "", currentIdx = -1, processing = false, initialized = false;
 let ipeAbortController = null;
@@ -1413,8 +1414,7 @@ async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
         stream: useStream
     };
     if (!ipeLedgerIsReasoningModel(item.model) && ipeApiTempOk(item.endpoint, item.model)) body.temperature = 0.2;
-    var eff = String(cfg().ledgerReasoningEffort || "").trim();
-    if (eff) body.reasoning_effort = eff;
+    ipeApiEffortApply(body, item.endpoint, item.model, cfg().ledgerReasoningEffort);   // 2.28.11 官方发 output_config.effort，中转发 reasoning_effort
     var maxT = Math.floor(Number(cfg().ledgerMaxTokens) || 0);
     if (maxT > 0) {
         if (ipeLedgerIsReasoningModel(item.model)) body.max_completion_tokens = maxT;
@@ -3477,10 +3477,7 @@ function ipeLedgerRefreshBotEditors() {
     });
     ["ipe-ledger-effort","iped-ledger-effort"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
-        if (!el.options || !el.options.length) {
-            el.innerHTML = '<option value="">不发（模型默认）</option>'
-                + ["minimal","low","medium","high"].map(function(v){ return '<option value="'+v+'">'+v+'</option>'; }).join("");
-        }
+        if (!el.options || !el.options.length) el.innerHTML = ipeEffortOptionsHTML();
         el.value = String(cfg().ledgerReasoningEffort || "");
     });
     ["ipe-ledger-maxtok","iped-ledger-maxtok"].forEach(function(id){
@@ -4902,6 +4899,41 @@ function ipeApiTempOk(endpoint, model) {
     var major = Number(r[2]), minor = r[3] ? Number(r[3]) : 0;
     return major < 4 || (major === 4 && minor < 7);
 }
+/* ---- 思考强度（2.28.11） ----
+   空 = 自动：不发，模型自己定。中转 / OpenAI 发 reasoning_effort（minimal 只有 GPT 认）。
+   A 社官方地址：官方的 OpenAI 兼容层不认 reasoning_effort（文档写明忽略），官方自己的参数是 output_config.effort
+   （low / medium / high / xhigh / max；Claude 没有 minimal，按 low 发）。只给认 effort 的模型发：
+   Opus 4.5 起、Sonnet 4.6 起、Haiku 5.5 起、Fable、Mythos；更老的（Sonnet 4.5、Haiku 4.5…）发了官方 400，就不发。 */
+var IPE_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+function ipeEffortOptionsHTML() {
+    return '<option value="">自动（模型默认）</option>'
+        + IPE_EFFORT_LEVELS.map(function(v){ return '<option value="' + v + '">' + v + '</option>'; }).join("");
+}
+function ipeApiEffortOk(model) {
+    var r = String(model || "").trim().toLowerCase().match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
+    if (!r) return false;
+    var fam = r[1], major = Number(r[2]), minor = r[3] ? Number(r[3]) : 0;
+    if (fam === "fable" || fam === "mythos") return true;
+    if (major >= 5) return true;
+    if (major < 4) return false;
+    if (fam === "opus") return minor >= 5;
+    if (fam === "sonnet") return minor >= 6;
+    return false;   // haiku 4.x
+}
+/* 往请求体里放思考强度；返回实际发出去的值（"" = 没发） */
+function ipeApiEffortApply(body, endpoint, model, eff) {
+    eff = String(eff || "").trim().toLowerCase();
+    if (!eff || IPE_EFFORT_LEVELS.indexOf(eff) < 0) return "";
+    if (!ipeIsAnthropicOfficial(endpoint)) { body.reasoning_effort = eff; return eff; }
+    if (!ipeApiEffortOk(model)) return "";
+    var v = eff === "minimal" ? "low" : eff;
+    body.output_config = Object.assign({}, body.output_config || {}, { effort: v });
+    return v;
+}
+function ipeEffortStatusText(eff) {
+    return eff ? "思考强度 = " + eff + "（中转发 reasoning_effort；A 社官方发 output_config.effort）" : "思考强度：自动（不发，模型自己定）";
+}
+
 /* fetch 自己抛的 TypeError（Safari「Load failed」、Chrome「Failed to fetch」）= 浏览器没让插件看到任何回应：
    多半是这个地址不让网页直接调（跨域被拦），或者网络到不了。具体原因浏览器不告诉插件。 */
 function ipeIsNetworkError(e) {
@@ -5860,6 +5892,11 @@ function ipeCastRefreshUI() {
     ["ipe-img-temp", "iped-img-temp"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = cfg().imgTemperature == null ? "" : String(cfg().imgTemperature);
     });
+    ["ipe-img-effort", "iped-img-effort"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        if (!el.options || !el.options.length) el.innerHTML = ipeEffortOptionsHTML();
+        el.value = String(cfg().imgReasoningEffort || "");
+    });
 }
 /* ============================================================
    🔍 自动提取人物外貌（2.21.0）
@@ -6195,6 +6232,14 @@ function ipeCastBindUI() {
             ipeSaveNow(); ipeCastRefreshUI();
         });
     });
+    ["ipe-img-effort", "iped-img-effort"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("imgReasoningEffort", String(el.value || ""));
+            ipeSaveNow(); ipeCastRefreshUI();
+            setStatus(ipeEffortStatusText(el.value), "#6ec577");
+        });
+    });
 }
 
 function buildVisionUserPrompt(text, supplement, lockOverride) {
@@ -6320,6 +6365,7 @@ async function ipeImgChat(body, opts) {
     body.stream = useStream;
     var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, true);
     if (!ipeApiTempOk(c.apiEndpoint, body.model)) delete body.temperature;   // 2.28.8 官方直连 + Claude 4.7 起：发了就 400
+    ipeApiEffortApply(body, c.apiEndpoint, body.model, c.imgReasoningEffort);   // 2.28.11 思考强度：提取、外貌整理都走这里
     var controller = opts.controller || (typeof AbortController !== "undefined" ? new AbortController() : null);
     /* 2.26.1 开口时限（opts.openLimit，提取用）：从发请求起算 N 秒还没写出正文第一个字就掐——思考、中转心跳都不算数，
        这类「连接活着、就是不出字」的，只看字节的看门狗永远判不死。开口之后不再卡时限，只防中途断流：连续 2N 秒没字节才掐。
@@ -7366,8 +7412,10 @@ function createPanel() {
             '<div id="ipe-cast-status" class="ipe-hint"></div>'+
             '<div class="ipe-preview-actions" style="margin-top:6px"><button id="ipe-cast-scan" class="ipe-btn" type="button">🔍 自动提取人物外貌</button></div>'+
             '<div class="ipe-hint">'+IPE_CAST_SCAN_HINT+'</div>'+
-            '<details class="ipe-cast-more" style="margin-top:6px"><summary class="ipe-hint" style="cursor:pointer">更多：提取温度</summary>'+
+            '<details class="ipe-cast-more" style="margin-top:6px"><summary class="ipe-hint" style="cursor:pointer">更多：提取温度 · 思考强度</summary>'+
                 '<label>提取温度（越低措辞越稳；留空 = 不发）<input type="number" id="ipe-img-temp" min="0" max="2" step="0.1" placeholder="0.2"></label>'+
+                '<label>思考强度（自动 = 模型默认）<select id="ipe-img-effort"></select></label>'+
+                '<div class="ipe-hint">提取生图词、整理外貌都用这个。只对会思考的模型有意义（Claude、o 系列、gpt-5）；low 一般够用，越高越慢越费。中转发 reasoning_effort；A 社官方地址发 output_config.effort（minimal 只有 GPT 认，官方按 low 发；xhigh、max 只有 Claude 认）。</div>'+
             '</details>'+
         '</div>');
 
@@ -7505,8 +7553,8 @@ function createPanel() {
             '<div class="ipe-hint">默认开。副 AI 边想边把字节流回来，中转不会因为「半天没动静」把连接掐断；关了就是老的整包干等。</div>'+
             '<label>空闲超时（秒，0 = 永不）<input type="text" id="ipe-ledger-idle" placeholder="300"></label>'+
             '<div class="ipe-hint">不是总时长，是「连续多少秒一个字节都没收到」才判死，思考再久只要连接活着就不算。超时算一次失败，自动挂账连撞两次照样自动关。</div>'+
-            '<label>思考强度 reasoning_effort<select id="ipe-ledger-effort"></select></label>'+
-            '<div class="ipe-hint">只对 o 系列 / gpt-5 这类思考模型有意义。不发 = 用模型默认；记账一般 low 就够，high 一楼能想好几分钟。</div>'+
+            '<label>思考强度（自动 = 模型默认）<select id="ipe-ledger-effort"></select></label>'+
+            '<div class="ipe-hint">只对会思考的模型有意义（Claude、o 系列、gpt-5）。记账一般 low 就够，high 一楼能想好几分钟。中转发 reasoning_effort；A 社官方地址发 output_config.effort（minimal 只有 GPT 认，官方按 low 发；xhigh、max 只有 Claude 认）。</div>'+
             '<label>输出上限（token，0 = 不发）<input type="text" id="ipe-ledger-maxtok" placeholder="0"></label>'+
             '<div class="ipe-hint">思考 token 和正文共用这个上限。中转给的默认值太小时，思考模型会把额度想光、正文交白卷（状态行会报 finish_reason=length）。填 16000 之类的大数压过它。</div>'+
             '<div id="ipe-ledger-size" class="ipe-hint" style="margin-top:6px"></div>'+
@@ -7802,7 +7850,7 @@ function createDrawer() {
     h += '<small id="iped-anchor-lock-info" style="color:#888"></small>';
     h += '<textarea id="iped-char-anchors" class="text_pole" rows="4" placeholder="陆星河：a man, 28 years old, tall..."></textarea>';
     h += '<div class="ipe-anchor-guide"><div class="ipe-anchor-guide-title">通用锚点规则已启用</div>会自动随提取请求发送；文本框只需填写具体角色外貌锚点，不必重复粘贴通用规则。<div style="display:flex;gap:6px;margin-top:8px"><input type="button" id="iped-anchor-guide-toggle" class="menu_button" value="编辑通用规则"><input type="button" id="iped-anchor-guide-reset" class="menu_button" value="恢复默认"></div><div id="iped-anchor-guide-editor-wrap" class="ipe-anchor-guide-editor-wrap" style="display:none"><textarea id="iped-anchor-guide-editor" class="text_pole" rows="6" placeholder="通用角色锚点调用规则"></textarea><small style="color:#888">这里改的是所有角色锚点共用的调用规则；保存后会随每次提取请求发送。</small></div></div>';
-    h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-scan" class="menu_button" value="🔍 自动提取人物外貌"></div><small style="color:#888;display:block">' + IPE_CAST_SCAN_HINT + '</small><details class="ipe-cast-more" style="margin-top:6px"><summary style="cursor:pointer;color:#888;font-size:12px">更多：提取温度</summary><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"></details></div>';
+    h += '<div class="ipe-anchor-guide ipe-cast-box"><div class="ipe-anchor-guide-title"><label>🧷 人物锁 <input type="checkbox" id="iped-cast-lock"></label></div><small id="iped-cast-status" style="color:#888;display:block"></small><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-cast-scan" class="menu_button" value="🔍 自动提取人物外貌"></div><small style="color:#888;display:block">' + IPE_CAST_SCAN_HINT + '</small><details class="ipe-cast-more" style="margin-top:6px"><summary style="cursor:pointer;color:#888;font-size:12px">更多：提取温度 · 思考强度</summary><label>提取温度（越低措辞越稳；留空 = 不发）</label><input type="number" id="iped-img-temp" class="text_pole" min="0" max="2" step="0.1" placeholder="0.2"><label>思考强度（自动 = 模型默认）</label><select id="iped-img-effort" class="text_pole"></select><small style="color:#888;display:block">提取、整理外貌都用。只对会思考的模型有意义；low 一般够用。中转发 reasoning_effort；A 社官方发 output_config.effort。</small></details></div>';
     h += '<hr><small><b>提取规则</b></small>';
     h += '<label>规则预设</label><select id="iped-rule-slot" class="text_pole"></select>';
     h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
@@ -7896,8 +7944,8 @@ function createDrawer() {
     h += '<small style="color:#888">默认开。边想边流字节回来，中转不会因空闲掐连接；关了就是整包干等。</small>';
     h += '<label>空闲超时（秒，0 = 永不）</label><input type="text" id="iped-ledger-idle" class="text_pole" placeholder="300">';
     h += '<small style="color:#888">「连续多少秒一个字节都没收到」才判死，思考再久只要连接活着就不算。超时算一次失败。</small>';
-    h += '<label>思考强度 reasoning_effort</label><select id="iped-ledger-effort" class="text_pole"></select>';
-    h += '<small style="color:#888">只对 o 系列 / gpt-5 这类思考模型有意义。不发 = 模型默认；记账一般 low 就够。</small>';
+    h += '<label>思考强度（自动 = 模型默认）</label><select id="iped-ledger-effort" class="text_pole"></select>';
+    h += '<small style="color:#888">只对会思考的模型有意义（Claude、o 系列、gpt-5）。记账一般 low 就够。中转发 reasoning_effort；A 社官方发 output_config.effort。</small>';
     h += '<label>输出上限（token，0 = 不发）</label><input type="text" id="iped-ledger-maxtok" class="text_pole" placeholder="0">';
     h += '<small style="color:#888">思考与正文共用。中转默认值太小会让思考模型交白卷（finish_reason=length），填 16000 之类压过它。</small>';
     h += '<div id="iped-ledger-size" style="color:#888;font-size:11px;margin:4px 0"></div>';
@@ -9289,7 +9337,7 @@ function bindAll() {
         el.addEventListener("change", function(){
             save("ledgerReasoningEffort", String(el.value || ""));
             ipeLedgerRefreshBotEditors();
-            ipeLedgerStatus(el.value ? "reasoning_effort = " + el.value : "不发 reasoning_effort，用模型默认", "#6ec577");
+            ipeLedgerStatus(ipeEffortStatusText(el.value), "#6ec577");
         });
     });
     ["ipe-ledger-maxtok","iped-ledger-maxtok"].forEach(function(id){
