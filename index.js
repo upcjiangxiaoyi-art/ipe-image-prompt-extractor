@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.11";
+var IPE_VERSION = "2.28.12";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -490,7 +490,11 @@ var IPE_LEDGER_REPORT_CAP = 60000;   // 真管事的那道闸；2000 楼旋钮�
 var IPE_LEDGER_SHRINK    = 0.4;                   // 新文本 < 旧版 40% 视为疑似事故
 
 /* ---- 基础工具 ---- */
-function ipeChatKey() {
+/* 2.28.12 账本认「哪张卡 + 哪个聊天」，不只认聊天名。
+   酒馆「复制角色卡」是把卡文件原样拷一份，卡里记的聊天文件名一起拷过去；导入的卡自带聊天名的也原样保留。
+   新卡的新聊天跟旧卡聊天同名，自己还没账，就去镜像里按名字找，找到的是旧卡的账——串账。
+   卡用头像文件名认（复制、重导入都会换新文件名），群聊用群 id；聊天名单独留一份（ipeChatIdPart），给人看、给旧条目兜底。 */
+function ipeChatIdPart() {
     try {
         var c = ctx();
         if (typeof c.getCurrentChatId === "function") {
@@ -500,6 +504,24 @@ function ipeChatKey() {
         if (c.chatId) return String(c.chatId);
         return String(c.characterId || "char") + "::" + String(c.name1 || "chat");
     } catch(e) { return "unknown-chat"; }
+}
+function ipeChatKey() {
+    var id = ipeChatIdPart();
+    if (id === "unknown-chat") return id;
+    var card = ""; try { card = ipeAnchorCardKey(); } catch(e) {}
+    return card ? card + "|" + id : id;
+}
+/* 2.28.12 以前镜像只按聊天名存。那样的旧条目要角色名对得上、楼数跟存的时候一模一样才敢认成同一个聊天：
+   复制卡的新聊天只有开场白，楼数对不上，不认；同卡刷新页面、聊天数据没来得及存的，楼数一样，救回来。 */
+function ipeLedgerMirrorLegacyHit(all) {
+    var id = ipeChatIdPart();
+    if (!all || id === ipeChatKey()) return null;   // 认不出卡：键跟以前一样，正常那一步已经查过
+    var v = all[id];
+    if (!v || typeof v !== "object") return null;
+    var who = String(v.who || ""), me = ipeCharName();
+    if (who && me && who !== me) return null;
+    if (Number(v.floors) !== ipeFloorNo()) return null;
+    return v;
 }
 function ipeCharName() {
     try { var c = ctx(); return String(c.name2 || (c.characters && c.characters[c.characterId] && c.characters[c.characterId].name) || ""); } catch(e) { return ""; }
@@ -698,11 +720,13 @@ function ipeLedgerReadFresh() {
             return ipeLedgerNormalize(root[IPE_LEDGER_META_KEY]);
         }
     } catch(e0) {}
-    // 2) v2 镜像
+    // 2) v2 镜像：先按「卡 + 聊天」找；2.28.12 以前只按聊天名存的旧条目，要对得上才认
     try {
         var all2 = ipeLedgerMirrorGet();
         var hit2 = all2[ipeChatKey()];
         if (hit2 && typeof hit2 === "object") return ipeLedgerNormalize(hit2);
+        var legacy = ipeLedgerMirrorLegacyHit(all2);
+        if (legacy) return ipeLedgerNormalize(legacy);
     } catch(e1) {}
     // 3) v1 迁移（主档优先，镜像兜底）
     try {
@@ -812,7 +836,7 @@ function ipeLedgerExport() {
         floorAtExport: ipeFloorNo(),
         data: st
     };
-    var name = "ipe-ledger-" + String(ipeChatKey() || "chat").replace(/[^\w.-]+/g, "_")
+    var name = "ipe-ledger-" + String(ipeChatIdPart() || "chat").replace(/[^\w.-]+/g, "_")
              + "-" + new Date().toISOString().slice(0, 10) + ".json";
     try {
         var blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
@@ -2064,13 +2088,19 @@ try { window.ipeGenerateInterceptor = ipeGenerateInterceptor; } catch(e) {}
    镜像里存着最近 30 个聊天的账本。同一张卡开新聊天时挑一份复制过来当起手：
    盖本聊天当前楼号的戳（盖原楼号会被下一次对账当幽灵账碎掉），本聊天原有的账先进历史。
    ============================================================ */
+function ipeLedgerKeyLabel(k) { return String(k || "").replace(/^(?:char|group):[^|]*\|/, ""); }   // 给人看：去掉卡前缀，只留聊天名
 function ipeLedgerInheritList() {
-    var all = ipeLedgerMirrorGet(), cur = ipeChatKey(), me = ipeCharName();
-    var out = [];
+    var all = ipeLedgerMirrorGet(), cur = ipeChatKey(), curId = ipeChatIdPart(), me = ipeCharName();
+    var out = [], strict = {};
+    Object.keys(all).forEach(function(k){ if (k.indexOf("|") > 0) strict[ipeLedgerKeyLabel(k) + "\n" + String((all[k] || {}).who || "")] = true; });
     Object.keys(all).forEach(function(k){
         var v = all[k];
         if (!v || k === cur || !String(v.current || "").trim()) return;
         var who = String(v.who || "");
+        if (k.indexOf("|") < 0) {
+            if (k === curId && (!who || who === me)) return;   // 2.28.12 以前本聊天自己存的旧条目
+            if (strict[k + "\n" + who]) return;                // 同一个聊天已经有「卡 + 聊天」的新条目，旧的不重复列
+        }
         out.push({ key: k, who: who, floor: Number(v.lastFloor) || 0, updatedAt: Number(v.updatedAt) || 0,
                    len: String(v.current).length, sameChar: !!(me && who === me) });
     });
@@ -2094,7 +2124,7 @@ function ipeLedgerRefreshInherit(force) {
         var cur = el.value;
         var html = '<option value="">从别的聊天继承账本…' + (list.length ? "（" + list.length + " 份）" : "（镜像里没有别的聊天）") + '</option>';
         list.forEach(function(it){
-            var k = it.key.length > 28 ? it.key.slice(0, 28) + "…" : it.key;
+            var k = ipeLedgerKeyLabel(it.key); if (k.length > 28) k = k.slice(0, 28) + "…";
             var d = it.updatedAt ? new Date(it.updatedAt).toLocaleDateString() : "";
             html += '<option value="' + esc(it.key) + '">' + (it.sameChar ? "★ " : "") + esc(it.who ? it.who + " · " : "") + esc(k) + " · 第 " + it.floor + " 楼 · " + it.len + " 字" + (d ? " · " + d : "") + '</option>';
         });
@@ -3351,7 +3381,7 @@ function ipeLedgerRefreshEditors() {
     });
     ["ipe-ledger-chatkey","iped-ledger-chatkey"].forEach(function(id){
         var el = q("#" + id);
-        if (el) el.textContent = "当前聊天：" + ipeChatKey() + "\u3000楼层：" + ipeFloorNo()
+        if (el) el.textContent = "当前聊天：" + ipeChatIdPart() + "\u3000楼层：" + ipeFloorNo()
             + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到第 " + st.lastFloor + " 楼" : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
     });
     // 版本历史下拉

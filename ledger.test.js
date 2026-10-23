@@ -1522,7 +1522,7 @@ await (async () => {
     F("ipeLedgerCommit")("本聊天现任的账，够长够长够长够长够长。", 8);
     F("ipeLedgerMirrorFlush")();   // 2.19.15 镜像空闲时才落盘，测试里手动落一次
     const mirror = JSON.parse(w.localStorage.getItem("ipe_ledger_mirror_v2"));
-    eq(mirror["test-chat"].who, "苑无忧", "镜像里带了角色名");
+    eq(mirror["char:yuan.png|test-chat"].who, "苑无忧", "镜像里带了角色名（2.28.12 键 = 卡 + 聊天）");
     mirror["old-chat-A"] = { v: 2, current: "别人的账：顾寒的旧聊天，够长够长够长。", versions: [], order: "", lastFloor: 77, updatedAt: 5000, who: "顾寒" };
     mirror["old-chat-B"] = { v: 2, current: "同角色的账：苑无忧上一个聊天，买了去北京的票。", versions: [{ floor: 100, ts: 1, text: "x" }], order: "别的指令", lastFloor: 120, updatedAt: 3000, who: "苑无忧" };
     mirror["empty-chat"] = { v: 2, current: "", versions: [], lastFloor: 3, updatedAt: 9000, who: "苑无忧" };
@@ -2586,6 +2586,60 @@ await (async () => {
     ok(st.imgReasoningEffort === "" && w.document.querySelector("#ipe-status").textContent.indexOf("思考强度：自动") === 0, "改回自动：存空，状态行说自动");
     const lsel = w.document.querySelector("#ipe-ledger-effort");
     ok(lsel && lsel.options[0].textContent === "自动（模型默认）" && [...lsel.options].map(o => o.value).join(",") === ",minimal,low,medium,high,xhigh,max", "挂账那格的档位跟生图一样，第一项叫「自动」");
+})();
+
+console.log("\n【66】 复制卡 / 重导入的新卡不串账（2.28.12）：酒馆复制卡连聊天文件名一起拷，新卡的新聊天没账时，以前会从镜像里按聊天名捞到旧卡的账；现在认「卡 + 聊天」，同卡刷新页面照样能从镜像救回来");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const { w, tavern, F } = boot(10);
+    const EPK = F("IPE_LEDGER_EP_KEY"), MK = w.eval("IPE_LEDGER_META_KEY");
+    const ep = () => String((tavern.extensionPrompts[EPK] || {}).value || "");
+    const cur = () => String(F("ipeLedgerRead")().current || "").trim();
+    // 旧卡记了好几楼：第 1 楼（开场白）那版留在历史里。以前复制卡的新聊天只有 1 楼，账跟楼走一对账，就退回到旧卡第 1 楼那版——串进来的正是它
+    F("ipeLedgerCommit")("旧卡开场白的账：阿絮初登场，够长够长够长够长。", 1);
+    F("ipeLedgerCommit")("旧卡第 5 楼的账：阿絮进城，够长够长够长够长。", 5);
+    F("ipeLedgerCommit")("旧卡的账：阿絮左肩刀伤，够长够长够长够长。", 10);
+    w.eval("ipeLedgerSync")();
+    ok(ep().indexOf("阿絮左肩刀伤") >= 0 && F("ipeLedgerRead")().versions.some(v => v.floor === 1), "旧卡：账本贴耳了，第 1 楼那版在历史里");
+    F("ipeLedgerMirrorFlush")();
+    const mirror = JSON.parse(w.localStorage.getItem("ipe_ledger_mirror_v2"));
+    ok(!!mirror["char:yuan.png|test-chat"] && !mirror["test-chat"], "镜像按「卡 + 聊天」存，不再只按聊天名", Object.keys(mirror).join(","));
+    // 复制卡：酒馆把卡文件原样拷一份，聊天名一样，头像文件名变了；新聊天只有开场白，聊天数据是空的
+    tavern.characters.push({ name: "苑无忧", avatar: "yuan_1.png" });
+    tavern.characterId = 2; tavern.chatMetadata = {}; tavern.chat.length = 1;
+    await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(!cur(), "复制出来的新卡：账本是空的，不是旧卡那份（以前会退回旧卡第 1 楼那版）", cur().slice(0, 40));
+    ok(ep().indexOf("阿絮") < 0, "贴耳也是空的，主 AI 读不到旧卡的账", ep().slice(0, 60));
+    const meta = tavern.chatMetadata[MK];
+    ok(!meta || !String(meta.current || "").trim(), "没把旧账写进新卡的聊天数据");
+    ok(statusText(w).indexOf("已切换到本聊天的账本") >= 0, "状态行照常", statusText(w));
+    // 同一张卡，页面重新载入、聊天数据没来得及存：镜像按「卡 + 聊天」救回来
+    tavern.characterId = 0; tavern.chatMetadata = {}; tavern.chat.length = 10;
+    await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(cur().indexOf("阿絮左肩刀伤") >= 0 && F("ipeLedgerRead")().versions.length >= 2, "回到原卡、聊天数据丢了：镜像救回来，连历史一起，跟以前一样", cur().slice(0, 40));
+    ok(ep().indexOf("阿絮左肩刀伤") >= 0, "救回来的照常贴耳");
+    // 2.28.12 以前存的旧条目（只按聊天名）：角色名对得上、楼数跟存的时候一样才认
+    const all = w.eval("ipeLedgerMirrorGet")();
+    delete all["char:yuan.png|test-chat"];
+    all["test-chat"] = { v: 2, current: "旧版本存的账，够长够长够长够长。", lastFloor: 10, versions: [], order: "", who: "苑无忧", floors: 10, updatedAt: 1 };
+    tavern.chatMetadata = {};
+    ok(String(w.eval("ipeLedgerReadFresh")().current || "").indexOf("旧版本存的账") >= 0, "旧条目：同卡、楼数一样，认（老用户刷新页面照样救得回）");
+    tavern.characterId = 2; tavern.chat.length = 1; tavern.chatMetadata = {};
+    ok(!String(w.eval("ipeLedgerReadFresh")().current || "").trim(), "旧条目：复制卡的新聊天只有开场白，楼数对不上，不认");
+    tavern.chat.length = 10; tavern.name2 = "顾寒";
+    ok(!String(w.eval("ipeLedgerReadFresh")().current || "").trim(), "旧条目：角色名对不上，不认");
+    tavern.name2 = "苑无忧"; tavern.characterId = 0;
+    // 继承列表：同一个聊天新旧两条只列新的；显示的是聊天名，不带卡前缀；本聊天自己的旧条目不列
+    all["char:gu.png|old-chat-A"] = { v: 2, current: "顾寒的账，够长够长够长。", versions: [], lastFloor: 7, updatedAt: 5000, who: "顾寒", floors: 7 };
+    all["old-chat-A"] = { v: 2, current: "顾寒的账，旧版本存的。", versions: [], lastFloor: 5, updatedAt: 4000, who: "顾寒", floors: 5 };
+    all["old-chat-B"] = { v: 2, current: "只有旧条目的聊天，够长够长。", versions: [], lastFloor: 3, updatedAt: 3000, who: "顾寒", floors: 3 };
+    F("ipeLedgerCommit")("本聊天现任，够长够长够长够长。", 10);
+    const list = F("ipeLedgerInheritList")();
+    eq(list.map(x => x.key).join(","), "char:gu.png|old-chat-A,old-chat-B", "列表：同一个聊天只列新条目，只有旧条目的照列，本聊天自己的旧条目不列");
+    F("ipeLedgerRefreshInherit")(true);
+    const sel = w.document.querySelector("#ipe-ledger-inherit-sel");
+    ok(sel.options[1].textContent.indexOf("old-chat-A") >= 0 && sel.options[1].textContent.indexOf("char:") < 0, "下拉里显示聊天名，不带卡前缀", sel.options[1].textContent);
+    ok(w.document.querySelector("#ipe-ledger-chatkey").textContent.indexOf("当前聊天：test-chat") === 0, "编辑框上面那行也只写聊天名", w.document.querySelector("#ipe-ledger-chatkey").textContent);
 })();
 
 console.log("\n" + "\u2500".repeat(46));
