@@ -2642,6 +2642,47 @@ await (async () => {
     ok(w.document.querySelector("#ipe-ledger-chatkey").textContent.indexOf("当前聊天：test-chat") === 0, "编辑框上面那行也只写聊天名", w.document.querySelector("#ipe-ledger-chatkey").textContent);
 })();
 
+console.log("\n【67】 开场白也自动挂账（2.28.13）：挂账页也有了跟生图一样的开场白开关，关掉以后开新聊天时开场白不自动挂；手动「重新挂账」照样挂；说过话以后的楼照常；生图不受影响");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const okBody = txt => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>" + txt + "</ledger>" } }] }) });
+    const AI = mes => ({ is_user: false, is_system: false, mes });
+    const GREET = "暮春三月，洛京飞花。镇北侯世子韩川央率三千铁骑踏过祁门关。";
+    async function greet(opts) {
+        const b = boot(1); const st = withApi(b.tavern, b.F); st.autoInjectDelay = 500; st.ledgerAutoRun = true;
+        if (opts.off) st.ledgerAutoGreeting = false;
+        b.tavern.chat.length = 0;
+        (opts.chat || [AI(GREET)]).forEach(m => b.tavern.chat.push(m));
+        const box = { ledger: 0, img: 0 };
+        b.w.fetch = async () => { box.ledger++; return okBody("开场的账，够长够长够长够长。"); };
+        b.w.runExtract = async function(){ box.img++; };
+        await b.tavern.eventSource.emit("MESSAGE_RECEIVED", ...opts.args); await wait(900);
+        return Object.assign(b, { box, st });
+    }
+    let r = await greet({ args: [0, "first_message"] });
+    ok(r.box.ledger === 1 && r.F("ipeLedgerRead")().current.indexOf("开场的账") >= 0, "默认开着：开场白照常自动挂账（和以前一样）", JSON.stringify(r.box));
+    r = await greet({ off: true, args: [0, "first_message"] });
+    ok(r.box.ledger === 0 && !String(r.F("ipeLedgerRead")().current || "").trim(), "关掉：开场白不自动挂，账本还是空的", JSON.stringify(r.box));
+    ok(statusText(r.w).indexOf("开场白") >= 0 && statusText(r.w).indexOf("重新挂账") >= 0, "状态行说是开场白、要挂点重新挂账", statusText(r.w));
+    ok(r.box.img === 1, "关掉也照常出图（这个开关只管挂账）", JSON.stringify(r.box));
+    await r.F("ipeLedgerRun")(null, false); await wait(50);
+    ok(r.box.ledger === 1 && r.F("ipeLedgerRead")().current.indexOf("开场的账") >= 0, "关掉以后点「重新挂账」照样挂开场白", JSON.stringify(r.box));
+    r = await greet({ off: true, args: [0] });
+    ok(r.box.ledger === 0, "老酒馆事件不带 type：第一句话之前的 AI 楼也认作开场白", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI("甲的开场白，够长够长。"), AI("乙的开场白，够长够长。")], args: [1] });
+    ok(r.box.ledger === 0, "群聊第二条开场白：同样不自动挂", JSON.stringify(r.box));
+    r = await greet({ off: true, chat: [AI(GREET), { is_user: true, is_system: false, mes: "你好" }, AI("回你的这一楼，够长够长够长。")], args: [2] });
+    ok(r.box.ledger === 1, "说过话以后的楼：照常自动挂", JSON.stringify(r.box));
+    // 面板：开关在「自动挂账」底下，默认开；改了存下来、状态行说一声
+    r = await greet({ args: [0, "first_message"] });
+    const cb = r.w.document.querySelector("#ipe-ledger-auto-greeting"), auto = r.w.document.querySelector("#ipe-ledger-auto");
+    ok(cb && cb.checked && !!(auto.compareDocumentPosition(cb) & r.w.Node.DOCUMENT_POSITION_FOLLOWING) && !cb.closest("details"), "面板上有「开场白也自动挂账」，默认开，就在自动挂账底下、不用展开");
+    cb.checked = false; cb.dispatchEvent(new r.w.Event("change"));
+    ok(r.st.ledgerAutoGreeting === false && statusText(r.w).indexOf("开场白不自动挂账了") >= 0, "关掉：存下来，状态行说清楚", statusText(r.w));
+    cb.checked = true; cb.dispatchEvent(new r.w.Event("change"));
+    ok(r.st.ledgerAutoGreeting === true && statusText(r.w).indexOf("开场白也自动挂账") >= 0, "打开：存下来");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

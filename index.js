@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.12";
+var IPE_VERSION = "2.28.13";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -98,6 +98,7 @@ const DEFAULTS = {
     ledgerCompressWarnChars: 3000,  // 账本超过这么多字提醒可以压缩
     ledgerApiProfile: "",
     imgAutoGreeting: true,         // 2.27.8 开场白也自动出图：关掉 = 开场白不自动提取，要图点「手动提取」
+    ledgerAutoGreeting: true,      // 2.28.13 开场白也自动挂账：关掉 = 开场白不自动挂，要挂点「重新挂账」
     bodyTag: "content",            // 2.27.7 正文标签：挂账、生图从这里取正文，新楼没收尾就不自动跑；留空 = 不认标签（照老样子认 <content>，只拦空回）
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
@@ -1918,6 +1919,11 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         }
     } catch(e) {}
     if (!msg) { ipeLedgerStatus("没找到可读的正文", "#d4726a"); return; }
+    // 2.28.13 开场白开关：开新聊天时开场白也是一条 AI 楼，关着就不自动挂（还什么都没发生，记的只能是卡的开头；手动「重新挂账」照样能挂）
+    if (silent && cfg().ledgerAutoGreeting === false && ipeIsGreetingFloor(msgFloor - 1)) {
+        ipeLedgerStatus("第 " + msgFloor + " 楼是开场白，「开场白也自动挂账」关着，这楼不自动挂；要挂点「重新挂账」", "#c9a227");
+        return;
+    }
     var unfinished = silent ? ipeFloorUnfinished(msg, msgFloor - 1) : "";   // 2.27.6 手动「重新挂账」不拦，你点了就跑
     if (unfinished) {
         ipeLedgerStatus("第 " + msgFloor + " 楼" + unfinished + "，自动挂账先不跑；重 roll 或点「继续」写完，收到新楼会照常挂。这楼其实写完了的话，点「重新挂账」手动挂", "#c9a227");
@@ -3472,6 +3478,9 @@ function ipeLedgerRefreshBotEditors() {
             el.innerHTML = h;
         }
         el.value = String(Number(cfg().ledgerVersionsN) || 3);
+    });
+    ["ipe-ledger-auto-greeting","iped-ledger-auto-greeting"].forEach(function(id){
+        var el = q("#" + id); if (el) el.checked = cfg().ledgerAutoGreeting !== false;
     });
     ["ipe-ledger-auto","iped-ledger-auto"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
@@ -7610,6 +7619,7 @@ function createPanel() {
             '<div id="ipe-ledger-mode-now" class="ipe-hint"></div>'+
         '</div></details>'+
         '<div style="color:#888;font-size:12px;margin-bottom:8px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start"><input type="checkbox" id="ipe-ledger-auto"> 自动挂账（每来一楼跑一次）</label></div>'+
+        '<div style="color:#888;font-size:12px;margin-bottom:8px"><label class="ipe-switch-left" style="display:flex;align-items:center;gap:10px;flex-direction:row;justify-content:flex-start" title="开新聊天时，开场白也是一条 AI 楼，自动挂账会给它记一笔。关掉 = 开场白不自动挂，要挂点「重新挂账」"><input type="checkbox" id="ipe-ledger-auto-greeting"> 开场白也自动挂账</label></div>'+
         '<div id="ipe-ledger-auto-hint" class="ipe-hint" style="display:none;margin:-2px 0 8px;line-height:1.6"></div>'+
         '<details class="ipe-fold" open><summary>\uD83D\uDCDD 挂账规则（想记什么写在这儿）</summary><div class="ipe-fold-body">'+
         '<label>规则预设<select id="ipe-ledger-prompt-slot"></select></label>'+
@@ -7996,6 +8006,7 @@ function createDrawer() {
     h += '<div id="iped-ledger-mode-now" style="color:#888;font-size:11px;margin:4px 0"></div>';
     h += '</div></details>';
     h += '<div style="margin-bottom:6px"><label class="ipe-switch-left"><input type="checkbox" id="iped-ledger-auto"> 自动挂账（每来一楼跑一次）</label></div>';
+    h += '<div style="margin-bottom:6px"><label class="ipe-switch-left" title="开新聊天时，开场白也是一条 AI 楼，自动挂账会给它记一笔。关掉 = 开场白不自动挂，要挂点「重新挂账」"><input type="checkbox" id="iped-ledger-auto-greeting"> 开场白也自动挂账</label></div>';
     h += '<div id="iped-ledger-auto-hint" style="display:none;color:#c9a227;font-size:11px;margin:-2px 0 6px;line-height:1.6"></div>';
     h += '<label>挂账规则预设</label><select id="iped-ledger-prompt-slot" class="text_pole"></select>';
     h += '<label>预设名称</label><input type="text" id="iped-ledger-prompt-name" class="text_pole" placeholder="例：修仙 / 爱情 / 大世界">';
@@ -9501,6 +9512,15 @@ function bindAll() {
         });
     });
 
+    ["ipe-ledger-auto-greeting","iped-ledger-auto-greeting"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.checked = cfg().ledgerAutoGreeting !== false;
+        el.addEventListener("change", function(){
+            save("ledgerAutoGreeting", !!el.checked);
+            var o = q("#" + (id === "ipe-ledger-auto-greeting" ? "iped-ledger-auto-greeting" : "ipe-ledger-auto-greeting")); if (o) o.checked = el.checked;
+            ipeLedgerStatus(el.checked ? "开场白也自动挂账：开新聊天时开场白照常自动挂" : "开场白不自动挂账了：开新聊天时开场白不挂，要挂点「重新挂账」", "#6ec577");
+        });
+    });
     ["ipe-ledger-auto","iped-ledger-auto"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
         el.addEventListener("change", function(){

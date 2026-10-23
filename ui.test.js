@@ -387,6 +387,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.imgReasoningEffort === 'medium' && ef[0].value === 'medium' && d.querySelector('#ipe-status').textContent.indexOf('思考强度 = medium') === 0, '改抽屉那个：存下来，浮窗那个跟着变，状态行说一声');
         const lef = [d.querySelector('#ipe-ledger-effort'), d.querySelector('#iped-ledger-effort')];
         check(lef.every(s => s && s.options.length === 7 && s.options[0].textContent === '自动（模型默认）'), '挂账那两个下拉的档位一样，第一项「自动」');
+        // 2.28.13 开场白也自动挂账：浮窗、抽屉各一个，自动挂账底下；默认开，改一个两个一起变
+        const lg = [d.querySelector('#ipe-ledger-auto-greeting'), d.querySelector('#iped-ledger-auto-greeting')];
+        check(lg.every(Boolean) && lg.every(el => el.checked) && lg.every((el, i) => !!(d.querySelector(i ? '#iped-ledger-auto' : '#ipe-ledger-auto').compareDocumentPosition(el) & w.Node.DOCUMENT_POSITION_FOLLOWING)), '挂账开场白开关浮窗、抽屉各一个，默认开，紧跟自动挂账');
+        lg[1].checked = false; lg[1].dispatchEvent(new w.Event('change'));
+        check(settings.ledgerAutoGreeting === false && !lg[0].checked && d.querySelector('#ipe-ledger-status').textContent.indexOf('开场白不自动挂账了') >= 0, '关掉抽屉那个：存下来，浮窗那个跟着关，状态行说一声');
+        lg[0].checked = true; lg[0].dispatchEvent(new w.Event('change'));
+        check(settings.ledgerAutoGreeting === true && lg[1].checked, '打开浮窗那个：抽屉那个跟着开');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
