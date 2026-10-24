@@ -2579,7 +2579,7 @@ await (async () => {
     await new Promise(r => setTimeout(r, 300));
     const sel = w.document.querySelector("#ipe-img-effort");
     ok(sel && sel.options.length === 7 && sel.options[0].value === "" && sel.options[0].textContent === "自动（模型默认）" && sel.value === "", "生图页有思考强度下拉：自动 + 6 档，默认自动", sel && [...sel.options].map(o => o.value).join(","));
-    ok(sel.closest("details") && sel.closest("details").querySelector("summary").textContent.indexOf("思考强度") >= 0, "在人物锁那张卡的「更多：提取温度 · 思考强度」里");
+    ok(sel.closest("details") && sel.closest("details").querySelector("summary").textContent.indexOf("思考强度") >= 0, "在 API 区的「请求参数（… 思考强度）」折叠里（2.29.0 从人物锁那张卡搬过来的）");
     sel.value = "low"; sel.dispatchEvent(new w.Event("change"));
     ok(st.imgReasoningEffort === "low" && w.document.querySelector("#ipe-status").textContent.indexOf("思考强度 = low") === 0, "选 low：存下来，状态行说清楚", w.document.querySelector("#ipe-status").textContent);
     sel.value = ""; sel.dispatchEvent(new w.Event("change"));

@@ -19,7 +19,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const beforeIDs = [...d.querySelectorAll('#ipe-panel [id], #ipe-drawer [id]')].map(el => el.id).sort();
         w.ui.ipeArrangeUI(); w.ui.bindAll(); await delay(200);
         const panel = d.querySelector('#ipe-panel'), drawer = d.querySelector('#ipe-drawer');
-        check(JSON.stringify(beforeIDs) === JSON.stringify([...d.querySelectorAll('#ipe-panel [id], #ipe-drawer [id]')].map(el => el.id).sort()), '整理前后所有控件 ID 原样保留');
+        const afterIDs = new Set([...d.querySelectorAll('#ipe-panel [id], #ipe-drawer [id]')].map(el => el.id));
+        check(beforeIDs.every(id => afterIDs.has(id)), '整理前后原有控件 ID 一个不少（2.29.0 只多了「备份与外观」区块自己的 id）');
         check(new Set(beforeIDs).size === beforeIDs.length, '两处入口没有重复控件 ID');
         check(panel.querySelector('.ipe-sections').firstElementChild.id === 'ipe-section-preview', '浮窗预览在生图配置之前');
         for (const prefix of ['ipe', 'iped']) {
@@ -31,12 +32,27 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const drawerCards = [...drawer.querySelectorAll('[data-ipe-tab="image"] > details')];
         const firstCard = drawerCards[0];
         check(firstCard.open && !!firstCard.querySelector('#iped-status') && !!firstCard.querySelector('#iped-preview-text') && firstCard.querySelector('summary').textContent === '预览', '抽屉置顶展开的就是真正的预览（状态行、预览框都在里面）');
-        const wantTitle = { api: 'API 配置', system: '系统提示', template: '画风模板', common: '公共块', anchors: '角色锚点', rules: '提取规则', preview: '预览' };
-        check(drawerCards.length === 7 && drawerCards.every(c => wantTitle[c.dataset.ipeFold.replace('drawer-image-', '')] === c.querySelector('summary').textContent), '抽屉七张卡的名字和标题一一对上（' + drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '') + '=' + c.querySelector('summary').textContent).join(' ') + '）');
+        // 2.29.0 按「多久用一次」排：预览（工作台）→ 这张卡 → 画风与规则 → API → 备份；公共块并进画风模板当子折叠
+        const wantTitle = { preview: '预览', anchors: '这张卡 · 角色锚点', template: '画风模板', system: '系统提示', rules: '提取规则', api: 'API 配置 · 副 AI 连接', backup: '备份与外观' };
+        check(drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '')).join(',') === Object.keys(wantTitle).join(',') && drawerCards.every(c => wantTitle[c.dataset.ipeFold.replace('drawer-image-', '')] === c.querySelector('summary').textContent), '抽屉七张卡按工作台 → 这张卡 → 画风与规则 → API → 备份排，名字和标题一一对上（' + drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '') + '=' + c.querySelector('summary').textContent).join(' ') + '）');
+        check([...panel.querySelectorAll('.ipe-sections > .ipe-section')].map(s => s.id.replace('ipe-section-', '')).join(',') === 'preview,char-anchors,base-template,system-prompt,extract-rules,api-config,backup,ledger', '浮窗区块同样的顺序');
+        for (const prefix of ['ipe', 'iped']) {
+            const g = id => d.querySelector('#' + prefix + '-' + id);
+            check(!!g('common-slot').closest('details') && g('common-slot').closest('details').querySelector('summary').textContent.indexOf('公共块') === 0 && !!g('common-slot').closest(prefix === 'ipe' ? '#ipe-section-base-template' : '[data-ipe-fold="drawer-image-template"]'), prefix + ' 公共块并进了画风模板，当子折叠');
+            const sw = g('enabled').closest('.ipe-switch-row');
+            check(!!sw && ['auto-inject', 'auto-greeting', 'layered'].every(k => g(k).closest('.ipe-switch-row') === sw) && !!sw.closest(prefix === 'ipe' ? '#ipe-section-preview' : '[data-ipe-fold="drawer-image-preview"]') && sw.parentElement.firstElementChild === sw, prefix + ' 自动提取 / 自动注入 / 开场白 / 分层四个开关归成一条，放在工作台最上面');
+            check(prefix !== 'ipe' || (!panel.querySelector('.ipe-panel-header #ipe-enabled') && sw.textContent.indexOf('自动提取') >= 0), '浮窗标题栏那个没字的小开关挪进开关条、标上「自动提取」');
+            const grid = g('btn-extract').closest('.ipe-btn-grid');
+            check(!!grid && [...grid.querySelectorAll('button,input')].map(b => b.id.replace(prefix + '-btn-', '')).join(',') === 'extract,reroll,inject,stop', prefix + ' 主按钮 2×2：手动提取｜重新生成｜确认注入｜打断');
+            check(['show-quick-entry', 'quick-motion', 'pack-export', 'pack-export-anchors', 'btn-save-now', 'notice-demo'].every(k => !!g(k).closest(prefix === 'ipe' ? '#ipe-section-backup' : '[data-ipe-fold="drawer-image-backup"]')), prefix + ' 浮标显示、预设包导出导入、备份锚点、保存设置、报错卡演示都收进「备份与外观」');
+            check(['img-stream', 'img-open', 'img-temp', 'img-effort'].every(k => { const f = g(k).closest('details'); return f && f.querySelector('summary').textContent.indexOf('请求参数') === 0 && !!f.closest(prefix === 'ipe' ? '#ipe-section-api-config' : '[data-ipe-fold="drawer-image-api"]'); }), prefix + ' 流式 / 开口时限 / 温度 / 思考强度收进 API 区的「请求参数」');
+            const cof = g('card-order').closest('details');
+            check((prefix === 'ipe' ? !cof : cof && cof.dataset.ipeFold === 'drawer-image-preview') && !!g('card-order').closest(prefix === 'ipe' ? '#ipe-section-preview' : '[data-ipe-fold="drawer-image-preview"]'), prefix + ' 本卡长期指令留在工作台、不藏在折叠里（ripple 每楼都改它）');
+        }
         // 2.26.2 界面上「基础模板」改叫「画风模板」：两处入口都搜不到旧名字，面板区块标题是新名字
         check(panel.querySelector('#ipe-section-base-template > .ipe-section-header').textContent.includes('画风模板') && !panel.textContent.includes('基础模板') && !drawer.textContent.includes('基础模板'), '「基础模板」改叫「画风模板」：面板标题换了，面板和抽屉里都再看不到旧名字');
         check(drawer.querySelector('.inline-drawer-content').firstElementChild.classList.contains('ipe-tabs'), '抽屉导航置顶');
-        for (const key of ['api', 'system', 'template', 'anchors', 'rules']) check(!drawer.querySelector('[data-ipe-fold="drawer-image-' + key + '"]').open, '抽屉 ' + key + ' 默认收起');
+        for (const key of ['api', 'system', 'template', 'anchors', 'rules', 'backup']) check(!drawer.querySelector('[data-ipe-fold="drawer-image-' + key + '"]').open, '抽屉 ' + key + ' 默认收起');
         for (const prefix of ['ipe', 'iped']) {
             const auto = d.querySelector('#' + prefix + '-ledger-auto');
             const text = d.querySelector('#' + prefix + '-ledger-text');
@@ -55,6 +71,19 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             check(!!el('export').closest('.ipe-desk-tools') && !!el('inherit').closest('.ipe-desk-tools') && !!el('age').closest('.ipe-desk-tools'), prefix + '备份继承历史集中收纳');
             check(!!el('api').closest('.ipe-desk-settings') && !!el('prompt').closest('.ipe-desk-settings'), prefix + '规则与连接集中在底部');
             check(!!el('inline').closest('.ipe-desk-display') && !!el('ep-enabled').closest('.ipe-desk-display'), prefix + '显示设置集中收起');
+            // 2.29.0 挂账页：开关条、本卡要点挪上来、主按钮 2×2、连接参数归连接、高级设置改名、看贴耳归贴耳、报错卡演示去生图页备份
+            const sw = el('auto').closest('.ipe-switch-row');
+            check(!!sw && el('auto-greeting').closest('.ipe-switch-row') === sw && el('reroll-trim').closest('.ipe-switch-row') === sw && !!sw.closest('.ipe-desk-overview') && [...sw.querySelectorAll('input')].map(i => i.id.replace(prefix + '-ledger-', '')).join(',') === 'auto,auto-greeting,reroll-trim', prefix + ' 自动挂账 / 开场白也挂 / 重 roll 不带本轮必须归成一条开关条，在最上面');
+            check(!!el('note').closest('.ipe-desk-request') && el('note').closest('details').querySelector('summary').textContent.indexOf('本卡要点') === 0 && !!(el('order').compareDocumentPosition(el('note')) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !!(el('note').compareDocumentPosition(el('extra')) & w.Node.DOCUMENT_POSITION_FOLLOWING), prefix + ' 本卡要点从规则里挪到本次挂账卡：长期指令 → 本卡要点 → 这次补充');
+            const grid = el('run').closest('.ipe-btn-grid');
+            check(!!grid && [...grid.querySelectorAll('button,input')].map(b => b.id.replace(prefix + '-ledger-', '')).join(',') === 'run,reconcile,stop-btn,force-btn' && !!grid.closest('.ipe-desk-request'), prefix + ' 挂账主按钮 2×2：重新挂账｜对账｜中断｜强制采用');
+            const txt = b => b.tagName === 'INPUT' ? b.value : b.textContent;
+            check(txt(el('run')).indexOf('重新挂账') === 0 && txt(el('reconcile')).indexOf('对账') === 0 && txt(el('force-btn')).indexOf('强制采用') === 0 && txt(el('stop-btn')).indexOf('中断') >= 0 && txt(el('run')).indexOf('读最后一楼') < 0, prefix + ' 按钮改成短名，长说明进第二行小字（抽屉进 title）');
+            check(['stream', 'idle', 'effort', 'maxtok'].every(k => el(k).closest('details') === el('api').closest('details')), prefix + ' 流式 / 空闲超时 / 思考强度 / 输出上限归到「副 AI 连接」，跟选哪套 API 放一起');
+            check(el('body-tag').closest('details').querySelector('summary').textContent.indexOf('喂给副 AI') >= 0 && ['rep-floors', 'vn', 'tag-open', 'nochange'].every(k => el(k).closest('details') === el('body-tag').closest('details')), prefix + ' 原「高级设置」只剩喂料参数，改名「喂给副 AI 什么」');
+            check(!!el('ep').closest('.ipe-desk-display') && !!el('ep-box').closest('.ipe-desk-display') && !!el('reroll-kw').closest('.ipe-desk-display'), prefix + ' 看贴耳、重 roll 关键词归到「贴耳与显示」');
+            check(['prompt-n-slot', 'mode-on', 'compress-prompt'].every(k => !!el(k).closest('details') && el(k).closest('details') !== el('prompt').closest('details') && el('prompt').closest('details').contains(el(k))), prefix + ' NSFW 槽、场景模式、压缩指令都收进「挂账规则」里当子折叠');
+            check(!d.querySelector('#' + prefix + '-notice-demo').closest('[data-ipe-tab="ledger"], #ipe-section-ledger'), prefix + ' 「试一下报错卡」不在挂账页了');
         }
         const header = panel.querySelector('#ipe-section-api-config > .ipe-section-header');
         check(header.tagName === 'BUTTON' && header.type === 'button', '配置标题是可键盘操作的按钮');
@@ -299,7 +328,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const bt = id => d.querySelector('#' + id);
         check(btIds.every(id => bt(id) && bt(id).value === 'content'), '正文标签四格都在（浮窗 / 抽屉 × 生图 / 挂账），默认都显示 content');
         check(!!bt('ipe-body-tag').closest('#ipe-section-extract-rules') && !!bt('iped-body-tag').closest('[data-ipe-fold="drawer-image-rules"]'), '生图那格在「提取规则」里');
-        check(['ipe-ledger-body-tag', 'iped-ledger-body-tag'].every(id => { const f = bt(id).closest('details'); return f && f.querySelector('summary').textContent.includes('高级设置') && !!bt(id).closest('.ipe-desk-settings'); }), '挂账那格在副 AI 的「高级设置」里');
+        check(['ipe-ledger-body-tag', 'iped-ledger-body-tag'].every(id => { const f = bt(id).closest('details'); return f && f.querySelector('summary').textContent.includes('喂给副 AI') && !!bt(id).closest('.ipe-desk-settings'); }), '挂账那格在副 AI 的「喂给副 AI 什么」里（2.29.0 从「高级设置」改的名）');
         bt('ipe-body-tag').value = '<正文>， main';
         bt('ipe-body-tag').dispatchEvent(new w.Event('change'));
         check(settings.bodyTag === '正文, main' && btIds.every(id => bt(id).value === '正文, main'), '改生图那格：存成「正文, main」（带尖括号、全角逗号都认），四格一起变');

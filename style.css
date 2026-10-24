@@ -2583,3 +2583,18 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 
 /* 2.28.4 重新生成（自动注入）：括号那句另起一行、小一号，手机上不再折成「自动注 / 入）」 */
 .ipe-btn .ipe-btn-sub { display: block; font-size: .8em; line-height: 1.25; opacity: .75; margin-top: 1px; }
+
+/* ============================================================
+   2.29.0 排布：开关条、主按钮 2×2
+   ============================================================ */
+.ipe-switch-row { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-bottom: 6px; }
+.ipe-switch-row > div { margin: 0 !important; }
+.ipe-switch-row label { display: flex !important; flex-direction: row !important; align-items: center; justify-content: flex-start !important; gap: 8px !important; margin: 0; white-space: nowrap; }
+.ipe-switch-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
+.ipe-switch-notes:empty { display: none; }
+.ipe-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+#ipe-panel .ipe-btn-grid { padding-right: var(--ipe-thumb); }
+.ipe-btn-grid > * { margin: 0 !important; min-width: 0; }
+.ipe-btn-grid > div { padding: 0 !important; display: flex; }
+.ipe-btn-grid > div[style*="display:none"], .ipe-btn-grid > div[style*="display: none"] { display: none; }
+.ipe-btn-grid .ipe-btn, .ipe-btn-grid .menu_button { width: 100%; flex: 1; margin: 0; }

@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.28.13";
+var IPE_VERSION = "2.29.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7729,12 +7729,6 @@ function ipeArrangeUI() {
         if (rule && note) wrap(rule.previousElementSibling, note.nextElementSibling.nextElementSibling, "drawer-ledger-rules", "挂账规则与本卡要点", false);
     }
     ["ipe", "iped"].forEach(function(prefix){
-        var auto = q("#" + prefix + "-ledger-auto"), chat = q("#" + prefix + "-ledger-chatkey");
-        if (auto && chat) {
-            var row = auto.closest("label").parentElement, hint = q("#" + prefix + "-ledger-auto-hint");
-            chat.parentNode.insertBefore(row, chat);
-            if (hint) chat.parentNode.insertBefore(hint, chat);
-        }
         var api = q("#" + prefix + "-ledger-api"), test = q("#" + prefix + "-ledger-test");
         if (api && test && !api.closest("details")) {
             var label = prefix === "ipe" ? api.parentElement : api.previousElementSibling;
@@ -7748,6 +7742,7 @@ function ipeArrangeUI() {
         if (nsfw && !nsfw.dataset.ipeMemoryBound) nsfw.removeAttribute("open");
     });
     ipeArrangeLedgerDesk();
+    ipeArrangeImageLayout();   // 2.29.0 生图页也按「多久用一次」归组
     var state = ipeFoldStates();
     d.querySelectorAll("#ipe-panel .ipe-section").forEach(function(section){
         if (typeof state[section.id] === "boolean") section.classList.toggle("collapsed", !state[section.id]);
@@ -7765,58 +7760,253 @@ function ipeArrangeUI() {
     });
 }
 
-// Present the same existing ledger controls as a small desk, without rebuilding any input.
+/* ============================================================
+   2.29.0 排布：按「多久用一次」分层
+   控件本身一个不动（id、绑定、读写都照旧），只在页面搭好以后把它们所在的行挪进该去的组：
+   每楼都看的放最上面（工作台），按卡填一次的其次，调一次就不动的折叠起来，备份 / 外观折得最深；同一件事的开关放一起。
+   行 = 控件往上爬到容器（区块正文 / 折叠正文 / 桌面卡 / 页签）的那一层。抽屉里标题是单独一行 <label>、提示是跟在后面的 <small>，
+   浮窗里提示是 .ipe-hint，都算这一行的，跟着一起挪。
+   ============================================================ */
+function ipeUiIsContainer(el) {
+    if (!el || el.nodeType !== 1) return true;
+    var cl = el.classList;
+    return el.tagName === "DETAILS" || el.hasAttribute("data-ipe-tab")
+        || cl.contains("ipe-section-body") || cl.contains("ipe-fold-body") || cl.contains("ipe-desk-content") || cl.contains("ipe-desk-settings")
+        || cl.contains("ipe-sections") || cl.contains("inline-drawer-content") || cl.contains("ipe-switch-row") || cl.contains("ipe-switch-notes")
+        || cl.contains("ipe-desk-overview") || cl.contains("ipe-btn-grid");
+}
+function ipeUiRow(el) {
+    if (!el) return null;
+    while (el.parentElement && !ipeUiIsContainer(el.parentElement)) el = el.parentElement;
+    return el;
+}
+function ipeUiIsHint(n) { return !!n && n.nodeType === 1 && (n.tagName === "SMALL" || n.classList.contains("ipe-hint")); }
+/* 这一行连同它的标题行、提示行 */
+function ipeUiRowGroup(el) {
+    var row = ipeUiRow(el); if (!row) return [];
+    var out = [row], p = row.previousElementSibling, n = row.nextElementSibling;
+    if (p && p.tagName === "LABEL" && !p.querySelector("input,select,textarea,button")) out.unshift(p);
+    while (ipeUiIsHint(n)) { out.push(n); n = n.nextElementSibling; }
+    return out;
+}
+/* 把这些控件所在的行挪进 target；opts.hintsTo：提示行另放一处（开关条里塞不下长提示） */
+function ipeUiMove(target, ids, opts) {
+    opts = opts || {};
+    ids.forEach(function(id){
+        var el = (typeof id === "string") ? q("#" + id) : id;
+        if (!el) return;
+        var row = ipeUiRow(el);
+        ipeUiRowGroup(el).forEach(function(n){
+            var to = (opts.hintsTo && n !== row && ipeUiIsHint(n)) ? opts.hintsTo : target;
+            if (n === to || n.contains(to)) return;
+            to.appendChild(n);
+        });
+    });
+}
+/* 只挪按钮本身（不带它那一排）；原来那排空了就拆掉 */
+function ipeUiMoveButtons(target, ids) {
+    ids.forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var old = el.parentElement;
+        target.appendChild(el);
+        if (old && !old.id && !ipeUiIsContainer(old) && !old.querySelector("button,input,select,textarea")) old.remove();
+    });
+}
+function ipeUiActions(d, panel) {
+    var row = d.createElement("div");
+    if (panel) row.className = "ipe-preview-actions";
+    else row.style.cssText = "display:flex;gap:6px;margin-top:6px;flex-wrap:wrap";
+    return row;
+}
+function ipeUiFold(d, key, title, open) {
+    var fold = d.createElement("details"), summary = d.createElement("summary"), body = d.createElement("div");
+    fold.className = "ipe-fold ipe-organized-card"; fold.dataset.ipeFold = key; fold.open = !!open;
+    summary.textContent = title; body.className = "ipe-fold-body";
+    fold.appendChild(summary); fold.appendChild(body);
+    return { fold: fold, body: body };
+}
+function ipeUiTitle(el, title) {
+    if (!el) return;
+    var t = el.classList.contains("ipe-section") ? el.querySelector(".ipe-section-header span") : el.querySelector(":scope > summary");
+    if (t) t.textContent = title;
+}
+/* 按钮改短名 + 第二行小字（浮窗是 <button>；抽屉是 <input type=button> 只能一行，窄屏放不下，只留短名、说明进 title） */
+function ipeUiBtnLabel(id, main, sub) {
+    var b = q("#" + id); if (!b) return;
+    if (b.tagName === "INPUT") { b.value = main; if (sub && !b.title) b.title = sub; }
+    else b.innerHTML = esc(main) + (sub ? '<small class="ipe-btn-sub">' + esc(sub) + '</small>' : "");
+}
+
+/* 生图页：工作台（开关条 + 结果 + 主按钮 2×2）→ 这张卡 → 画风与规则 → API 连接（带请求参数）→ 备份与外观 */
+function ipeArrangeImageLayout() {
+    var d = ipeRootDocument();
+    ["ipe", "iped"].forEach(function(p){
+        var panel = p === "ipe";
+        var root = panel ? q("#ipe-panel .ipe-sections") : q('#ipe-drawer [data-ipe-tab="image"]');
+        if (!root || root.dataset.ipeLayout) return;
+        root.dataset.ipeLayout = "1";
+        var P = { preview: "preview", api: "api-config", system: "system-prompt", template: "base-template", common: "common-blocks", anchors: "char-anchors", rules: "extract-rules", backup: "backup" };
+        function box(k) { return panel ? q("#ipe-section-" + P[k]) : root.querySelector('[data-ipe-fold="drawer-image-' + k + '"]'); }
+        function body(k) { var b = box(k); return b ? b.querySelector(panel ? ":scope > .ipe-section-body" : ":scope > .ipe-fold-body") : null; }
+        var work = body("preview"); if (!work) return;
+
+        // ⑤ 备份与外观先搭好，下面各组往这儿扔
+        var backup;
+        if (panel) { root.insertAdjacentHTML("beforeend", secHTML("backup", "备份与外观", true, "", "image")); backup = body("backup"); }
+        else { var bf = ipeUiFold(d, "drawer-image-backup", "备份与外观", false); root.appendChild(bf.fold); backup = bf.body; }
+        var bh = d.createElement("div");
+        if (panel) bh.className = "ipe-hint"; else bh.style.cssText = "color:#888;font-size:11px;margin-bottom:4px";
+        bh.textContent = "预设包、锚点的导出导入，浮标怎么显示，都在这儿。平时用不着。";
+        backup.appendChild(bh);
+
+        // ① 工作台：开关条放最上面；标题栏那个没字的小开关挪下来、标上字
+        var sw = d.createElement("div"); sw.className = "ipe-switch-row";
+        work.insertBefore(sw, work.firstChild);
+        var en = q("#" + p + "-enabled");
+        if (panel && en) {
+            var tg = en.closest("label.ipe-toggle"), item = d.createElement("div"); item.className = "ipe-switch-item";
+            if (tg && tg.title) item.title = tg.title;
+            item.appendChild(d.createTextNode("自动提取 ")); item.appendChild(tg || en); sw.appendChild(item);
+        } else if (en) ipeUiMove(sw, [en]);
+        ipeUiMove(sw, [p + "-auto-inject", p + "-auto-greeting", p + "-layered"]);
+        // 主按钮 2×2：手动提取｜重新生成｜确认注入｜打断
+        var ext = q("#" + p + "-btn-extract");
+        if (ext) {
+            var grid = d.createElement("div"); grid.className = "ipe-btn-grid";
+            ext.parentElement.parentNode.insertBefore(grid, ext.parentElement);
+            ipeUiMoveButtons(grid, [p + "-btn-extract", p + "-btn-reroll", p + "-btn-inject", p + "-btn-stop"]);
+        }
+        // 备份与外观：预设包、锚点备份、保存设置、报错卡演示、浮标
+        ipeUiMove(backup, [p + "-pack-export", p + "-pack-file"]);
+        var bk = ipeUiActions(d, panel); backup.appendChild(bk);
+        ipeUiMoveButtons(bk, [p + "-pack-export-anchors", p + "-btn-save-now", p + "-notice-demo"]);
+        ipeUiMove(backup, [p + "-show-quick-entry", p + "-quick-motion", p + "-open-panel"]);
+        // ④ API 连接：请求参数折叠（流式、开口时限从本区挪进去，温度、思考强度从锚点那张卡搬来）
+        var apiBody = body("api");
+        if (apiBody) {
+            var pf = ipeUiFold(d, p + "-img-params", "请求参数（流式 · 开口时限 · 温度 · 思考强度）", false);
+            apiBody.appendChild(pf.fold);
+            ipeUiMove(pf.body, [p + "-img-stream", p + "-img-open", p + "-img-temp", p + "-img-effort"]);
+        }
+        var more = root.querySelector("details.ipe-cast-more");
+        if (more && !more.querySelector("input,select,textarea")) more.remove();
+        // ③ 公共块只服务画风模板：并进去当子折叠
+        var tpl = body("template"), common = box("common");
+        if (tpl && common) {
+            var cf = ipeUiFold(d, p + "-template-common", "公共块（挂在模板里的固定句）", false);
+            var cb = common.querySelector(panel ? ":scope > .ipe-section-body" : ":scope > .ipe-fold-body");
+            while (cb && cb.firstChild) cf.body.appendChild(cb.firstChild);
+            tpl.appendChild(cf.fold); common.remove();
+        }
+        // 顺序：工作台 → 这张卡 → 画风与规则 → 连接 → 备份
+        ["preview", "anchors", "template", "system", "rules", "api", "backup"].forEach(function(k){ var b = box(k); if (b) root.appendChild(b); });
+        if (panel) { var led = q("#ipe-section-ledger"); if (led) root.appendChild(led); }
+        ipeUiTitle(box("anchors"), "这张卡 · 角色锚点");
+        ipeUiTitle(box("api"), "API 配置 · 副 AI 连接");
+    });
+}
+
+/* 挂账页：开关条 + 当前账本 + 本次挂账（长期指令、本卡要点、这次补充、主按钮 2×2）→ 规则与连接 → 历史与备份。
+   控件一个不重建，只挪行。 */
 function ipeArrangeLedgerDesk() {
     var d = ipeRootDocument();
-    ["ipe", "iped"].forEach(function(prefix) {
-        var text = q("#" + prefix + "-ledger-text");
+    ["ipe", "iped"].forEach(function(p) {
+        var text = q("#" + p + "-ledger-text");
         if (!text) return;
-        var body = prefix === "ipe" ? q("#ipe-section-ledger .ipe-section-body") : q('#ipe-drawer [data-ipe-tab="ledger"]');
+        var panel = p === "ipe";
+        var body = panel ? q("#ipe-section-ledger .ipe-section-body") : q('#ipe-drawer [data-ipe-tab="ledger"]');
         if (!body || body.dataset.ipeDesk) return;
         body.dataset.ipeDesk = "1";
         body.classList.add("ipe-ledger-desk");
-        var nodes = Array.from(body.children), used = new Set();
-        function node(suffix) {
-            var el = q("#" + prefix + "-ledger-" + suffix);
-            while (el && el.parentElement !== body) el = el.parentElement;
-            return el;
-        }
+        var L = function(s){ return p + "-ledger-" + s; };
+        var fold = function(s){ var el = q("#" + L(s)); return el ? el.closest("details") : null; };
         function card(title, kind, folded) {
             var box = d.createElement(folded ? "details" : "section");
             box.className = "ipe-desk-card ipe-desk-" + kind + (folded ? " ipe-fold ipe-organized-card" : "");
-            if (folded) box.dataset.ipeFold = prefix + "-desk-" + kind;
+            if (folded) box.dataset.ipeFold = p + "-desk-" + kind;
             var heading = d.createElement(folded ? "summary" : "h3");
             heading.textContent = title; box.appendChild(heading);
             var content = d.createElement("div"); content.className = "ipe-desk-content" + (folded ? " ipe-fold-body" : ""); box.appendChild(content);
             return { box: box, content: content };
         }
-        function take(target, el) { if (el && nodes.indexOf(el) >= 0 && !used.has(el)) { used.add(el); target.appendChild(el); } }
-        // Capture sibling relationships before moving fields.
-        var textNode = node("text"), order = node("order"), extra = node("extra");
-        var textLabel = textNode.previousElementSibling, orderLabel = order.previousElementSibling, extraLabel = extra.previousElementSibling;
-        var toolsStart = nodes.indexOf(node("compress")), toolsEnd = nodes.indexOf(node("ep-box"));
-        var history = node("age"), historyNote = history && history.nextElementSibling;
-        var record = card("当前账本", "record", false), request = card("本次挂账", "request", false), tools = card("账本管理 · 历史与备份", "tools", true);
+        var nodes = Array.from(body.children);
+        var textLabel = ipeUiRowGroup(text)[0], orderLabel = ipeUiRowGroup(q("#" + L("order")))[0], extraLabel = ipeUiRowGroup(q("#" + L("extra")))[0];
+        // 卡片先挂进页面再往里挪：q() 只认页面里的，挂在内存里的卡找不到
         var hero = d.createElement("div"); hero.className = "ipe-desk-overview";
-        [node("auto"), node("auto-hint"), node("chatkey")].forEach(function(el){ take(hero, el); });
-        [textLabel, textNode, node("save")].forEach(function(el){ take(record.content, el); });
-        [orderLabel, order, extraLabel, extra, node("run"), node("reconcile-box"), node("stop"), node("force"), node("status"), node("preview-box")].forEach(function(el){ take(request.content, el); });
-        for (var i = toolsStart; i >= 0 && i <= toolsEnd; i++) take(tools.content, nodes[i]);
-        take(tools.content, history); take(tools.content, historyNote);
-        var display = card("显示与贴耳", "display", true);
-        ["inline", "ep-enabled", "compress-prompt", "ep-depth"].forEach(function(key){ take(display.content, node(key)); });
+        var record = card("当前账本", "record", false), request = card("本次挂账", "request", false);
         var settings = d.createElement("section"); settings.className = "ipe-desk-settings";
+        var tools = card("\u23F1 历史与备份", "tools", true);
+        [hero, record.box, request.box, settings, tools.box].forEach(function(el){ body.appendChild(el); });
+
+        // ① 开关条：自动挂账 · 开场白也挂 · 重 roll 不带本轮必须（三个归拢；提示另起一行）
+        var sw = d.createElement("div"); sw.className = "ipe-switch-row"; hero.appendChild(sw);
+        var notes = d.createElement("div"); notes.className = "ipe-switch-notes"; hero.appendChild(notes);
+        ipeUiMove(sw, [L("auto"), L("auto-greeting"), L("reroll-trim")], { hintsTo: notes });
+        ipeUiMove(hero, [L("chatkey")]);
+
+        ipeUiMove(record.content, [text, L("save")]);
+
+        // ② 本次挂账：长期指令 → 本卡要点（从规则里挪上来，开新卡先填这儿）→ 这次补充 → 主按钮 2×2 → 状态 → 预览
+        ipeUiMove(request.content, [L("order")]);
+        var nf = ipeUiFold(d, p + "-desk-note", "本卡要点 / 世界观硬设定（每次都发给副 AI；开新卡先填这儿）", false);
+        request.content.appendChild(nf.fold);
+        ipeUiMove(nf.body, [L("note-slot"), L("note-name"), L("note-add"), L("note")]);
+        ipeUiMove(request.content, [L("extra")]);
+        var grid = d.createElement("div"); grid.className = "ipe-btn-grid"; request.content.appendChild(grid);
+        var runRow = ipeUiRow(q("#" + L("run")));
+        [runRow, q("#" + L("reconcile-box")), q("#" + L("stop")), q("#" + L("force"))].forEach(function(el){ if (el) grid.appendChild(el); });
+        ipeUiMove(request.content, [L("status"), L("preview-box")]);
+        ipeUiBtnLabel(L("run"), "重新挂账", "先预览再采用");
+        ipeUiBtnLabel(L("reconcile"), "对账", "重 roll 完点一下");
+        ipeUiBtnLabel(L("stop-btn"), "⏹ 中断", "");
+        ipeUiBtnLabel(L("force-btn"), "强制采用", "这次的结果");
+        var run = q("#" + L("run")); if (run) run.title = "读取最后一楼，先预览，再决定是否采用";
+        var rec = q("#" + L("reconcile")); if (rec) rec.title = "重 roll 完点一下，把楼没了的账碎掉；删楼不用管，插件自己会对";
+
+        // ③④⑤⑥ 规则与连接
         var heading = d.createElement("h3"); heading.textContent = "规则与连接"; settings.appendChild(heading);
-        ["api", "prompt", "nsfw-fold", "mode-on", "rep-floors"].forEach(function(key){ take(settings, node(key)); });
-        nodes.forEach(function(el){ if (!used.has(el)) { if (el.tagName === "HR") el.remove(); else take(settings, el); } });
+        var rules = fold("prompt");
+        if (rules) {
+            ipeUiTitle(rules, "📝 挂账规则（想记什么写在这儿）");
+            var rb = rules.querySelector(":scope > .ipe-fold-body") || rules;
+            var compress = fold("compress-prompt");
+            if (compress && compress === fold("ep-depth")) {   // 抽屉里压缩指令跟贴耳细节挤在一张卡：拆出来
+                var cf = ipeUiFold(d, p + "-desk-compress", "🗜 压缩账本（合并没用的支线、精简语言）", false);
+                ipeUiMove(cf.body, [L("compress-prompt"), L("compress-reset"), L("compress-warn")]);
+                compress = cf.fold;
+            }
+            [fold("prompt-n-slot"), fold("mode-on"), compress].forEach(function(f){ if (f) rb.appendChild(f); });
+            settings.appendChild(rules);
+        }
+        var connect = fold("api");
+        if (connect) {
+            ipeUiTitle(connect, "🤖 副 AI 连接（API · 请求参数）");
+            var cb2 = connect.querySelector(":scope > .ipe-fold-body") || connect;
+            ipeUiMove(cb2, [L("stream"), L("idle"), L("effort"), L("maxtok")]);
+            settings.appendChild(connect);
+        }
+        var feed = fold("body-tag");
+        if (feed) { ipeUiTitle(feed, "📦 喂给副 AI 什么（正文标签 · 往回看几楼 · 账本标签）"); settings.appendChild(feed); }
+        var display = card("🎧 贴耳与显示", "display", true);
+        ipeUiMove(display.content, [L("ep-enabled"), L("inline")]);
+        var detail = fold("ep-depth"); if (detail) display.content.appendChild(detail);
+        var epRow = ipeUiActions(d, panel); display.content.appendChild(epRow);
+        ipeUiMoveButtons(epRow, [L("ep")]);
+        ipeUiMove(display.content, [L("ep-box")]);
         settings.appendChild(display.box);
-        body.appendChild(hero); body.appendChild(record.box); body.appendChild(request.box); body.appendChild(tools.box); body.appendChild(settings);
+
+        // ⑦ 历史与备份
+        var tr = ipeUiActions(d, panel); tools.content.appendChild(tr);
+        ipeUiMoveButtons(tr, [L("compress"), L("export"), L("import")]);
+        ipeUiMove(tools.content, [L("file"), L("inherit-sel")]);
+        var history = fold("vers"); if (history) ipeUiMove(tools.content, [history]);
+
+        // 剩下没认领的（分隔线扔掉，其余归到规则与连接，一个都不丢）
+        nodes.forEach(function(el){ if (el.parentElement === body) { if (el.tagName === "HR") el.remove(); else settings.appendChild(el); } });
         // Keep labels concise; the scope of each instruction remains explicit.
-        textLabel.textContent = "副 AI 记下的内容，也可以直接修改";
-        orderLabel.textContent = "长期指令 · 优先于副 AI 判断";
-        extraLabel.textContent = "这次补充 · 只对下一次挂账有效";
-        var run = q("#" + prefix + "-ledger-run");
-        if (run) { run.title = "读取最后一楼，先预览，再决定是否采用"; if (run.tagName === "INPUT") run.value = "重新挂账 · 先预览"; else run.textContent = "重新挂账 · 先预览"; }
+        if (textLabel && textLabel.tagName === "LABEL") textLabel.textContent = "副 AI 记下的内容，也可以直接修改";
+        if (orderLabel && orderLabel.tagName === "LABEL") orderLabel.textContent = "长期指令 · 优先于副 AI 判断";
+        if (extraLabel && extraLabel.tagName === "LABEL") extraLabel.textContent = "这次补充 · 只对下一次挂账有效";
     });
 }
 
