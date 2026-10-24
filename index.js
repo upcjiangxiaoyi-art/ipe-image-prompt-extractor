@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.1";
+var IPE_VERSION = "2.29.2";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7859,8 +7859,8 @@ function ipeArrangeImageLayout() {
         bh.textContent = "预设包、锚点的导出导入，浮标怎么显示，都在这儿。平时用不着。";
         backup.appendChild(bh);
 
-        // ① 工作台：开关条放最上面；标题栏那个没字的小开关挪下来、标上字
-        var sw = d.createElement("div"); sw.className = "ipe-switch-row";
+        // ① 工作台：开关条放最上面，排成一列、开关统一靠左（2.29.2，跟挂账页一样）；标题栏那个没字的小开关挪下来、标上字
+        var sw = d.createElement("div"); sw.className = "ipe-switch-row ipe-switch-col";
         work.insertBefore(sw, work.firstChild);
         var en = q("#" + p + "-enabled");
         if (panel && en) {

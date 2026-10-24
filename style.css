@@ -2602,3 +2602,4 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 .ipe-switch-row.ipe-switch-col label { justify-content: flex-start !important; white-space: normal; }
 .ipe-switch-row.ipe-switch-col label > input[type="checkbox"] { order: -1; margin: 0 2px 0 0; flex: none; }
 #ipe-ledger-status:empty, #iped-ledger-status:empty { display: none; }
+.ipe-switch-row.ipe-switch-col .ipe-switch-item > .ipe-toggle { order: -1; flex: none; }

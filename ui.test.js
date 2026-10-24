@@ -40,7 +40,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             const g = id => d.querySelector('#' + prefix + '-' + id);
             check(!!g('common-slot').closest('details') && g('common-slot').closest('details').querySelector('summary').textContent.indexOf('公共块') === 0 && !!g('common-slot').closest(prefix === 'ipe' ? '#ipe-section-base-template' : '[data-ipe-fold="drawer-image-template"]'), prefix + ' 公共块并进了画风模板，当子折叠');
             const sw = g('enabled').closest('.ipe-switch-row');
-            check(!!sw && ['auto-inject', 'auto-greeting', 'layered'].every(k => g(k).closest('.ipe-switch-row') === sw) && !!sw.closest(prefix === 'ipe' ? '#ipe-section-preview' : '[data-ipe-fold="drawer-image-preview"]') && sw.parentElement.firstElementChild === sw, prefix + ' 自动提取 / 自动注入 / 开场白 / 分层四个开关归成一条，放在工作台最上面');
+            check(!!sw && ['auto-inject', 'auto-greeting', 'layered'].every(k => g(k).closest('.ipe-switch-row') === sw) && !!sw.closest(prefix === 'ipe' ? '#ipe-section-preview' : '[data-ipe-fold="drawer-image-preview"]') && sw.parentElement.firstElementChild === sw && sw.classList.contains('ipe-switch-col'), prefix + ' 自动提取 / 自动注入 / 开场白 / 分层四个开关归成一列（开关靠左），放在工作台最上面');
             check(prefix !== 'ipe' || (!panel.querySelector('.ipe-panel-header #ipe-enabled') && sw.textContent.indexOf('自动提取') >= 0), '浮窗标题栏那个没字的小开关挪进开关条、标上「自动提取」');
             const grid = g('btn-extract').closest('.ipe-btn-grid');
             check(!!grid && [...grid.querySelectorAll('button,input')].map(b => b.id.replace(prefix + '-btn-', '')).join(',') === 'extract,reroll,inject,stop', prefix + ' 主按钮 2×2：手动提取｜重新生成｜确认注入｜打断');
