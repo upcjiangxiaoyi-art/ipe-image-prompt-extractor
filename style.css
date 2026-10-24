@@ -2598,3 +2598,7 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 .ipe-btn-grid > div { padding: 0 !important; display: flex; }
 .ipe-btn-grid > div[style*="display:none"], .ipe-btn-grid > div[style*="display: none"] { display: none; }
 .ipe-btn-grid .ipe-btn, .ipe-btn-grid .menu_button { width: 100%; flex: 1; margin: 0; }
+.ipe-switch-row.ipe-switch-col { flex-direction: column; align-items: stretch; gap: 6px; }
+.ipe-switch-row.ipe-switch-col label { justify-content: flex-start !important; white-space: normal; }
+.ipe-switch-row.ipe-switch-col label > input[type="checkbox"] { order: -1; margin: 0 2px 0 0; flex: none; }
+#ipe-ledger-status:empty, #iped-ledger-status:empty { display: none; }

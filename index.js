@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.0";
+var IPE_VERSION = "2.29.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7556,7 +7556,7 @@ function createPanel() {
         '<div class="ipe-preview-actions" id="ipe-ledger-force" style="display:none">'+
             '<button id="ipe-ledger-force-btn" class="ipe-btn" type="button">\u26A0\uFE0F 强制采用这次结果</button>'+
         '</div>'+
-        '<div id="ipe-ledger-status" class="ipe-preview-status" style="margin-top:6px">\u2014</div>'+
+        '<div id="ipe-ledger-status" class="ipe-preview-status" style="margin-top:6px"></div>'+
         '<details class="ipe-fold"><summary>\u23F1 后悔药（改错了从这儿找回来）</summary><div class="ipe-fold-body">'+
             '<pre id="ipe-ledger-age" class="ipe-ledger-age"></pre>'+
             '<label>存过的旧账本<select id="ipe-ledger-vers"></select></label>'+
@@ -7938,10 +7938,15 @@ function ipeArrangeLedgerDesk() {
         var tools = card("\u23F1 历史与备份", "tools", true);
         [hero, record.box, request.box, settings, tools.box].forEach(function(el){ body.appendChild(el); });
 
-        // ① 开关条：自动挂账 · 开场白也挂 · 重 roll 不带本轮必须（三个归拢；提示另起一行）
-        var sw = d.createElement("div"); sw.className = "ipe-switch-row"; hero.appendChild(sw);
+        // ① 开关条：自动挂账 · 开场白也挂 · 重 roll 不带本轮必须（三个归拢，排成一列、开关统一靠左；提示另起一行）
+        var sw = d.createElement("div"); sw.className = "ipe-switch-row ipe-switch-col"; hero.appendChild(sw);
         var notes = d.createElement("div"); notes.className = "ipe-switch-notes"; hero.appendChild(notes);
-        ipeUiMove(sw, [L("auto"), L("auto-greeting"), L("reroll-trim")], { hintsTo: notes });
+        ipeUiMove(sw, [L("auto"), L("auto-greeting")], { hintsTo: notes });
+        // 2.29.1 重 roll 那个开关的长提示放到「贴耳细节」里它的关键词格旁边，开关条只留开关
+        var trimNotes = d.createElement("div");
+        ipeUiMove(sw, [L("reroll-trim")], { hintsTo: trimNotes });
+        var kwRow = ipeUiRow(q("#" + L("reroll-kw")));
+        while (trimNotes.firstChild) { if (kwRow && kwRow.parentNode) kwRow.parentNode.insertBefore(trimNotes.firstChild, kwRow); else notes.appendChild(trimNotes.firstChild); }
         ipeUiMove(hero, [L("chatkey")]);
 
         ipeUiMove(record.content, [text, L("save")]);
@@ -7954,9 +7959,11 @@ function ipeArrangeLedgerDesk() {
         ipeUiMove(request.content, [L("extra")]);
         var grid = d.createElement("div"); grid.className = "ipe-btn-grid"; request.content.appendChild(grid);
         var runRow = ipeUiRow(q("#" + L("run")));
-        [runRow, q("#" + L("reconcile-box")), q("#" + L("stop")), q("#" + L("force"))].forEach(function(el){ if (el) grid.appendChild(el); });
+        var compressRow = ipeUiActions(d, panel); ipeUiMoveButtons(compressRow, [L("compress")]);   // 2.29.1 压缩常用，跟重新挂账并排
+        [runRow, compressRow, q("#" + L("reconcile-box")), q("#" + L("stop")), q("#" + L("force"))].forEach(function(el){ if (el) grid.appendChild(el); });
         ipeUiMove(request.content, [L("status"), L("preview-box")]);
         ipeUiBtnLabel(L("run"), "重新挂账", "先预览再采用");
+        ipeUiBtnLabel(L("compress"), "\uD83D\uDDDC 压缩一版", "合并支线、精简语言");
         ipeUiBtnLabel(L("reconcile"), "对账", "重 roll 完点一下");
         ipeUiBtnLabel(L("stop-btn"), "⏹ 中断", "");
         ipeUiBtnLabel(L("force-btn"), "强制采用", "这次的结果");
@@ -7997,7 +8004,7 @@ function ipeArrangeLedgerDesk() {
 
         // ⑦ 历史与备份
         var tr = ipeUiActions(d, panel); tools.content.appendChild(tr);
-        ipeUiMoveButtons(tr, [L("compress"), L("export"), L("import")]);
+        ipeUiMoveButtons(tr, [L("export"), L("import")]);
         ipeUiMove(tools.content, [L("file"), L("inherit-sel")]);
         var history = fold("vers"); if (history) ipeUiMove(tools.content, [history]);
 
@@ -8147,7 +8154,7 @@ function createDrawer() {
        + '</div>';
     h += '<div id="iped-ledger-stop" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-stop-btn" class="menu_button" style="width:100%" value="\u23F9 \u4E2D\u65AD\u8FD9\u6B21\u6302\u8D26"></div>';
     h += '<div id="iped-ledger-force" style="display:none;margin-top:6px"><input type="button" id="iped-ledger-force-btn" class="menu_button" style="width:100%" value="\u26A0\uFE0F 强制采用这次结果"></div>';
-    h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0">\u2014</div>';
+    h += '<div id="iped-ledger-status" style="color:#888;font-size:12px;margin:6px 0"></div>';
     h += '<details class="ipe-fold"><summary>\u23F1 后悔药（改错了从这儿找回来）</summary><div class="ipe-fold-body">';
     h += '<pre id="iped-ledger-age" class="ipe-ledger-age"></pre>';
     h += '<label>存过的旧账本</label><select id="iped-ledger-vers" class="text_pole"></select>';
