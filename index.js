@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.2";
+var IPE_VERSION = "2.29.3";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -514,6 +514,15 @@ function ipeChatKey() {
 }
 /* 2.28.12 以前镜像只按聊天名存。那样的旧条目要角色名对得上、楼数跟存的时候一模一样才敢认成同一个聊天：
    复制卡的新聊天只有开场白，楼数对不上，不认；同卡刷新页面、聊天数据没来得及存的，楼数一样，救回来。 */
+/* 2.29.3 「当前聊天」那行：聊天文件名是酒馆起的，复制卡 / 重导入的卡会带着旧卡的名字（「陈呈 - 2026-10-23@22h07m13s382ms」），
+   看着像卡串了，其实账本早按「卡 + 聊天」分开了。这里显示现在这张卡的名字 + 聊天建档时间，完整文件名放 title 里。 */
+function ipeLedgerChatLabel() {
+    var id = ipeChatIdPart(), card = "";
+    try { card = ipeAnchorCardLabel(); } catch(e) {}
+    var m = id.match(/(\d{4}-\d{2}-\d{2})\s*@\s*(\d{1,2})h\s*(\d{2})m/);
+    var when = m ? m[1] + " " + m[2] + ":" + m[3] : id;
+    return (card ? card + " · " : "") + when;
+}
 function ipeLedgerMirrorLegacyHit(all) {
     var id = ipeChatIdPart();
     if (!all || id === ipeChatKey()) return null;   // 认不出卡：键跟以前一样，正常那一步已经查过
@@ -3387,8 +3396,11 @@ function ipeLedgerRefreshEditors() {
     });
     ["ipe-ledger-chatkey","iped-ledger-chatkey"].forEach(function(id){
         var el = q("#" + id);
-        if (el) el.textContent = "当前聊天：" + ipeChatIdPart() + "\u3000楼层：" + ipeFloorNo()
-            + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到第 " + st.lastFloor + " 楼" : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
+        if (el) {
+            el.textContent = "当前聊天：" + ipeLedgerChatLabel() + "\u3000楼层：" + ipeFloorNo()
+                + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到第 " + st.lastFloor + " 楼" : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
+            el.title = "聊天文件：" + ipeChatIdPart();
+        }
     });
     // 版本历史下拉
     ["ipe-ledger-vers","iped-ledger-vers"].forEach(function(id){

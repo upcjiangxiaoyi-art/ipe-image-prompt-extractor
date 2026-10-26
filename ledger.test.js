@@ -2639,7 +2639,14 @@ await (async () => {
     F("ipeLedgerRefreshInherit")(true);
     const sel = w.document.querySelector("#ipe-ledger-inherit-sel");
     ok(sel.options[1].textContent.indexOf("old-chat-A") >= 0 && sel.options[1].textContent.indexOf("char:") < 0, "下拉里显示聊天名，不带卡前缀", sel.options[1].textContent);
-    ok(w.document.querySelector("#ipe-ledger-chatkey").textContent.indexOf("当前聊天：test-chat") === 0, "编辑框上面那行也只写聊天名", w.document.querySelector("#ipe-ledger-chatkey").textContent);
+    ok(w.document.querySelector("#ipe-ledger-chatkey").textContent.indexOf("当前聊天：苑无忧 · test-chat") === 0, "编辑框上面那行：这张卡的名字 + 聊天名，不带卡前缀", w.document.querySelector("#ipe-ledger-chatkey").textContent);
+    // 2.29.3 复制卡 / 重导入的卡：聊天文件名带着旧卡的名字，那行显示现在这张卡的名字 + 建档时间，不再像串了卡
+    tavern.characters.push({ name: "顾寒改的名", avatar: "gu2.png" }); tavern.characterId = 3; tavern.name2 = "顾寒改的名";
+    tavern.getCurrentChatId = () => "陈呈 - 2026-10-23@22h07m13s382ms";
+    F("ipeLedgerRefreshEditors")();
+    const ck = w.document.querySelector("#ipe-ledger-chatkey");
+    ok(ck.textContent.indexOf("当前聊天：顾寒改的名 · 2026-10-23 22:07") === 0 && ck.textContent.indexOf("陈呈") < 0 && ck.title.indexOf("陈呈 - 2026-10-23@22h07m13s382ms") >= 0, "聊天文件名带旧卡名字：那行只显示现在这张卡的名字和建档时间，完整文件名放 title 里", ck.textContent);
+    tavern.getCurrentChatId = () => "test-chat"; tavern.characterId = 0; tavern.name2 = "苑无忧";
 })();
 
 console.log("\n【67】 开场白也自动挂账（2.28.13）：挂账页也有了跟生图一样的开场白开关，关掉以后开新聊天时开场白不自动挂；手动「重新挂账」照样挂；说过话以后的楼照常；生图不受影响");
