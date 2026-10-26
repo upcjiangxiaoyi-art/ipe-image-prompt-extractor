@@ -2690,6 +2690,48 @@ await (async () => {
     ok(r.st.ledgerAutoGreeting === true && statusText(r.w).indexOf("开场白也自动挂账") >= 0, "打开：存下来");
 })();
 
+console.log("\n【68】 本卡要点按卡记（2.29.4）：以前是全局选一套，换卡以后副 AI 拿到的还是上一张卡的要点，写账用上一张卡的人名；现在每张卡记自己的，没记过的卡不发、下拉提示先选");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const { w, tavern, F } = boot(10);
+    const st = withApi(tavern, F, "gpt-4.1");
+    st.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "阿絮的卡", value: "阿絮：左肩旧伤七天好。" }, { id: "ln_2", name: "顾寒的卡", value: "顾寒：体质特殊，外伤两日即愈。" }]);
+    st.activeLedgerNote = "ln_1"; st.ledgerNoteCardJson = "";
+    const d = w.document, sel = d.querySelector("#ipe-ledger-note-slot"), ta = d.querySelector("#ipe-ledger-note");
+    const user = () => F("ipeLedgerBuildUser")(tavern.chat[9].mes, "", 10, true);
+    const switchTo = async (idx) => { tavern.characterId = idx; tavern.name2 = tavern.characters[idx].name; tavern.chatMetadata = {}; await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260); };
+    await wait(300);   // 面板 120ms 后刷新一次编辑框：升级上来的第一张卡认领当时选中的那套
+    ok(user().indexOf("【本卡要点】\n阿絮：左肩旧伤七天好。") >= 0, "升级上来：正在用的卡认领当时选中的那套（阿絮），照常发");
+    eq(JSON.parse(st.ledgerNoteCardJson)["char:yuan.png"], "ln_1", "记到这张卡（头像文件名）上");
+    await switchTo(1);
+    ok(user().indexOf("【本卡要点】") < 0, "换到没记过的卡（顾寒）：不发本卡要点（以前会把阿絮的要点发过去，副 AI 就用阿絮的名字写账）");
+    ok(sel.value === "" && sel.options[0].textContent.indexOf("这张卡还没选") >= 0 && ta.disabled && ta.value === "" && ta.placeholder.indexOf("还没选") >= 0, "下拉显示「这张卡还没选」、编辑框灰着提示先选", sel.options[0].textContent + " / " + ta.placeholder);
+    sel.value = "ln_2"; sel.dispatchEvent(new w.Event("change"));
+    ok(user().indexOf("【本卡要点】\n顾寒：体质特殊") >= 0 && JSON.parse(st.ledgerNoteCardJson)["char:gu.png"] === "ln_2", "给顾寒选「顾寒的卡」：记到这张卡上、照常发");
+    ok(!ta.disabled && ta.value.indexOf("顾寒：体质特殊") >= 0 && statusText(w).indexOf("顾寒") >= 0, "编辑框换成这套、能改，状态行说清楚是哪张卡的", statusText(w));
+    ta.value = "顾寒：体质特殊，外伤两日即愈。怕冷。"; ta.dispatchEvent(new w.Event("input"));
+    eq(JSON.parse(st.ledgerNotePresetsJson).find(x => x.id === "ln_2").value, "顾寒：体质特殊，外伤两日即愈。怕冷。", "在顾寒的卡上改编辑框，改的是顾寒那套");
+    await switchTo(0);
+    ok(user().indexOf("【本卡要点】\n阿絮：左肩旧伤七天好。") >= 0 && sel.value === "ln_1" && ta.value.indexOf("阿絮") >= 0, "换回阿絮：还是阿絮那套，下拉、编辑框跟着换");
+    eq(JSON.parse(st.ledgerNotePresetsJson).find(x => x.id === "ln_1").value, "阿絮：左肩旧伤七天好。", "阿絮那套没被改到");
+    // 新增：新建的那套归这张卡
+    tavern.characters.push({ name: "新卡", avatar: "new.png" }); await switchTo(2);
+    ok(user().indexOf("【本卡要点】") < 0, "再来一张新卡：不发");
+    d.querySelector("#ipe-ledger-note-add").click();
+    const nid = JSON.parse(st.ledgerNoteCardJson)["char:new.png"];
+    ok(!!nid && nid !== "ln_1" && nid !== "ln_2" && !ta.disabled && sel.value === nid, "点「新增」：新建一套并记到这张卡上，编辑框能写");
+    // 选回「还没选」= 这张卡不发
+    sel.value = ""; sel.dispatchEvent(new w.Event("change"));
+    ok(!("char:new.png" in JSON.parse(st.ledgerNoteCardJson)) && user().indexOf("【本卡要点】") < 0 && ta.disabled, "选「还没选」：解绑，不发");
+    // 删掉一套：记着它的卡解绑，不会悄悄换成别的
+    await switchTo(1); sel.value = "ln_2"; sel.dispatchEvent(new w.Event("change"));
+    d.querySelector("#ipe-ledger-note-del").click();
+    ok(!("char:gu.png" in JSON.parse(st.ledgerNoteCardJson)) && user().indexOf("【本卡要点】") < 0 && JSON.parse(st.ledgerNoteCardJson)["char:yuan.png"] === "ln_1", "删掉顾寒那套：顾寒的卡解绑、不发；阿絮的记录不受影响");
+    // 没开卡：照旧用全局选中的
+    tavern.characterId = undefined; tavern.groupId = null; st.activeLedgerNote = "ln_1";
+    ok(user().indexOf("【本卡要点】\n阿絮") >= 0, "没打开角色卡（没有键）：照旧用全局选中的那套");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

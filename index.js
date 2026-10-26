@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.3";
+var IPE_VERSION = "2.29.4";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -99,6 +99,7 @@ const DEFAULTS = {
     ledgerApiProfile: "",
     imgAutoGreeting: true,         // 2.27.8 开场白也自动出图：关掉 = 开场白不自动提取，要图点「手动提取」
     ledgerAutoGreeting: true,      // 2.28.13 开场白也自动挂账：关掉 = 开场白不自动挂，要挂点「重新挂账」
+    ledgerNoteCardJson: "",        // 2.29.4 每张卡用哪套本卡要点：{ "char:头像.png" / "group:id": 预设 id }
     bodyTag: "content",            // 2.27.7 正文标签：挂账、生图从这里取正文，新楼没收尾就不自动跑；留空 = 不认标签（照老样子认 <content>，只拦空回）
     ledgerReportFloors: 10, ledgerReportOpen: "<report>", ledgerReportClose: "</report>",
     ledgerVersionsN: 3,
@@ -3302,7 +3303,40 @@ var LN = ["ledgerNotePresetsJson","activeLedgerNote","ln_1","本卡要点", IPE_
 var LPN = ["ledgerPromptNsfwPresetsJson","activeLedgerPromptNsfw","lpn_1","NSFW 挂账规则", ""];   // NSFW 槽自己的库
 function ipeLedgerPromptValue(){ return ipePresetItem.apply(null, LP).value || IPE_LEDGER_PROMPT_DEFAULT; }
 function ipeLedgerPromptNsfwValue(){ return ipePresetItem.apply(null, LPN).value || ""; }
-function ipeLedgerNoteValue(){ return ipePresetItem.apply(null, LN).value || ""; }
+/* ---- 本卡要点按卡记（2.29.4） ----
+   以前「本卡要点」选的是全局的一套：换到另一张卡，副 AI 拿到的还是上一张卡的要点，写账就用上一张卡的人名。
+   现在每张卡记住自己选的那套（键跟锚点锁、本卡长期指令一样：头像文件名 / 群 id），存在扩展设置里。
+   没开卡（没有键）照旧用全局选中的。升级上来一张卡都没记过时，第一张用到的卡认领当时选中的那套（在用的卡不用重选）；
+   之后再碰到没记过的卡就不发要点，下拉显示「这张卡还没选」，编辑框先灰着，选一套或点「新增」就记上。 */
+function ipeLedgerNoteBindings() {
+    var m = ipeSafeJsonParse(cfg().ledgerNoteCardJson, null);
+    return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
+}
+function ipeLedgerNoteBind(id) {
+    var k = ipeAnchorCardKey(); if (!k) return false;
+    var m = ipeLedgerNoteBindings();
+    if (id) m[k] = String(id); else delete m[k];
+    saveCritical("ledgerNoteCardJson", JSON.stringify(m));
+    return true;
+}
+/* 这张卡用的那套要点；null = 这张卡还没选（不发） */
+function ipeLedgerNoteItem() {
+    var k = ipeAnchorCardKey();
+    if (!k) return ipePresetItem.apply(null, LN);
+    var list = ipePresetList.apply(null, LN), m = ipeLedgerNoteBindings(), id = m[k];
+    for (var i = 0; i < list.length; i++) if (id && list[i] && list[i].id === id) return list[i];
+    if (Object.keys(m).length) return null;
+    var g = ipePresetItem.apply(null, LN);
+    m[k] = g.id; saveCritical("ledgerNoteCardJson", JSON.stringify(m));   // 升级后第一张卡认领
+    return g;
+}
+function ipeLedgerNoteValue(){ var it = ipeLedgerNoteItem(); return it ? (it.value || "") : ""; }
+/* 换了卡：全局选中的切成这张卡的那套，编辑框才改得到对的那套 */
+function ipeLedgerNoteCardSync() {
+    var it = ipeLedgerNoteItem();
+    if (it && cfg()[LN[1]] !== it.id) save(LN[1], it.id);
+    ipeLedgerRefreshBotEditors();
+}
 
 /* ---- 状态行 ---- */
 function ipeLedgerStatus(t, color) {
@@ -3442,7 +3476,8 @@ function ipeLedgerRefreshBotEditors() {
     try { ipeLedgerRefreshInherit(); } catch(eI) {}
     ipeLedgerUpgradePrompts();
     var pv = ipePresetItem.apply(null, LP);
-    var nv = ipePresetItem.apply(null, LN);
+    var nv = ipeLedgerNoteItem();                                   // 2.29.4 这张卡的那套；null = 还没选
+    if (nv && cfg()[LN[1]] !== nv.id) save(LN[1], nv.id);
     var pnv = ipePresetItem.apply(null, LPN);
     var apiList = ipeGetApiProfiles();
     var apiId = cfg().ledgerApiProfile || "";
@@ -3459,8 +3494,22 @@ function ipeLedgerRefreshBotEditors() {
     });
     ipeFillSelect("ipe-ledger-prompt-slot",  ipePresetList.apply(null, LP), pv.id);
     ipeFillSelect("iped-ledger-prompt-slot", ipePresetList.apply(null, LP), pv.id);
-    ipeFillSelect("ipe-ledger-note-slot",    ipePresetList.apply(null, LN), nv.id);
-    ipeFillSelect("iped-ledger-note-slot",   ipePresetList.apply(null, LN), nv.id);
+    ipeFillSelect("ipe-ledger-note-slot",    ipePresetList.apply(null, LN), nv ? nv.id : "");
+    ipeFillSelect("iped-ledger-note-slot",   ipePresetList.apply(null, LN), nv ? nv.id : "");
+    ["ipe-ledger-note-slot","iped-ledger-note-slot"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        var ph = el.querySelector('option[value=""]');
+        if (!nv) {
+            if (!ph) { ph = doc.createElement("option"); ph.value = ""; el.insertBefore(ph, el.firstChild); }
+            ph.textContent = "（这张卡还没选本卡要点 · 不发）"; el.value = "";
+        } else if (ph) ph.remove();
+    });
+    ["ipe-ledger-note","iped-ledger-note","ipe-ledger-note-name","iped-ledger-note-name"].forEach(function(id){
+        var el = q("#" + id); if (!el) return;
+        if (!el.dataset.ipePh) el.dataset.ipePh = el.placeholder || "";
+        el.disabled = !nv;
+        el.placeholder = nv ? el.dataset.ipePh : "这张卡还没选本卡要点：在上面选一套，或点「新增」给这张卡建一套";
+    });
     ipeFillSelect("ipe-ledger-prompt-n-slot",  ipePresetList.apply(null, LPN), pnv.id);
     ipeFillSelect("iped-ledger-prompt-n-slot", ipePresetList.apply(null, LPN), pnv.id);
 
@@ -3468,8 +3517,8 @@ function ipeLedgerRefreshBotEditors() {
      ["ipe-ledger-prompt-n-name", pnv.name || ""], ["iped-ledger-prompt-n-name", pnv.name || ""],
      ["ipe-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT], ["iped-ledger-prompt", pv.value || IPE_LEDGER_PROMPT_DEFAULT],
      ["ipe-ledger-prompt-name", pv.name || ""], ["iped-ledger-prompt-name", pv.name || ""],
-     ["ipe-ledger-note", nv.value || ""], ["iped-ledger-note", nv.value || ""],
-     ["ipe-ledger-note-name", nv.name || ""], ["iped-ledger-note-name", nv.name || ""],
+     ["ipe-ledger-note", nv ? nv.value || "" : ""], ["iped-ledger-note", nv ? nv.value || "" : ""],
+     ["ipe-ledger-note-name", nv ? nv.name || "" : ""], ["iped-ledger-note-name", nv ? nv.name || "" : ""],
      ["ipe-ledger-rep-open", String(cfg().ledgerReportOpen || "<report>")],
      ["iped-ledger-rep-open", String(cfg().ledgerReportOpen || "<report>")],
      ["ipe-ledger-rep-close", String(cfg().ledgerReportClose || "</report>")],
@@ -8678,7 +8727,7 @@ function ipeLedgerPackImportText(txt, opts) {
     if (Array.isArray(pack.notes) && pack.notes.length === 1 && pack.scope === "current") {
         var nn = String(pack.notes[0].name || "").trim();
         var hn = m3.list.find(function(x){ return String(x.name || "").trim() === nn; });
-        if (hn) save(LN[1], hn.id);
+        if (hn) { save(LN[1], hn.id); ipeLedgerNoteBind(hn.id); }   // 2.29.4 导进来的那套归这张卡
     }
     try { ipeSaveNow(); } catch(e) {}
     try { ipeLedgerRefreshBotEditors(); } catch(e) {}
@@ -9766,8 +9815,13 @@ function bindAll() {
      ["ipe-ledger-note-slot", LN],   ["iped-ledger-note-slot", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("change", function(){
+            if (pr[1] === LN) {                                   // 2.29.4 本卡要点：记到这张卡上
+                ipeLedgerNoteBind(el.value);
+                if (!el.value) { ipeLedgerRefreshBotEditors(); ipeLedgerStatus("这张卡不发本卡要点了", "#6ec577"); return; }
+            }
             save(pr[1][1], el.value);
             ipeLedgerRefreshBotEditors();
+            if (pr[1] === LN) ipeLedgerStatus("「" + (ipeAnchorCardLabel() || "这张卡") + "」的本卡要点：" + (ipePresetItem.apply(null, LN).name || ""), "#6ec577");
         });
     });
     [["ipe-ledger-prompt-add", LP, "lp"], ["iped-ledger-prompt-add", LP, "lp"],
@@ -9776,6 +9830,7 @@ function bindAll() {
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("click", function(){
             ipePresetAdd.apply(null, pr[1].concat([pr[2]]));
+            if (pr[1] === LN) ipeLedgerNoteBind(cfg()[LN[1]]);      // 2.29.4 新建的那套归这张卡
             ipeLedgerRefreshBotEditors();
             ipeLedgerStatus("已新增预设", "#6ec577");
         });
@@ -9785,7 +9840,13 @@ function bindAll() {
      ["ipe-ledger-note-del", LN],   ["iped-ledger-note-del", LN]].forEach(function(pr){
         var el = q("#" + pr[0]); if (!el) return;
         el.addEventListener("click", function(){
+            var gone = pr[1] === LN ? ipePresetItem.apply(null, LN).id : "";
             var ok = ipePresetDelete.apply(null, pr[1]);
+            if (ok && gone) {                                     // 2.29.4 删掉的那套：记着它的卡都解绑，别悄悄换成别的
+                var bm = ipeLedgerNoteBindings(), changed = false;
+                Object.keys(bm).forEach(function(c){ if (bm[c] === gone) { delete bm[c]; changed = true; } });
+                if (changed) saveCritical("ledgerNoteCardJson", JSON.stringify(bm));
+            }
             ipeLedgerRefreshBotEditors();
             ipeLedgerStatus(ok ? "已删除" : "至少要留一个预设", ok ? "#6ec577" : "#c9a227");
         });
@@ -9899,6 +9960,7 @@ function bindAll() {
                     ipeLedgerSync();
                     ipeLedgerStatus("已切换到本聊天的账本", "#6ec577");
                     try { ipeLedgerModeRefresh(); } catch(eS) {}   // 卡槽显示换成这张卡的
+                    try { ipeLedgerNoteCardSync(); } catch(eN) {}  // 2.29.4 本卡要点换成这张卡记的那套
                     try { ipeImgRefreshLayerUI(); } catch(eL) {}   // 四个层框换成本聊天的
                     try {                                            // 锁了锚点的卡：下拉切到锁定的那套
                         var ab = ipeAnchorLockApply();
