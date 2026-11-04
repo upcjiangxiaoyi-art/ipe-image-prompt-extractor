@@ -2732,6 +2732,24 @@ await (async () => {
     ok(user().indexOf("【本卡要点】\n阿絮") >= 0, "没打开角色卡（没有键）：照旧用全局选中的那套");
 })();
 
+console.log("\n【69】 模板行里占位符空了，画风词留下（2.29.5）：以前「Setting: {Env}, warm watercolor wash」环境层一空整行没了，画风词跟着丢；现在只去掉标签和空占位符，字留下；整行只有标签加占位符的照旧去掉");
+await (async () => {
+    const { w, tavern, F } = boot(4);
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON RULES." }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: "<draw>\nCamera: {Camera}\nSetting: {Env}, warm watercolor wash\nMood: {Mood}\n{Chars}\nsoft light, {Pose}, dreamy haze\nSTYLE: ink and wash.\n</draw>", common: "c1" }]);
+    st.activeBaseTemplate = "tpl_1";
+    const B = F("buildInjectTag");
+    eq(B("x", { camera: "C.", env: "E.", mood: "M.", chars: "CH.", pose: "P." }), "<draw>\nCamera: C.\nSetting: E., warm watercolor wash\nMood: M.\nCH.\nsoft light, P., dreamy haze\nSTYLE: ink and wash.\n\nCOMMON RULES.\n</draw>", "五层齐全：照常");
+    eq(B("x", { camera: "C.", env: "", mood: "", chars: "CH.", pose: "" }), "<draw>\nCamera: C.\nwarm watercolor wash\nCH.\nsoft light, dreamy haze\nSTYLE: ink and wash.\n\nCOMMON RULES.\n</draw>", "环境、氛围、动作空了：Setting 行留下画风词，Mood 行只有标签就去掉，行中间的占位符去掉后逗号接好");
+    eq(B("x", { camera: "", env: "", mood: "", chars: "", pose: "" }), "<draw>\nwarm watercolor wash\nsoft light, dreamy haze\nSTYLE: ink and wash.\n\nCOMMON RULES.\n</draw>", "五层全空：只留画风词和公共块");
+    const T = w.eval("ipeImgFillTemplate");
+    eq(T("镜头：{Camera}\n环境：{Env}，水墨淡彩\n{Mood}", { "{Camera}": "", "{Env}": "", "{Mood}": "" }), "水墨淡彩", "中文标签、全角逗号也认");
+    eq(T("Mood and light: {Mood}\nratio 16:9, {Mood}\nx", { "{Mood}": "" }), "ratio 16:9\nx", "带空格的标签整行去掉；带数字的「ratio 16:9」不当标签，留下");
+    eq(T("a {Camera}\nb", { "{Camera}": "" }), "a\nb", "占位符前面的普通字留下");
+    eq(T("{Description}", { "{Description}": "" }), "", "单行模板不收行，照旧填空");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

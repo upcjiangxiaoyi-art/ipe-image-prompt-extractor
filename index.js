@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.4";
+var IPE_VERSION = "2.29.5";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -40,10 +40,24 @@ function ipeImgFillTemplate(tpl, vals) {
             if (v.trim()) allEmpty = false;
             return v;
         });
-        if (multi && hadPh && allEmpty) continue;
+        if (multi && hadPh && allEmpty) {
+            /* 2.29.5 这一行占位符全空：以前整行不要。可画风词常跟占位符挤一行（「Setting: {Env}, warm watercolor wash」），
+               环境层一空，画风词跟着没了。现在去掉「Setting:」这种标签和空占位符留下的逗号，还剩字就把字留下；只剩标签的才整行去掉。 */
+            var rest = ipeImgTplLineRest(filled);
+            if (rest) out.push(rest);
+            continue;
+        }
         out.push(filled);
     }
     return out.join("\n");
+}
+/* 占位符填空以后这一行还剩什么：去掉行首「标签:」、连着的分隔符、首尾分隔符；空串 = 整行只有标签 */
+function ipeImgTplLineRest(line) {
+    var s = String(line == null ? "" : line);
+    s = s.replace(/^\s*[A-Za-z\u4e00-\u9fff][A-Za-z\u4e00-\u9fff \u3000]{0,29}\s*[:：]\s*/, "");   // 「Mood and light:」「环境：」这种标签；带数字的（ratio 16:9）不算
+    s = s.replace(/\s*([,，;；])(?:\s*[,，;；])+\s*/g, function(m, p){ return p + (p === "," || p === ";" ? " " : ""); });
+    s = s.replace(/^[\s,，;；·\-–—]+|[\s,，;；·\-–—]+$/g, "");
+    return s.trim();
 }
 const DEFAULTS = {
     enabled: true,
