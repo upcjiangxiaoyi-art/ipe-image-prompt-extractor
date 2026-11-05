@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.6";
+var IPE_VERSION = "2.29.7";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -529,6 +529,8 @@ function ipeChatKey() {
 }
 /* 2.28.12 以前镜像只按聊天名存。那样的旧条目要角色名对得上、楼数跟存的时候一模一样才敢认成同一个聊天：
    复制卡的新聊天只有开场白，楼数对不上，不认；同卡刷新页面、聊天数据没来得及存的，楼数一样，救回来。 */
+/* 2.29.7 插件楼号从 1 数（= 楼数），酒馆的消息编号从 0 数（开场白是 #0）。界面上说「第 N 楼」时跟上酒馆编号 #N-1，两边对得上。 */
+function ipeFloorLabel(n) { n = Number(n); return "第 " + n + " 楼（酒馆 #" + (n - 1) + "）"; }
 /* 2.29.3 「当前聊天」那行：聊天文件名是酒馆起的，复制卡 / 重导入的卡会带着旧卡的名字（「陈呈 - 2026-10-23@22h07m13s382ms」），
    看着像卡串了，其实账本早按「卡 + 聊天」分开了。这里显示现在这张卡的名字 + 聊天建档时间，完整文件名放 title 里。 */
 function ipeLedgerChatLabel() {
@@ -1002,7 +1004,7 @@ function ipeLedgerReconcile(limit, opts) {
     if (!opts.silent) {
         var msg = "楼层对账：碎掉 " + smashed + " 份已不存在楼层的账";
         if (demoted) msg += (st.lastFloor >= 0
-            ? "，已自动回退到第 " + st.lastFloor + " 楼的账"
+            ? "，已自动回退到" + ipeFloorLabel(st.lastFloor) + "的账"
             : "，账本已清空，下轮挂账会重建");
         ipeLedgerStatus(msg, "#c9a227");
     }
@@ -2027,7 +2029,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
         ipeLedgerCommit(body, msgFloor);
         ipeLedgerSrcMark(input);
         ipeLedgerModeAfterRun(usedMode);
-        ipeLedgerStatus("已挂账 \u2713 第 " + (msgFloor || ipeFloorNo()) + " 楼" + note + (ipeLedgerLastMode !== "normal" ? "｜" + ipeLedgerLastMode + " 槽" + (ipeLedgerNsfwFellBack ? "（内容为空，已用 Normal 槽）" : "") : "")
+        ipeLedgerStatus("已挂账 \u2713 " + ipeFloorLabel(msgFloor || ipeFloorNo()) + note + (ipeLedgerLastMode !== "normal" ? "｜" + ipeLedgerLastMode + " 槽" + (ipeLedgerNsfwFellBack ? "（内容为空，已用 Normal 槽）" : "") : "")
             + (ipeLedgerReportTruncated ? "（report 层已截断）" : "") + ipeLedgerHisHint()
             + (input.edited ? "｜这楼挂账途中改过，账是按改前的正文记的，改了剧情就点「重新挂账」" : ""),
             got.level === 1 ? "#6ec577" : "#c9a227");
@@ -2717,6 +2719,8 @@ function ipeLedgerAfterFloorsGone(why) {
         if (ipeGenRunning()) return;        // 生成途中酒馆会重画楼，不算删
         ipeLedgerReconcile(ipeFloorNo());   // 撕了现任的话 ipeLedgerFloorsGoneAt 在里面记下
         ipeLedgerSync();
+        // 2.29.7 有的删楼工具先摘页面、过一会儿才改聊天数组：1.2 秒后再数一遍，没变就是空跑
+        if (why === "dom") setTimeout(function(){ ipeLedgerAfterFloorsGone("dom-late"); }, 1200);
     } catch(e) {}
 }
 function ipeLedgerInstallFloorWatch() {
@@ -3483,8 +3487,8 @@ function ipeLedgerRefreshEditors() {
     ["ipe-ledger-chatkey","iped-ledger-chatkey"].forEach(function(id){
         var el = q("#" + id);
         if (el) {
-            el.textContent = "当前聊天：" + ipeLedgerChatLabel() + "\u3000楼层：" + ipeFloorNo()
-                + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到第 " + st.lastFloor + " 楼" : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
+            el.textContent = "当前聊天：" + ipeLedgerChatLabel() + "\u3000楼层：" + ipeFloorNo() + "（酒馆到 #" + (ipeFloorNo() - 1) + "）"
+                + (st.lastFloor >= 0 && String(st.current || "").trim() ? "\u3000账本记到" + ipeFloorLabel(st.lastFloor) : "");   // 2.27.11 编辑框里改的是记到哪一楼的那份
             el.title = "聊天文件：" + ipeChatIdPart();
         }
     });
