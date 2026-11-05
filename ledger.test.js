@@ -2750,6 +2750,64 @@ await (async () => {
     eq(T("{Description}", { "{Description}": "" }), "", "单行模板不收行，照旧填空");
 })();
 
+console.log("\n【70】 删楼不靠事件（2.29.6）：第三方工具条删楼不发 MESSAGE_DELETED，以前账不撕；现在楼从页面上消失就对账、退回上一楼的账；删楼后的第一发当重 roll，开了开关就不带「本轮必须」");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const LEDGER = "【本轮必须・正文模型硬性约束】\n- 禁止转场\n\n【楼层状态】\n当前楼层数：10";
+    function setup() {
+        const b = boot(10);
+        const d = b.w.document;
+        d.body.insertAdjacentHTML("beforeend", '<div id="chat">' + b.tavern.chat.map((m, i) => '<div class="mes" mesid="' + i + '" is_user="' + (m.is_user ? "true" : "false") + '"><div class="mes_text"><p>x</p></div></div>').join("") + '</div>');
+        b.w.eval("ipeLedgerInstallFloorWatch")();
+        b.F("ipeLedgerCommit")("第 8 楼的账，够长够长够长够长够长。", 8);
+        b.F("ipeLedgerCommit")(LEDGER, 10);
+        b.F("ipeLedgerApplyEP")();
+        return Object.assign(b, { d, st: b.tavern.extensionSettings[b.F("EXT_NAME")], ep: () => String((b.tavern.extensionPrompts[b.F("IPE_LEDGER_EP_KEY")] || {}).value || "") });
+    }
+    // 不发事件、只从页面和数组里把第 10 楼去掉
+    let r = setup();
+    eq(r.F("ipeLedgerRead")().lastFloor, 10, "删之前：现任是第 10 楼的账");
+    r.tavern.chat.length = 9; r.d.querySelector('#chat .mes[mesid="9"]').remove();
+    await wait(600);
+    eq(r.F("ipeLedgerRead")().lastFloor, 8, "第三方入口删楼（不发事件）：楼从页面上消失，账照样撕、退回第 8 楼的账");
+    ok(r.ep().indexOf("禁止转场") < 0 && r.ep().indexOf("第 8 楼的账") >= 0, "贴耳换成第 8 楼的");
+    ok(statusText(r.w).indexOf("回退到第 8 楼") >= 0, "状态行说回退了", statusText(r.w));
+    // 删楼后的第一发：开了开关就不带「本轮必须」
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.F("ipeLedgerCommit")("第 8 楼的账\n【本轮必须】第 8 楼给下一楼的要求\n【伤势】左肩刀伤", 8);   // 让第 8 楼那版也带硬要求
+    r.F("ipeLedgerCommit")(LEDGER, 10);
+    r.tavern.chat.length = 9; r.d.querySelector('#chat .mes[mesid="9"]').remove();
+    await wait(600);
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, false);
+    let e = r.ep();
+    ok(e.indexOf("第 8 楼给下一楼的要求") < 0 && e.indexOf("本轮无硬性约束") >= 0 && e.indexOf("左肩刀伤") >= 0, "删楼后的第一发：退回的那份账里「本轮必须」换成「本轮无硬性约束」，其余照常", e);
+    ok(statusText(r.w).indexOf("删楼后的第一发") >= 0, "状态行说清楚", statusText(r.w));
+    await r.tavern.eventSource.emit("GENERATION_ENDED");
+    ok(r.ep().indexOf("第 8 楼给下一楼的要求") >= 0, "写完恢复整份");
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, false);
+    ok(r.ep().indexOf("第 8 楼给下一楼的要求") >= 0, "再发一条（不是删楼后的第一发）：整份贴");
+    // 「继续」不算；开关关着照旧整份
+    r = setup(); r.st.ledgerRerollTrim = true;
+    r.tavern.chat.length = 9; r.d.querySelector('#chat .mes[mesid="9"]').remove(); await wait(600);
+    r.tavern.eventSource.emit("GENERATION_STARTED", "continue", {}, false);
+    ok(r.ep().indexOf("第 8 楼的账") >= 0 && statusText(r.w).indexOf("删楼后的第一发") < 0, "删楼后点「继续」：不当重 roll");
+    r = setup();
+    r.tavern.chat.length = 9; r.d.querySelector('#chat .mes[mesid="9"]').remove(); await wait(600);
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, false);
+    ok(statusText(r.w).indexOf("删楼后的第一发") < 0, "开关关着：删楼后的第一发照常整份贴，不多话");
+    // 老路（酒馆自己的删楼事件）照旧
+    r = setup();
+    r.tavern.chat.length = 9; r.d.querySelector('#chat .mes[mesid="9"]').remove();
+    await r.tavern.eventSource.emit("MESSAGE_DELETED", 9); await wait(600);
+    eq(r.F("ipeLedgerRead")().lastFloor, 8, "酒馆自己的删楼事件：照旧撕");
+    // 生成途中酒馆重画楼：不算删
+    r = setup();
+    r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, false);
+    r.d.querySelector('#chat .mes[mesid="9"]').remove(); await wait(600);
+    eq(r.F("ipeLedgerRead")().lastFloor, 10, "生成途中楼被重画（摘掉又画上）：账不动");
+    await r.tavern.eventSource.emit("GENERATION_ENDED");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

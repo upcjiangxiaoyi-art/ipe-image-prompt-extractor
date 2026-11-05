@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.5";
+var IPE_VERSION = "2.29.6";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -997,6 +997,7 @@ function ipeLedgerReconcile(limit, opts) {
 
     if (!smashed) return false;
     ipeLedgerSave(st);
+    if (demoted && limit >= ipeFloorNo()) ipeLedgerFloorsGoneAt = Date.now();   // 2.29.6 是删楼（不是重 roll：重 roll 的 limit 比楼数少一）撕的现任：下一发当重 roll
     try { console.log("[IPE] 楼层对账", { limit: limit, smashed: smashed, currentFloor: st.lastFloor }); } catch(eL) {}
     if (!opts.silent) {
         var msg = "楼层对账：碎掉 " + smashed + " 份已不存在楼层的账";
@@ -2689,6 +2690,43 @@ function ipeMutationsAddedRows(records) {
         }
     } catch(e) {}
     return false;
+}
+
+/* 变动里有没有整楼被摘掉（删楼、整段聊天重画）。正文里的字怎么变都不算 */
+function ipeMutationsRemovedRows(records) {
+    try {
+        for (var i = 0; i < records.length; i++) {
+            var r = records[i], rn = r.removedNodes;
+            if (!rn || !rn.length) continue;
+            if (r.target && r.target.closest && r.target.closest(".mes_text")) continue;
+            for (var k = 0; k < rn.length; k++) {
+                var n = rn[k];
+                if (!n || n.nodeType !== 1) continue;
+                if ((n.classList && n.classList.contains("mes")) || (n.querySelector && n.querySelector(".mes"))) return true;
+            }
+        }
+    } catch(e) {}
+    return false;
+}
+/* 2.29.6 删楼不靠事件：以前只接酒馆的 MESSAGE_DELETED，第三方工具条、别的插件删楼不发这个事件，账就留着不撕，
+   下一发主 AI 读到的还是没了那楼的账。现在盯着聊天区：楼从页面上消失，400ms 后数一遍楼对账；没变动就是空跑一趟。 */
+var ipeLedgerFloorsGoneAt = 0;          // 最近一次因删楼撕掉现任账的时刻；下一发生成前看它，当重 roll 处理
+var ipeLedgerFloorWatchTimer = null;
+function ipeLedgerAfterFloorsGone(why) {
+    try {
+        if (ipeGenRunning()) return;        // 生成途中酒馆会重画楼，不算删
+        ipeLedgerReconcile(ipeFloorNo());   // 撕了现任的话 ipeLedgerFloorsGoneAt 在里面记下
+        ipeLedgerSync();
+    } catch(e) {}
+}
+function ipeLedgerInstallFloorWatch() {
+    try {
+        ipeChatObserve("ledger-floors", function(records){
+            if (!ipeMutationsRemovedRows(records)) return;
+            if (ipeLedgerFloorWatchTimer) clearTimeout(ipeLedgerFloorWatchTimer);
+            ipeLedgerFloorWatchTimer = setTimeout(function(){ ipeLedgerFloorWatchTimer = null; ipeLedgerAfterFloorsGone("dom"); }, 400);
+        });
+    } catch(e) {}
 }
 
 function ipeLedgerInstallInlineObserver() {
@@ -6990,7 +7028,7 @@ function createUI() {
     bindAll();
     setTimeout(function(){ ipeRefreshApiProfileEditors(); ipeRefreshSystemPromptEditors(); ipeRefreshTemplateEditors(); ipeRefreshAnchorEditors(); ipeRefreshRuleEditors(); ipeSetStopButtonsState(!!ipeAbortController); try { ipeImgBindLayerUI(); ipeImgRefreshLayerUI(); } catch(eL) {} try { ipeInstallZoomButtons(); } catch(eZ) {} try { ipeRefreshSuppPresets(); } catch(eS) {} try { ipeInstallMesButtonsObserver(); ipeInstallMesButtons(); } catch(eM) {} }, 120);
     setTimeout(function(){ try { ipeInstallZoomButtons(); } catch(eZ) {} }, 2500);   // 抽屉晚到也补上
-    setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerSync(); ipeLedgerInstallInlineObserver(); }, 160);
+    setTimeout(function(){ ipeSetActiveTab(cfg().activeTab || "image"); ipeLedgerSync(); ipeLedgerInstallInlineObserver(); ipeLedgerInstallFloorWatch(); }, 160);
 }
 
 function ipeForcePanelVisible() {
@@ -9994,7 +10032,7 @@ function bindAll() {
             if (cd.event_types.MESSAGE_DELETED) {
                 cd.eventSource.on(cd.event_types.MESSAGE_DELETED, function(){
                     // 400ms 等 chat 数组换完再数楼——时序缓冲照抄小红霞踩过的坑
-                    setTimeout(function(){ try { ipeLedgerReconcile(ipeFloorNo()); ipeLedgerSync(); } catch(eD) {} }, 400);
+                    setTimeout(function(){ ipeLedgerAfterFloorsGone("event"); }, 400);
                 });
             }
             if (cd.event_types.MESSAGE_EDITED) {
@@ -10041,6 +10079,7 @@ function bindAll() {
                        continue 不降：它是给当前楼续写，那楼的账仍然算数。 */
                     var t = String(genType || "").toLowerCase();
                     if ((t === "swipe" || t === "regenerate") && dryRun !== true) {
+                        ipeLedgerFloorsGoneAt = 0;   // 2.29.6 重 roll 本身就按重 roll 处理，删楼那笔不用再记
                         try {
                             ipeLedgerReconcile(Math.max(0, ipeFloorNo() - 1), { silent: true });
                             ipeLedgerEpRerollOn = cfg().ledgerRerollTrim === true;   // 2.28.5 这一发不带「本轮必须」
@@ -10055,7 +10094,20 @@ function bindAll() {
                         // 旧酒馆没有删楼事件——发出去之前同步对一次账，保证这一发的贴耳干净
                         var wasReroll = ipeLedgerEpRerollOn && dryRun !== true;   // 2.28.5 上一发是重 roll：这一发恢复整份
                         if (wasReroll) ipeLedgerEpRerollOn = false;
-                        try { if (ipeLedgerReconcile(ipeFloorNo(), { silent: true }) || wasReroll) ipeLedgerApplyEP(); } catch(eR) {}
+                        /* 2.29.6 删了楼再发的第一发，跟重 roll 一个意思：那楼的账撕了，退回上一楼的账，可上一楼账里给「这一轮」下的硬要求
+                           还是原来那份，照旧贴过去就又写出一样的剧情。开了「重 roll 不带本轮必须」，这一发也不带。「继续」不算。 */
+                        try {
+                            var changed = ipeLedgerReconcile(ipeFloorNo(), { silent: true });   // 老酒馆没有删楼事件：这儿才发现楼没了，也算删楼后的第一发
+                            var afterDel = ipeLedgerFloorsGoneAt > 0 && dryRun !== true && t !== "quiet";
+                            if (afterDel) ipeLedgerFloorsGoneAt = 0;
+                            if (afterDel && t !== "continue" && cfg().ledgerRerollTrim === true) {
+                                ipeLedgerEpRerollOn = true;
+                                ipeLedgerApplyEP();
+                                ipeLedgerStatus(ipeLedgerEpRerollHit
+                                    ? "删楼后的第一发：贴给主 AI 的账本里，「" + ipeLedgerRerollKw() + "」那一段换成了「本轮无硬性约束」，其余照常；写完恢复"
+                                    : "删楼后的第一发：账本里没找到标题带「" + ipeLedgerRerollKw() + "」的段落，照常整份贴", ipeLedgerEpRerollHit ? "#6ec577" : "#c9a227");
+                            } else if (changed || wasReroll) ipeLedgerApplyEP();
+                        } catch(eR) {}
                     }
                     if (!ipeLedgerBusy || ipeLedgerStaleWarned) return;
                     ipeLedgerStaleWarned = true;
@@ -10080,7 +10132,7 @@ function bindAll() {
             // 2.28.5 重 roll 那一发生成完 / 停了 / 换了聊天：贴耳恢复整份
             ["GENERATION_ENDED", "GENERATION_STOPPED", "CHAT_CHANGED"].forEach(function(n){
                 var ev = cg.event_types[n]; if (!ev) return;
-                cg.eventSource.on(ev, function(){ if (!ipeLedgerEpRerollOn) return; ipeLedgerEpRerollOn = false; try { ipeLedgerApplyEP(); } catch(eE) {} });
+                cg.eventSource.on(ev, function(){ if (n === "CHAT_CHANGED") ipeLedgerFloorsGoneAt = 0; if (!ipeLedgerEpRerollOn) return; ipeLedgerEpRerollOn = false; try { ipeLedgerApplyEP(); } catch(eE) {} });
             });
             ["GENERATION_ENDED", "GENERATION_STOPPED", "MESSAGE_RECEIVED", "CHAT_CHANGED"].forEach(function(n){
                 var ev = cg.event_types[n]; if (!ev) return;
