@@ -2343,12 +2343,12 @@ await (async () => {
     r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
     let e = r.ep();
     ok(e.indexOf("禁止转场") < 0 && e.indexOf("归位至玩家尚未表态") < 0, "开了：重 roll 那一发，「本轮必须」那几条不贴了", e);
-    ok(e.indexOf("【本轮必须・正文模型硬性约束】\n（这一发是重 roll：本轮无硬性约束）") >= 0, "标题留着，内容换成「本轮无硬性约束」（正好对上预设里写好的那条规则）");
+    ok(e.indexOf("【本轮必须・正文模型硬性约束】\n（这一发是重 roll：本轮无提示，本轮无硬性约束）") >= 0, "标题留着，内容换成「本轮无硬性约束」（正好对上预设里写好的那条规则）");
     ok(e.indexOf("【楼层状态】\n当前楼层数：620") >= 0 && e.indexOf("【核心锚点】") >= 0 && e.indexOf("体况：韩川央：正常") >= 0 && e.indexOf("正文须先满足") >= 0, "其余各段、开头的说明照常贴");
     ok(e.indexOf("【User 指令】\n伤先别好") >= 0, "User 指令照常贴");
     ok(e.indexOf("第12楼") < 0, "这一楼的账照旧撕掉了");
     ok(r.F("ipeLedgerRead")().current === LEDGER10, "账本本身一个字没动（只改贴给主 AI 的那份）");
-    ok(statusText(r.w).indexOf("换成了「本轮无硬性约束」") >= 0, "状态行说这一发换掉了那一段", statusText(r.w));
+    ok(statusText(r.w).indexOf("换成了「本轮无提示 / 无硬性约束」") >= 0, "状态行说这一发换掉了那一段", statusText(r.w));
     r.tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, true);
     ok(r.ep().indexOf("禁止转场") < 0, "中途酒馆干跑算 token（dryRun）不打断：还是去掉的");
     await r.tavern.eventSource.emit("GENERATION_ENDED");
@@ -2374,7 +2374,7 @@ await (async () => {
     let x = T("## 本轮必须\n- 禁止转场\n\n## 楼层状态\n620", "本轮必须");
     ok(x.n === 1 && x.text.indexOf("禁止转场") < 0 && x.text.indexOf("## 楼层状态\n620") >= 0, "# 标题的写法也认", x.text);
     x = T("【本轮必须】禁止转场\n【伤势】左肩刀伤", "本轮必须");
-    ok(x.text === "【本轮必须】\n（这一发是重 roll：本轮无硬性约束）\n\n【伤势】左肩刀伤", "标题同一行后面跟着的要求也去掉", JSON.stringify(x.text));
+    ok(x.text === "【本轮必须】\n（这一发是重 roll：本轮无提示，本轮无硬性约束）\n\n【伤势】左肩刀伤", "标题同一行后面跟着的要求也去掉", JSON.stringify(x.text));
     x = T("**本轮必须**\n- 禁止转场\n**楼层状态**\n620", "本轮必须");
     ok(x.n === 1 && x.text.indexOf("禁止转场") < 0 && x.text.indexOf("**楼层状态**\n620") >= 0, "整行加粗的标题也认");
     x = T("【楼层状态】\n620", "本轮必须");
@@ -2393,7 +2393,7 @@ await (async () => {
     const cb = r.w.document.querySelector("#ipe-ledger-reroll-trim"), kw = r.w.document.querySelector("#ipe-ledger-reroll-kw");
     ok(cb && !cb.checked && kw, "面板上有开关（默认关）和关键词格");
     cb.checked = true; cb.dispatchEvent(new r.w.Event("change"));
-    ok(r.st.ledgerRerollTrim === true && statusText(r.w).indexOf("不带「本轮必须」") >= 0, "打开开关：存下来，状态行说清楚", statusText(r.w));
+    ok(r.st.ledgerRerollTrim === true && statusText(r.w).indexOf("不带「本轮必须") >= 0, "打开开关：存下来，状态行说清楚", statusText(r.w));
     kw.value = "  硬性约束 "; kw.dispatchEvent(new r.w.Event("change"));
     ok(r.st.ledgerRerollTrimKw === "硬性约束", "关键词存下来（去掉首尾空格）");
 })();
@@ -2806,6 +2806,40 @@ await (async () => {
     r.d.querySelector('#chat .mes[mesid="9"]').remove(); await wait(600);
     eq(r.F("ipeLedgerRead")().lastFloor, 10, "生成途中楼被重画（摘掉又画上）：账不动");
     await r.tavern.eventSource.emit("GENERATION_ENDED");
+})();
+
+console.log("\n【71】 重 roll 开关也认「本轮提示」（2.29.8）：ripple 的预设那一段叫【本轮提示】，开关只认「本轮必须」就一直没对上，重 roll 几次都是同一件事；现在内置两个都认，关键词能填好几个");
+await (async () => {
+    const LEDGER = "情感脉络与剧情奔涌\n（【本轮提示】为\"本轮无提示\"时，正文按本职承接玩家最新输入并让剧情向前流。）\n\n【本轮提示】\n- 下一轮两人在天台和解\n- 宜转场至雨夜\n\n【楼层状态】\n当前楼层数：10\n\n【核心锚点】\n- 体况：阿絮：左肩刀伤";
+    const setup = (kw) => {
+        const b = boot(12);
+        b.F("ipeLedgerCommit")(LEDGER, 10);
+        b.F("ipeLedgerCommit")("第12楼挂完的账\n【本轮提示】第12楼给下一楼的新建议", 12);
+        const st = b.tavern.extensionSettings[b.F("EXT_NAME")]; st.ledgerRerollTrim = true; if (kw != null) st.ledgerRerollTrimKw = kw;
+        b.F("ipeLedgerApplyEP")();
+        return Object.assign(b, { st, ep: () => String((b.tavern.extensionPrompts[b.F("IPE_LEDGER_EP_KEY")] || {}).value || "") });
+    };
+    let r = setup();
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    let e = r.ep();
+    ok(e.indexOf("天台和解") < 0 && e.indexOf("雨夜") < 0, "预设用的是【本轮提示】：重 roll 那一发这一段去掉了（以前只认「本轮必须」，这段原样贴，roll 几次都是天台和解）", e);
+    ok(e.indexOf("【本轮提示】\n（这一发是重 roll：本轮无提示，本轮无硬性约束）") >= 0, "换成的那句带「本轮无提示」，正好对上预设里「为本轮无提示时」那条规则");
+    ok(e.indexOf("当前楼层数：10") >= 0 && e.indexOf("左肩刀伤") >= 0 && e.indexOf("承接玩家最新输入") >= 0, "其余各段、开头的说明照常");
+    ok(statusText(r.w).indexOf("「本轮必须 / 本轮提示」那一段换成了") >= 0, "状态行列出内置的两个关键词", statusText(r.w));
+    r = setup("本轮必须");   // 2.28.5 升级上来存着的旧默认值：等于留空
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    ok(r.ep().indexOf("天台和解") < 0, "老用户存着的旧默认「本轮必须」：当成留空，照样认「本轮提示」");
+    r = setup("甲, 乙、本轮提示");
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    ok(r.ep().indexOf("天台和解") < 0, "自己填好几个（逗号 / 顿号分开）：哪个对上都去");
+    r = setup("硬性约束");
+    r.tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    ok(r.ep().indexOf("天台和解") >= 0 && statusText(r.w).indexOf("没找到标题带「硬性约束」") >= 0, "自己填的对不上：照常整份贴，状态行说没找到", statusText(r.w));
+    const T = r.w.eval("ipeLedgerTrimReroll");
+    eq(T("【本轮必须】禁止转场\n【本轮提示】去雨夜\n【伤势】刀伤", ["本轮必须", "本轮提示"]).n, 2, "两段都有：两段都去");
+    eq(r.w.eval("ipeLedgerRerollKws")().join(","), "硬性约束", "填了就只认填的");
+    r.st.ledgerRerollTrimKw = "";
+    eq(r.w.eval("ipeLedgerRerollKws")().join(","), "本轮必须,本轮提示", "留空 = 内置两个");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
