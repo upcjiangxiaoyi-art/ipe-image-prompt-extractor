@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.8";
+var IPE_VERSION = "2.29.9";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -8008,6 +8008,17 @@ function ipeArrangeImageLayout() {
         var bk = ipeUiActions(d, panel); backup.appendChild(bk);
         ipeUiMoveButtons(bk, [p + "-pack-export-anchors", p + "-btn-save-now", p + "-notice-demo"]);
         ipeUiMove(backup, [p + "-show-quick-entry", p + "-quick-motion", p + "-open-panel"]);
+        // 2.29.9 瘦身本聊天的生图记录（老聊天每楼存了整段 + 五层两份）
+        var tidyRow = ipeUiActions(d, panel); backup.appendChild(tidyRow);
+        var tidy = d.createElement(panel ? "button" : "input");
+        tidy.id = p + "-tidy-extra"; tidy.type = "button";
+        if (panel) { tidy.className = "ipe-btn"; tidy.textContent = "🧹 瘦身本聊天的生图记录"; } else { tidy.className = "menu_button"; tidy.value = "🧹 瘦身本聊天的生图记录"; }
+        tidy.title = "老聊天每楼存了整段描述 + 五层两份，有五层的把整段删掉。整个聊天过一遍，只存一次聊天；换画风重注入照常能用。";
+        tidy.addEventListener("click", function(){
+            var r = ipeTidyInjectRecords();
+            setStatus(r.floors ? "瘦身完成：" + r.floors + " 楼少存了约 " + Math.round(r.bytes / 1024) + " KB，聊天只存一次" : "没有可瘦的：这个聊天的生图记录已经是最省的写法", "#6ec577");
+        });
+        tidyRow.appendChild(tidy);
         // ④ API 连接：请求参数折叠（流式、开口时限从本区挪进去，温度、思考强度从锚点那张卡搬来）
         var apiBody = body("api");
         if (apiBody) {
@@ -10219,20 +10230,48 @@ function ipeRememberInjectTag(msg, tag, desc, layers) {
         msg.extra.ipe_inject_env = envName || "";
         if (envName) delete msg.extra.ipe_inject_tag; else msg.extra.ipe_inject_tag = String(tag || "");
         // 2.16.0 连描述和五层一起记：翻到哪楼都能按新模板重拼，刷新页面也不丢
-        msg.extra.ipe_inject_desc = String(desc || "");
+        // 2.29.9 整段就是五层拼起来的（平时都是）就只记五层，读的时候再拼；整段被手改过、跟五层不一样的才两份都记。空层不记。聊天文件每楼少存一份
         var ly = null;
-        if (layers && typeof layers === "object") { ly = {}; IPE_IMG_LAYERS.forEach(function(l){ ly[l] = String(layers[l] || ""); }); }
+        if (layers && typeof layers === "object") { ly = {}; IPE_IMG_LAYERS.forEach(function(l){ var v = String(layers[l] || ""); if (v.trim()) ly[l] = v; }); if (!Object.keys(ly).length) ly = null; }
         msg.extra.ipe_inject_layers = ly;
+        if (ly && ipeNormWs(String(desc || "")) === ipeNormWs(ipeImgJoinLayers(ly))) delete msg.extra.ipe_inject_desc;
+        else msg.extra.ipe_inject_desc = String(desc || "");
     } catch(e) {}
 }
-/* 这楼记过的提取结果；没有就 null */
+/* 这楼记过的提取结果；没有就 null。只记了五层的（2.29.9 起），整段现拼 */
 function ipeInjectRecord(msg) {
     try {
         var ex = msg && msg.extra;
-        if (!ex || !String(ex.ipe_inject_desc || "").trim()) return null;
+        if (!ex) return null;
         var ly = (ex.ipe_inject_layers && typeof ex.ipe_inject_layers === "object" && ipeImgJoinLayers(ex.ipe_inject_layers)) ? ex.ipe_inject_layers : null;
-        return { desc: String(ex.ipe_inject_desc), layers: ly };
+        var desc = String(ex.ipe_inject_desc || "").trim() ? String(ex.ipe_inject_desc) : (ly ? ipeImgJoinLayers(ly) : "");
+        if (!desc.trim()) return null;
+        return { desc: desc, layers: ly };
     } catch(e) { return null; }
+}
+/* 2.29.9 瘦身：老聊天每楼都存着整段 + 五层两份，有五层的把整段删掉、空层删掉。整个聊天过一遍，只存一次。
+   返回 { floors, bytes }：动了几楼、大约省了多少字节 */
+function ipeTidyInjectRecords() {
+    var chat = [], floors = 0, bytes = 0;
+    try { chat = ctx().chat || []; } catch(e) { return { floors: 0, bytes: 0 }; }
+    for (var i = 0; i < chat.length; i++) {
+        var ex = chat[i] && chat[i].extra;
+        if (!ex || typeof ex !== "object") continue;
+        var before = 0; try { before = JSON.stringify({ d: ex.ipe_inject_desc, l: ex.ipe_inject_layers }).length; } catch(e0) {}
+        var ly = (ex.ipe_inject_layers && typeof ex.ipe_inject_layers === "object") ? ex.ipe_inject_layers : null;
+        var touched = false;
+        if (ly) {
+            Object.keys(ly).forEach(function(k){ if (!String(ly[k] || "").trim()) { delete ly[k]; touched = true; } });
+            if (!Object.keys(ly).length) { ex.ipe_inject_layers = null; ly = null; touched = true; }
+        }
+        if (ly && ex.ipe_inject_desc != null && ipeNormWs(String(ex.ipe_inject_desc)) === ipeNormWs(ipeImgJoinLayers(ly))) { delete ex.ipe_inject_desc; touched = true; }
+        if (!touched) continue;
+        floors++;
+        var after = 0; try { after = JSON.stringify({ d: ex.ipe_inject_desc, l: ex.ipe_inject_layers }).length; } catch(e1) {}
+        bytes += Math.max(0, before - after);
+    }
+    if (floors) ipeSaveChatSoon();
+    return { floors: floors, bytes: bytes };
 }
 
 /* 注入用的内容：预览框 → currentDesc；分层开着且本次分层新鲜时带上层框 */

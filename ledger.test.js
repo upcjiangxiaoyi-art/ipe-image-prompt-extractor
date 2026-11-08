@@ -1198,7 +1198,7 @@ await (async () => {
     ok(!("ipe_inject_tag" in tavern.chat[9].extra), "包裹型模板：没有几 KB 的原文副本");
     // 什么都没有 → 直说
     tavern.chatMetadata.ipe_img_layers_v1.floor = 3;
-    delete tavern.chat[9].extra.ipe_inject_desc;   // 这楼的记录也抹掉，才是真的什么都没有
+    delete tavern.chat[9].extra.ipe_inject_desc; delete tavern.chat[9].extra.ipe_inject_layers;   // 这楼的记录也抹掉（2.29.9 起五层也算记录），才是真的什么都没有
     let threw = ""; try { F("reinjectDescToMessage")(9); } catch(e) { threw = e.message; }
     ok(threw.indexOf("先提取一次") >= 0, "预览空、层框不是这楼的：报「先提取一次」", threw);
 })();
@@ -2840,6 +2840,51 @@ await (async () => {
     eq(r.w.eval("ipeLedgerRerollKws")().join(","), "硬性约束", "填了就只认填的");
     r.st.ledgerRerollTrimKw = "";
     eq(r.w.eval("ipeLedgerRerollKws")().join(","), "本轮必须,本轮提示", "留空 = 内置两个");
+})();
+
+console.log("\n【72】 楼里的生图记录只存一份（2.29.9）：有五层就不再另存整段，空层不存；老记录读得懂；「瘦身」按钮整个聊天过一遍只存一次聊天；没改的不存");
+await (async () => {
+    const { w, tavern, F } = boot(10);
+    const d = w.document;
+    d.body.insertAdjacentHTML("beforeend", '<div id="extensions_settings2"></div>');
+    w.jQuery = s => { const el = d.querySelector(s); return { length: el ? 1 : 0, append: h => el.insertAdjacentHTML("beforeend", h) }; };
+    w.eval("createDrawer(); ipeArrangeUI();");
+    let saves = 0; tavern.saveChatDebounced = () => { saves++; };
+    const Rm = w.eval("ipeRememberInjectTag"), Rd = w.eval("ipeInjectRecord");
+    const five = { camera: "C.", env: "E.", mood: "", chars: "CH.", pose: "P." };
+    const m1 = { is_user: false, mes: "x" };
+    Rm(m1, "<draw>t</draw>", "C. E. CH. P.", five);
+    ok(!("ipe_inject_desc" in m1.extra) && JSON.stringify(m1.extra.ipe_inject_layers) === JSON.stringify({ camera: "C.", env: "E.", chars: "CH.", pose: "P." }), "有五层：只存五层、空的氛围层不存、不另存整段", JSON.stringify(m1.extra));
+    eq(Rd(m1).desc, "C. E. CH. P.", "读的时候整段从五层拼出来");
+    eq(Rd(m1).layers.camera, "C.", "五层照样读得到");
+    const m2 = { is_user: false, mes: "x" };
+    Rm(m2, "<draw>t</draw>", "flat desc.", null);
+    ok(m2.extra.ipe_inject_desc === "flat desc." && m2.extra.ipe_inject_layers === null, "没分层：只存整段，层记录 null");
+    eq(Rd(m2).desc, "flat desc.", "整段读得到");
+    const m3 = { is_user: false, mes: "x", extra: { ipe_inject_env: "draw", ipe_inject_desc: "C.  E. CH. P.", ipe_inject_layers: { camera: "C.", env: "E.", mood: "", chars: "CH.", pose: "P." } } };
+    eq(Rd(m3).desc, "C.  E. CH. P.", "老记录（整段 + 五层都有）照旧读整段");
+    const m4 = { is_user: false, mes: "x" };
+    Rm(m4, "<draw>t</draw>", "手改过的整段。", five);
+    ok(m4.extra.ipe_inject_desc === "手改过的整段。" && !!m4.extra.ipe_inject_layers, "整段被手改过、跟五层拼出来的不一样：两份都记（只有 {Description} 的模板换画风时要用手改的那份）");
+    eq(Rd(m4).desc, "手改过的整段。", "读的是手改的那份");
+    // 瘦身：老聊天里两份都有的，删掉整段和空层，只存一次
+    tavern.chat[3] = m3; tavern.chat[5] = { is_user: false, mes: "x", extra: { ipe_inject_env: "draw", ipe_inject_desc: "only flat" } }; tavern.chat[7] = m1; tavern.chat[1] = m4;
+    const T = w.eval("ipeTidyInjectRecords");
+    let r = T();
+    ok(r.floors === 1 && r.bytes > 0 && !("ipe_inject_desc" in m3.extra) && !("mood" in m3.extra.ipe_inject_layers), "瘦身：只动了那楼老记录（整段跟五层一样就删整段、删空层）；只有整段的、手改过的、已经瘦过的都不碰", JSON.stringify(r) + " m4=" + JSON.stringify(m4.extra));
+    ok(m4.extra.ipe_inject_desc === "手改过的整段。", "手改过的那楼两份都留着");
+    eq(Rd(m3).desc, "C. E. CH. P.", "瘦完照样读得到（整段从五层拼）");
+    await new Promise(res => setTimeout(res, 1200));
+    eq(saves, 1, "整个聊天过一遍只存一次");
+    r = T();
+    ok(r.floors === 0, "再点一次：没有可瘦的，不存", JSON.stringify(r));
+    await new Promise(res => setTimeout(res, 1200));
+    eq(saves, 1, "没改就不叫酒馆存聊天");
+    // 按钮在「备份与外观」里，面板、抽屉各一个
+    const b1 = d.querySelector("#ipe-tidy-extra"), b2 = d.querySelector("#iped-tidy-extra");
+    ok(b1 && b2 && !!b1.closest("#ipe-section-backup") && !!b2.closest('[data-ipe-fold="drawer-image-backup"]'), "「瘦身本聊天的生图记录」按钮在备份与外观里");
+    b1.click();
+    ok(d.querySelector("#ipe-status").textContent.indexOf("没有可瘦的") >= 0, "点了：状态行说结果", d.querySelector("#ipe-status").textContent);
 })();
 
 console.log("\n" + "\u2500".repeat(46));
