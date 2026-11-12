@@ -424,6 +424,14 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.ledgerAutoGreeting === false && !lg[0].checked && d.querySelector('#ipe-ledger-status').textContent.indexOf('开场白不自动挂账了') >= 0, '关掉抽屉那个：存下来，浮窗那个跟着关，状态行说一声');
         lg[0].checked = true; lg[0].dispatchEvent(new w.Event('change'));
         check(settings.ledgerAutoGreeting === true && lg[1].checked, '打开浮窗那个：抽屉那个跟着开');
+        // 2.30.0 体检入口：面板标题栏一个 🩺、抽屉页签底下一个「🩺 体检」，两页都点得到；点开是只读的全屏报告
+        const dg = [d.querySelector('#ipe-diag-open'), d.querySelector('#iped-diag-open')];
+        check(dg.every(Boolean) && !!dg[0].closest('.ipe-panel-header') && !dg[1].closest('[data-ipe-tab]') && !!dg[1].closest('.inline-drawer-content'), '体检入口：面板在标题栏，抽屉在页签外面（生图、挂账两页都看得到）');
+        dg[1].click();
+        const dov = d.querySelector('#ipe-zoom-overlay');
+        check(!!dov && dov.querySelector('.ipe-zoom-ta').readOnly && dov.querySelector('.ipe-zoom-ta').value.indexOf('🐚 小海螺体检') === 0 && !!dov.querySelector('.ipe-diag-copy') && !!dov.querySelector('.ipe-diag-clear'), '抽屉的「🩺 体检」点开：只读报告，带「复制」「清空」');
+        dov.querySelector('.ipe-zoom-close').click();
+        check(!d.querySelector('#ipe-zoom-overlay'), '关闭后弹层收起');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

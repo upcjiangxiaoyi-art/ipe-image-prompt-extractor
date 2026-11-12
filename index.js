@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.10";
+var IPE_VERSION = "2.30.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1001,6 +1001,7 @@ function ipeLedgerReconcile(limit, opts) {
     ipeLedgerSave(st);
     if (demoted && limit >= ipeFloorNo()) ipeLedgerFloorsGoneAt = Date.now();   // 2.29.6 是删楼（不是重 roll：重 roll 的 limit 比楼数少一）撕的现任：下一发当重 roll
     try { console.log("[IPE] 楼层对账", { limit: limit, smashed: smashed, currentFloor: st.lastFloor }); } catch(eL) {}
+    if (opts.silent) ipeLog("挂账", "对账（没在状态行说）：撕掉 " + smashed + " 份已不存在楼层的账，" + (st.lastFloor >= 0 ? "现任是" + ipeFloorLabel(st.lastFloor) + "的账" : "账本空了"));
     if (!opts.silent) {
         var msg = "楼层对账：碎掉 " + smashed + " 份已不存在楼层的账";
         if (demoted) msg += (st.lastFloor >= 0
@@ -1447,6 +1448,14 @@ function ipeLedgerEmptyReason(finish, reasonChars) {
 }
 
 async function ipeLedgerCallAPI(text, extra, atFloor, userOverride) {
+    var t0 = Date.now(), it0 = ipeLedgerApiItem() || {};
+    try {
+        var out = await ipeLedgerCallAPICore(text, extra, atFloor, userOverride);
+        ipeLogApi("挂账", it0.endpoint, it0.model, t0, "回了 " + String(typeof out === "string" ? out : (out && out.text) || "").length + " 字");
+        return out;
+    } catch(e) { ipeLogApi("挂账", it0.endpoint, it0.model, t0, ipeLogErr(e)); throw e; }
+}
+async function ipeLedgerCallAPICore(text, extra, atFloor, userOverride) {
     var item = ipeLedgerApiItem();
     if (!item || !item.endpoint) throw new Error("请先在挂账页选一套 API 预设（地址为空）");
     if (!item.model) throw new Error("这套 API 预设没有选模型");
@@ -1960,7 +1969,7 @@ async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
 
     var input = ipeLedgerInput(msg, msgFloor);
     if (silent && (ipeLedgerSameInput(input, ipeLedgerActiveInput)
-        || ipeLedgerSameInput(input, ipeLedgerLastAutoInput))) return;
+        || ipeLedgerSameInput(input, ipeLedgerLastAutoInput))) { ipeLog("挂账", "第 " + msgFloor + " 楼这条正文已经挂过 / 正在挂，不重复挂"); return; }
     if (ipeLedgerBusy) {
         if (silent) { ipeLedgerQueued = true; ipeLedgerStatus("挂账还在跑，这楼记下了，跑完自动补挂最新一楼", "#c9a227"); }
         else ipeLedgerStatus("上一次挂账还没跑完", "#c9a227");
@@ -3409,6 +3418,7 @@ function ipeLedgerStatus(t, color) {
     ["#ipe-ledger-status","#iped-ledger-status"].forEach(function(id){
         var e = q(id); if (e) { e.textContent = t; e.style.color = color || ""; }
     });
+    ipeLogStatus("挂账", t);
 }
 
 /* ---- 版本信息（取代 v1 的账龄栏）---- */
@@ -6525,6 +6535,14 @@ function ipeImgLiveBegin(title) {
    opts.controller：外面给的中止器（「打断请求」按钮用的那个）；opts.title：实况框标题；opts.status：状态行前缀。
    返回剥掉开头 <think> 块之后的正文；用户点打断时原样抛 AbortError，外面据此判「人掐的」不重试。 */
 async function ipeImgChat(body, opts) {
+    var t0 = Date.now(), ep0 = ""; try { ep0 = cfg().apiEndpoint; } catch(e0) {}
+    try {
+        var out = await ipeImgChatCore(body, opts);
+        ipeLogApi("生图", ep0, body && body.model, t0, "回了 " + String(out || "").length + " 字");
+        return out;
+    } catch(e) { ipeLogApi("生图", ep0, body && body.model, t0, ipeLogErr(e)); throw e; }
+}
+async function ipeImgChatCore(body, opts) {
     opts = opts || {};
     var c = cfg();
     var useStream = c.imgStream !== false;
@@ -6685,10 +6703,190 @@ async function callAPI(text, supplement, lockOverride, statusText) {
     return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "", openLimit: true });
 }
 
+/* ============================================================
+   🩺 体检（2.30.0）：现在的状态 + 最近发生了什么
+   ripple 在手机上看不到控制台，出了事只能截状态行让人猜；插件里又有不少地方出错了一声不吭。
+   这里留一份流水：状态行每换一句、每张报错卡、每次接口请求的结果、几处以前静悄悄退出的地方，都记一笔。
+   只留最近 IPE_LOG_MAX 条，存在这台设备的 localStorage 里（Safari 切后台重载页面也还在；不进聊天数据、不进扩展设置，不会引起酒馆存盘）。
+   不记 key、不记正文和提示词，只记「哪一楼、干了什么、结果怎样」。
+   ============================================================ */
+var IPE_LOG_KEY = "ipe-log-v1", IPE_LOG_MAX = 80;
+var ipeLogBuf = null, ipeLogTimer = null, ipeLogBound = false;
+function ipeLogStore() { try { return (ipeRootWindow() || window).localStorage; } catch(e) { return null; } }
+function ipeLogAll() {
+    if (ipeLogBuf) return ipeLogBuf;
+    ipeLogBuf = [];
+    try {
+        var raw = ipeLogStore().getItem(IPE_LOG_KEY), arr = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(arr)) ipeLogBuf = arr.filter(function(x){ return Array.isArray(x) && x.length >= 3; }).slice(-IPE_LOG_MAX);
+    } catch(e) {}
+    return ipeLogBuf;
+}
+function ipeLogFlush() {
+    if (ipeLogTimer) { try { clearTimeout(ipeLogTimer); } catch(e) {} ipeLogTimer = null; }
+    try { ipeLogStore().setItem(IPE_LOG_KEY, JSON.stringify(ipeLogBuf || [])); return true; } catch(e) { return false; }
+}
+function ipeLog(kind, text) {
+    try {
+        var s = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+        if (!s) return;
+        if (s.length > 220) s = s.slice(0, 220) + "…";
+        var buf = ipeLogAll(), last = buf[buf.length - 1];
+        if (last && last[1] === kind && last[2] === s) { last[0] = Date.now(); last[3] = (last[3] || 1) + 1; }   // 连着一样的只记一条，记次数
+        else buf.push([Date.now(), String(kind || ""), s]);
+        if (buf.length > IPE_LOG_MAX) buf.splice(0, buf.length - IPE_LOG_MAX);
+        if (!ipeLogTimer) ipeLogTimer = setTimeout(function(){ ipeLogTimer = null; ipeLogFlush(); }, 800);
+        if (!ipeLogBound) {
+            ipeLogBound = true;
+            var w = ipeRootWindow() || window, d = w.document || document;
+            w.addEventListener("pagehide", ipeLogFlush);
+            d.addEventListener("visibilitychange", function(){ if (d.visibilityState === "hidden") ipeLogFlush(); });
+        }
+    } catch(e) {}
+}
+/* 状态行每秒跳的进度（「已想 120 字 · 12 秒」「挂账中…已收 30 字」）不记，不然一次提取就把流水刷满 */
+var IPE_LOG_PROGRESS_RE = /(· \d+(?: \/ \d+)? 秒$)|(^挂账中…)|(已[想收写] \d+ 字)/;
+function ipeLogStatus(kind, t) {
+    var s = String(t == null ? "" : t);
+    if (!s.trim() || s === "—" || s === "等待新消息…" || IPE_LOG_PROGRESS_RE.test(s)) return;
+    ipeLog(kind, s);
+}
+function ipeLogHost(endpoint) { return String(endpoint || "").trim().replace(/^https?:\/\//i, "").split(/[\/?#]/)[0] || "（没填地址）"; }
+function ipeLogApi(side, endpoint, model, t0, outcome) {
+    ipeLog("接口", side + " → " + ipeLogHost(endpoint) + " · " + (model || "没选模型") + "：" + outcome + "，用时 " + (Math.round((Date.now() - t0) / 100) / 10) + " 秒");
+}
+function ipeLogErr(e) { return (e && e.name === "AbortError") ? "中断了" : "失败：" + String((e && e.message) || e).slice(0, 140); }
+
+/* 体检报告：一页纯文字，能直接复制发给人看。每一行各自兜错，哪一项读不出来就写读不出来，不让整份报告挂掉 */
+function ipeDiagReport() {
+    var out = [], warn = [];
+    var onoff = function(v){ return v ? "开" : "关"; };
+    var line = function(label, fn){ var v; try { v = fn(); } catch(e) { v = "（读不出来：" + ((e && e.message) || e) + "）"; } if (v != null && v !== "") out.push(label + "：" + v); };
+    var c = {}; try { c = cfg() || {}; } catch(e) {}
+    var pad = function(n){ return (n < 10 ? "0" : "") + n; };
+    var stamp = function(t){ var d = new Date(t); return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+    out.push("🐚 小海螺体检 · v" + IPE_VERSION);
+    out.push("时间：" + stamp(Date.now()));
+    out.push("");
+    out.push("【现在】");
+    var floors = 0; try { floors = ipeFloorNo(); } catch(e) {}
+    line("聊天", function(){ return ipeLedgerChatLabel() + "｜楼层 " + floors + (floors ? "（酒馆到 #" + (floors - 1) + "）" : ""); });
+    line("这张卡", function(){
+        var k = ipeAnchorCardKey(); if (!k) return "没打开角色卡";
+        var lk = ipeAnchorLockedItem(), an = ipeGetActiveAnchorItem(), note = ipeLedgerNoteItem(), ord = ipeCardOrderGet();
+        return (ipeAnchorCardLabel() || k) + "｜锚点：" + (lk ? "锁「" + lk.name + "」" : "没锁，用「" + ((an && an.name) || "") + "」")
+            + "｜本卡要点：" + (note ? "「" + (note.name || "") + "」" + (String(note.value || "").trim() ? "" : "（空的）") : "还没选（不发）")
+            + "｜本卡长期指令：" + (ord.trim() ? ord.trim().length + " 字" : "没写");
+    });
+    line("生图开关", function(){ return "自动提取 " + onoff(c.enabled) + "｜自动注入 " + onoff(c.autoInject) + "｜开场白也出图 " + onoff(c.imgAutoGreeting !== false) + "｜分层提取 " + onoff(ipeImgLayeredOn()); });
+    line("生图进度", function(){
+        return (currentIdx >= 0 ? "盯着" + ipeFloorLabel(currentIdx + 1) : "还没定位楼（按钮会盯最后一条 AI 楼）")
+            + "｜正在提取 " + (processing ? "是" : "否") + "｜排着自动提取 " + (pendingAutoIdx >= 0 ? "是" : "否") + "｜等着自动重试 " + (ipeRetryTimer ? "是" : "否");
+    });
+    line("生图接口", function(){
+        var it = ipeGetActiveApiProfileItem() || {};
+        if (!String(it.endpoint || "").trim()) warn.push("生图的 API 地址没填（生图页 → API 配置）");
+        else if (!String(it.model || "").trim()) warn.push("生图的 API 没选模型（生图页 → API 配置 → 加载模型）");
+        return "「" + (it.name || "") + "」" + ipeLogHost(it.endpoint) + " · " + (it.model || "没选模型") + "｜key " + (it.key ? "已填" : "没填")
+            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连" : "") + "｜流式 " + onoff(c.imgStream !== false)
+            + "｜思考强度 " + (c.imgReasoningEffort || "自动") + "｜温度 " + (c.imgTemperature === "" || c.imgTemperature == null ? "不发" : c.imgTemperature);
+    });
+    line("画风模板", function(){
+        var it = ipeGetActiveTemplateItem() || {}, blk = ipeGetCommonBlock(it.common);
+        var raw = ipeGetTemplateValue() || c.baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;   // 跟 buildInjectTag 同一个取法：预设是空的就用默认模板
+        var phs = String(raw).match(IPE_IMG_TPL_PH_RE) || [];
+        if (!phs.length) warn.push("画风模板「" + (it.name || "") + "」里一个占位符都没有（{Description} 之类），描述会直接接在模板后面");
+        return "「" + (it.name || "") + "」｜公共块：" + (blk ? "「" + (blk.name || "") + "」" : "不挂") + "｜占位符：" + (phs.length ? phs.filter(function(x, i){ return phs.indexOf(x) === i; }).join(" ") : "没有");
+    });
+    line("提取规则 / 系统提示", function(){ return "「" + ((ipeGetActiveRuleItem() || {}).name || "") + "」/「" + ((ipeGetActiveSystemPromptItem() || {}).name || "") + "」"; });
+    line("正文标签", function(){
+        var tags = ipeBodyTagNames(), chat = ctx().chat || [], i = -1;
+        for (var k = chat.length - 1; k >= 0; k--) { if (chat[k] && !chat[k].is_user && chat[k].is_system !== true) { i = k; break; } }
+        if (!tags.length) return "没设（整楼都当正文）";
+        if (i < 0) return tags.join(" / ") + "｜这个聊天还没有 AI 楼";
+        var un = ipeFloorUnfinished(chat[i], i);
+        if (un) warn.push("最后一条 AI 楼（酒馆 #" + i + "）" + un + "：自动提取、自动挂账会先不跑");
+        var sc = ipeBodyTagScan(String(chat[i].mes || ""), tags);
+        return tags.join(" / ") + "｜最后一条 AI 楼（酒馆 #" + i + "）里" + (sc.found ? (sc.unclosed ? "找到了，但没收尾" : "找到了") : "没找到（这楼按整楼取）");
+    });
+    var st = null; try { st = ipeLedgerRead(); } catch(e) {}
+    line("挂账开关", function(){
+        var on = c.ledgerEpEnabled !== false;
+        if (!on && st && String(st.current || "").trim()) warn.push("贴耳注入关着：账本有内容，但主 AI 读不到");
+        if (c.ledgerAutoRun !== true && c.ledgerAutoOffReason) warn.push("自动挂账是插件自己关掉的（连着失败），换好 API 再打开");
+        return "自动挂账 " + onoff(c.ledgerAutoRun === true) + "｜开场白也挂 " + onoff(c.ledgerAutoGreeting !== false)
+            + "｜重 roll 不带本轮必须 " + onoff(c.ledgerRerollTrim === true) + "（关键词 " + ipeLedgerRerollKw() + "）"
+            + "｜贴耳 " + onoff(on) + "（深度 " + ipeLedgerEpDepth() + "）｜楼里显示账本 " + onoff(c.ledgerInlineShow !== false);
+    });
+    line("挂账进度", function(){
+        if (!st) return "读不到账本";
+        var has = String(st.current || "").trim();
+        var live = ""; try { var bag = ctx().extensionPrompts || {}, e = bag[IPE_LEDGER_EP_KEY]; live = String((e && e.value != null) ? e.value : (e || "")); } catch(e2) {}
+        if (has && st.lastFloor > floors) warn.push("账本记到的楼号（" + st.lastFloor + "）比现在的楼数（" + floors + "）大：有楼删了还没对账，点一下「对账」或再发一条");
+        return (has ? "账本记到" + ipeFloorLabel(st.lastFloor) + "，" + has.length + " 字" : "账本是空的") + "｜历史 " + ((st.versions || []).length) + " 份"
+            + "｜贴给主 AI 的 " + live.length + " 字｜正在挂账 " + (ipeLedgerBusy ? "是" : "否") + "｜连着失败 " + ipeLedgerFailStreak + " 次";
+    });
+    line("挂账接口", function(){
+        var it = ipeLedgerApiItem();
+        if (!it) { if (c.ledgerAutoRun === true) warn.push("自动挂账开着，但没选挂账用哪套 API（挂账页 → 副 AI 连接）"); return "还没选"; }
+        if (!String(it.model || "").trim()) warn.push("挂账用的那套 API 没选模型");
+        return "「" + (it.name || "") + "」" + ipeLogHost(it.endpoint) + " · " + (it.model || "没选模型") + "｜key " + (it.key ? "已填" : "没填")
+            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连" : "") + "｜流式 " + onoff(c.ledgerStream !== false)
+            + "｜思考强度 " + (c.ledgerReasoningEffort || "自动") + "｜输出上限 " + (Number(c.ledgerMaxTokens) > 0 ? c.ledgerMaxTokens : "不发");
+    });
+    line("挂账规则", function(){ return "「" + (ipePresetItem.apply(null, LP).name || "") + "」"; });
+    if (c.enabled === false) warn.push("自动提取关着：收到新楼不会自动出图（要的话在生图页最上面打开）");
+    if (!ipeLogStore()) warn.push("这个浏览器不让存本地数据：下面的记录页面一刷新就没了");
+    out.push("");
+    out.push("【可能有问题的地方】");
+    if (warn.length) warn.forEach(function(x){ out.push("- " + x); }); else out.push("（没发现明显问题）");
+    out.push("");
+    var log = ipeLogAll().slice(-50).reverse();
+    out.push("【最近发生了什么】新的在上，最多 50 条");
+    if (!log.length) out.push("（还没有记录）");
+    log.forEach(function(x){ out.push(stamp(x[0]) + " " + x[1] + "｜" + x[2] + (x[3] > 1 ? "（×" + x[3] + "）" : "")); });
+    return out.join("\n");
+}
+function ipeDiagCopy(big, btn) {
+    var text = String(big.value || "");
+    var done = function(ok){ btn.textContent = ok ? "已复制 ✓" : "长按全选"; setTimeout(function(){ btn.textContent = "复制"; }, 1800); };
+    var fallback = function(){
+        try { big.focus(); big.select(); big.setSelectionRange(0, text.length); done(!!ipeRootDocument().execCommand("copy")); } catch(e) { done(false); }
+    };
+    try {
+        var nav = (ipeRootWindow() || window).navigator;
+        if (nav && nav.clipboard && nav.clipboard.writeText) nav.clipboard.writeText(text).then(function(){ done(true); }, fallback);
+        else fallback();
+    } catch(e) { fallback(); }
+}
+/* 借「⤢ 放大编辑」那个全屏弹层显示（手机上各种层级的坑它都踩过了），只读；标题栏多放「复制」「清空」两颗按钮 */
+function ipeDiagOpen() {
+    var d = ipeRootDocument();
+    var ta = d.createElement("textarea");
+    ta.id = "ipe-diag-text"; ta.readOnly = true; ta.value = ipeDiagReport();
+    ipeZoomOpen(ta);
+    var ov = d.getElementById("ipe-zoom-overlay"); if (!ov) return false;
+    var head = ov.querySelector(".ipe-zoom-head"), close = ov.querySelector(".ipe-zoom-close"), big = ov.querySelector(".ipe-zoom-ta"), count = ov.querySelector(".ipe-zoom-count");
+    if (count) count.style.display = "none";
+    head.style.flexWrap = "wrap";
+    var mk = function(cls, text, fn){
+        var b = d.createElement("button"); b.type = "button"; b.className = cls; b.textContent = text;
+        b.style.cssText = close.style.cssText; b.addEventListener("click", function(){ fn(b); });
+        head.insertBefore(b, close); return b;
+    };
+    mk("ipe-diag-copy", "复制", function(b){ ipeDiagCopy(big, b); }).style.marginLeft = "auto";
+    mk("ipe-diag-clear", "清空", function(b){ ipeLogBuf = []; ipeLogFlush(); big.value = ipeDiagReport(); b.textContent = "已清空"; setTimeout(function(){ b.textContent = "清空"; }, 1500); });
+    close.textContent = "关闭";
+    big.style.fontSize = "13px"; big.style.lineHeight = "1.55";
+    setTimeout(function(){ try { big.setSelectionRange(0, 0); big.scrollTop = 0; big.blur(); } catch(e) {} }, 80);   // 放大编辑默认跳到末尾，报告要从头看
+    return true;
+}
+
 function setStatus(t, color) {
     ["#ipe-status","#iped-status"].forEach(function(id){
         var e = q(id); if(e){e.textContent=t;e.style.color=color||"";}
     });
+    ipeLogStatus("生图", t);
 }
 function setPreview(t) {
     ["#ipe-preview-text","#iped-preview-text"].forEach(function(id){
@@ -6813,6 +7011,7 @@ function ipeNoticeStack() {
 
 function ipeNotice(opts) {
     opts = opts || {};
+    try { ipeLog("弹卡", String(opts.title || "") + (opts.body ? "｜" + String(opts.body) : "")); } catch(eLg) {}
     var kind = opts.kind || "error";                       // error | ok | info
     var sticky = opts.sticky === true;
     var ms = Number(opts.timeout) || (kind === "error" ? 9000 : 6000);
@@ -7487,7 +7686,7 @@ function createPanel() {
 
     var h = '<div class="ipe-panel-header">';
     h += '<span class="ipe-panel-title">🐚 小海螺 · IPE</span>';
-    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle" title="自动提取（只管生图，挂账有自己的开关）"><input type="checkbox" id="ipe-enabled" aria-label="自动提取"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
+    h += '<div style="display:flex;align-items:center;gap:8px">'+ '<button id="ipe-diag-open" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="体检：现在的状态 + 最近发生了什么。出了问题点这里，复制发给人看">🩺</button>' + '<button id="ipe-theme-toggle" type="button" class="ipe-btn" style="flex:none;padding:3px 8px" title="配色：点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）">'+IPE_THEME_ICON[ipeThemeCurrent()]+'</button>' + '<label class="ipe-toggle" title="自动提取（只管生图，挂账有自己的开关）"><input type="checkbox" id="ipe-enabled" aria-label="自动提取"'+(c.enabled?' checked':'')+'><span class="ipe-toggle-slider"></span></label><button id="ipe-panel-close" type="button" class="ipe-btn" style="flex:none;padding:3px 8px">×</button></div>';
     h += '</div>';
     h += '<div class="ipe-tabs">'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
@@ -8183,6 +8382,7 @@ function createDrawer() {
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="image">\uD83C\uDFA8 生图</button>'
        + '<button type="button" class="ipe-tab" data-ipe-tabbtn="ledger">\uD83D\uDCCB 挂账</button>'
        + '</div>';
+    h += '<div style="margin:0 0 8px;display:flex;justify-content:flex-end"><input type="button" id="iped-diag-open" class="menu_button" value="🩺 体检" title="现在的状态 + 最近发生了什么。出了问题点这里，复制发给人看"></div>';
     h += '<div data-ipe-tab="image">';
     h += '<hr><small><b>API 配置</b></small>';
     h += '<label>API 预设</label><select id="iped-api-profile" class="text_pole"></select>';
@@ -8832,7 +9032,7 @@ var IPE_ZOOM_TITLES = {
     "ipe-layer-camera": "📷 镜头层", "ipe-layer-env": "🌆 环境层", "ipe-layer-mood": "🎞️ 氛围层",
     "ipe-layer-chars": "🧍 人物层", "ipe-layer-pose": "🤝 动作层",
     "ipe-ledger-text": "账本", "ipe-ledger-order": "User 指令", "ipe-ledger-extra": "这次额外说一句",
-    "ipe-ledger-preview": "副 AI 刚才说了什么", "ipe-ledger-prompt": "挂账规则", "ipe-ledger-note": "本卡要点 / 世界观硬设定"
+    "ipe-ledger-preview": "副 AI 刚才说了什么", "ipe-ledger-prompt": "挂账规则", "ipe-ledger-note": "本卡要点 / 世界观硬设定", "ipe-diag-text": "🩺 小海螺体检"
 };
 function ipeZoomTitleFor(ta) {
     try {
@@ -9409,6 +9609,11 @@ function bindAll() {
         var bt=q("#"+p+"-btn-test"); if(bt && !bt.__ipeBound){ bt.__ipeBound = true; bt.addEventListener("click", testConnection); }
         var bs=q("#"+p+"-btn-stop"); if(bs && !bs.__ipeBound){ bs.__ipeBound = true; bs.addEventListener("click", ipeAbortCurrentRequest); }
         var bv=q("#"+p+"-btn-save-now"); if(bv && !bv.__ipeBound){ bv.__ipeBound = true; bv.addEventListener("click", ipeForceSaveFromEditors); }
+    });
+
+    ["ipe-diag-open", "iped-diag-open"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("click", function(){ try { ipeDiagOpen(); } catch(e) { setStatus("体检打不开：" + ((e && e.message) || e), "#d4726a"); } });
     });
 
     var openPanelBtn = q("#iped-open-panel");
@@ -10109,6 +10314,7 @@ function bindAll() {
                        酒馆把 type 当第一个参数传进来，这里同步降一楼，赶在组 prompt 之前碎掉尾楼的账。
                        continue 不降：它是给当前楼续写，那楼的账仍然算数。 */
                     var t = String(genType || "").toLowerCase();
+                    if (evName === "GENERATION_STARTED" && dryRun !== true && t !== "quiet") ipeLog("系统", "酒馆开始生成（" + (t || "normal") + "）");
                     if ((t === "swipe" || t === "regenerate") && dryRun !== true) {
                         ipeLedgerFloorsGoneAt = 0;   // 2.29.6 重 roll 本身就按重 roll 处理，删楼那笔不用再记
                         try {
@@ -10182,7 +10388,7 @@ function bindAll() {
                 setTimeout(function(){
                     // 2.27.13 定时器里的异常没人接，会直接报到控制台、打断后面的事：都兜住
                     try { ipeLedgerSync(); } catch(eS) { try { console.warn("[IPE] 收到新楼后同步挂账失败", eS); } catch(e2) {} }
-                    try { if (cfg().ledgerAutoRun === true) ipeLedgerRun(null, true); } catch(eR) { try { console.warn("[IPE] 自动挂账启动失败", eR); } catch(e2) {} }
+                    try { if (cfg().ledgerAutoRun === true) ipeLedgerRun(null, true); else ipeLog("挂账", "收到新楼：自动挂账关着，没挂"); } catch(eR) { ipeLog("挂账", "自动挂账启动失败：" + ((eR && eR.message) || eR)); try { console.warn("[IPE] 自动挂账启动失败", eR); } catch(e2) {} }
                 }, 500);
             });
             console.log("[IPE] 挂账已绑定消息事件");
@@ -10722,6 +10928,7 @@ function ipeImgChatGuard() {
     if (ipeImgChatSeen === null) { ipeImgChatSeen = k; return false; }
     if (k === ipeImgChatSeen) return false;
     ipeImgChatSeen = k;
+    try { ipeLog("系统", "换了聊天：" + ipeLedgerChatLabel() + "（生图记着的楼号、预览框、排着的自动提取作废）"); } catch(eLg) {}
     currentIdx = -1; currentDesc = ""; pendingAutoIdx = -1;
     if (autoTimer) { try { clearTimeout(autoTimer); } catch(e) {} autoTimer = null; }
     ipeClearApiRetry();
@@ -10757,7 +10964,8 @@ function onMsgReceived(idx, type) {
         var chat = ctx().chat || [];
         var i = Number(idx);
         var msg = (Number.isFinite(i) && i >= 0) ? chat[i] : null;
-        if (msg && msg.is_user) return;               // 酒馆明确点名 user 楼：不提取，维持原行为
+        ipeLog("生图", "收到新楼：酒馆 #" + idx + (type ? "（" + type + "）" : ""));
+        if (msg && msg.is_user) { ipeLog("生图", "酒馆 #" + i + " 是你发的楼，不提取"); return; }               // 酒馆明确点名 user 楼：不提取，维持原行为
         if (!msg) {
             // 有的酒馆/套壳发事件不带楼号（或带的不是数字）——参数靠不住就自己找最后一条 AI 楼
             i = -1;
@@ -10765,7 +10973,7 @@ function onMsgReceived(idx, type) {
                 var m = chat[k];
                 if (m && !m.is_user && m.is_system !== true) { i = k; msg = m; break; }   // 2.27.6 空回也认这楼（到点再看写没写完），不往回找上一楼
             }
-            if (i < 0 || !msg) return;
+            if (i < 0 || !msg) { ipeLog("生图", "这个聊天里没找到 AI 楼，没提取"); return; }
             try { console.log("[IPE] 生图：事件没带楼号（收到:", idx, "），已自行定位第", i + 1, "楼"); } catch(eLg) {}
         }
         if (!cfg().enabled) {
@@ -10790,7 +10998,7 @@ function onMsgReceived(idx, type) {
         }, delay);
 
         setStatus("已捕捉新正文，等待自动提取…", "#6ec577");
-    } catch(e){}
+    } catch(e){ ipeLog("生图", "收到新楼时出错：" + ((e && e.message) || e)); }
 }
 
 function runPendingAutoExtract() {
@@ -10807,7 +11015,7 @@ function runPendingAutoExtract() {
         pendingAutoIdx = -1;
 
         var msg = ctx().chat[idx];
-        if (!msg || msg.is_user) return;
+        if (!msg || msg.is_user) { ipeLog("生图", "排着的自动提取取消：酒馆 #" + idx + (msg ? " 是你发的楼" : " 已经不在了")); return; }
         var unfinished = ipeFloorUnfinished(msg, idx);   // 2.27.6 空回 / 没写完的楼不提取、不注入
         if (unfinished) {
             setStatus("第 " + (idx + 1) + " 楼" + unfinished + "，自动提取先不跑；重 roll 或点「继续」写完，收到新楼会照常提取。这楼其实写完了的话，点「手动提取」", "#c9a227");
@@ -10931,7 +11139,7 @@ async function onReroll() {
     if (ipeImgTargetIdx() < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }   // 2.29.10 记着的楼不是这个聊天的 / 已经删了：改盯最后一条 AI 楼
     try{var msg=ctx().chat[currentIdx];if(!msg)return;
     var sup=q("#ipe-supplement");var supd=q("#iped-supplement");
-    await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", "replace", currentIdx);}catch(e){}
+    await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", "replace", currentIdx);}catch(e){ ipeLog("生图", "重新生成出错：" + ((e && e.message) || e)); }
 }
 
 async function onRerollLayer(layer) {
@@ -10966,7 +11174,7 @@ function onInject() {
 
 function init() {
     if (initialized) return;
-    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; try { ipeImgChatSeen = ipeChatKey(); } catch(eK) {} console.log("[IPE] ✓ 已加载"); }
+    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; try { ipeImgChatSeen = ipeChatKey(); } catch(eK) {} ipeLog("系统", "小海螺 v" + IPE_VERSION + " 载入（页面打开或重新载入）"); console.log("[IPE] ✓ 已加载"); }
     catch(e) { console.error("[IPE] 初始化失败:",e); }
 }
 

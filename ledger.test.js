@@ -1462,17 +1462,25 @@ await (async () => {
     tavern.chat.push({is_user: false, mes: "真实新增的一楼正文"});
     F("ipeLedgerRun")(null, true);
     ok(statusText(w).indexOf("补挂") >= 0, "第二楼来了：状态行说记下了、跑完补挂", statusText(w));
-    await wait(700);
+    // 不按固定时间等：页面刚载入那一下插件要刷一遍面板，机器忙的时候 700 毫秒不够，以前这项时过时不过。等到第二次真的跑完、挂账闲下来为止
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    await until(() => n >= 2 && !w.eval("ipeLedgerBusy"));
+    await wait(250);   // 再等一会儿：不该有第三次
     eq(n, 2, "跑完自动补了一次（共两次请求）");
     ok(F("ipeLedgerRead")().current.indexOf("第 2 次") >= 0, "现任是补挂那次的");
     // 人掐的不补
     n = 0;
-    w.fetch = (u, o) => new Promise((res, rej) => { o.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); }); });
-    F("ipeLedgerRun")(null, false); await wait(20);
+    w.fetch = (u, o) => { n++; return new Promise((res, rej) => { o.signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); }); }); };
+    F("ipeLedgerRun")(null, false);
+    await until(() => n >= 1);
     tavern.chat.push({is_user: false, mes: "等待补挂但将被中断的新楼"});
     F("ipeLedgerRun")(null, true);
-    F("ipeLedgerStop")(); await wait(300);
-    eq(n, 0, "人掐了：排着的那次也不跑");
+    ok(w.eval("ipeLedgerQueued") === true, "跑着的时候又来一楼：排上了");
+    F("ipeLedgerStop")();
+    await until(() => !w.eval("ipeLedgerBusy"));
+    await wait(300);
+    eq(n, 1, "人掐了：排着的那次也不跑（只有被掐的那一次请求）");
+    ok(w.eval("ipeLedgerQueued") === false && !w.eval("ipeLedgerBusy"), "队列清了，挂账闲着");
 })();
 
 console.log("\n【44】 失败自动重试一次（2.18.0）：5xx / 网络错重试且不计失败不弹卡；4xx 不重试；重试再败才计失败");
@@ -2985,6 +2993,97 @@ await (async () => {
     const pv = r.preview();
     await r.tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
     ok(!!pv && r.preview() === pv && r.F("imgState")().idx === 9 && !r.d.querySelector("#ipe-btn-inject").disabled, "同一个聊天重新载入（没换卡）：预览框、盯着的楼、「确认注入」都不动");
+})();
+
+console.log("\n【74】 体检页（2.30.0）：状态行每换一句、报错卡、接口结果、以前静悄悄退出的地方都记一笔；只留最近 80 条、存在本机、页面重载不丢；报告一页纯文字能复制，里面没有 key");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const { w, tavern, F } = boot(10);
+    const KEY = "sk-SECRET-KEY-123456";
+    const st = imgApi(w, tavern, F, "a girl.");
+    st.apiKey = KEY; st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "中转甲", endpoint: "http://x.test/v1", key: KEY, model: "gpt-4.1" }]);
+    st.ledgerApiProfile = "api_1"; st.ledgerAutoRun = false; st.imgStream = false; st.autoInjectDelay = 500;
+    const d = w.document;
+    const L = () => w.eval("ipeLogAll")().map(x => x[1] + "｜" + x[2]);
+    const has = s => L().some(x => x.indexOf(s) >= 0);
+    ok(has("系统｜小海螺 v") && has("载入"), "页面载入记一笔（看得出 Safari 是不是重新载入过）", L().join(" / "));
+    // 状态行
+    w.eval("setStatus")("提取完成 — 可编辑后确认注入", "");
+    w.eval("ipeLedgerStatus")("已挂账 ✓ 第 10 楼（酒馆 #9）", "");
+    ok(has("生图｜提取完成 — 可编辑后确认注入") && has("挂账｜已挂账 ✓ 第 10 楼"), "生图、挂账的状态行每换一句记一笔");
+    const n0 = L().length;
+    ["正在提取…模型思考中，已想 120 字 · 12 秒", "正在提取…连接中 · 3 / 120 秒", "正在提取…模型输出中，已写 40 字 · 15 秒"].forEach(t => w.eval("setStatus")(t, ""));
+    w.eval("ipeLedgerStatus")("挂账中…副 AI 正在写账本，已收 30 字", "");
+    w.eval("setStatus")("等待新消息…", "");
+    eq(L().length, n0, "每秒跳的进度（已想 N 字 · N 秒、挂账中…）和「等待新消息…」不记，不刷屏");
+    w.eval("setStatus")("同一句话", ""); w.eval("setStatus")("同一句话", ""); w.eval("setStatus")("同一句话", "");
+    const lastRow = w.eval("ipeLogAll")().slice(-1)[0];
+    ok(lastRow[2] === "同一句话" && lastRow[3] === 3 && L().length === n0 + 1, "连着一样的只记一条，记次数", JSON.stringify(lastRow));
+    // 以前静悄悄的地方
+    st.enabled = false;
+    tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal"); await wait(30);
+    ok(has("生图｜收到新楼：酒馆 #9（normal）") && has("自动提取关着，第 10 楼没提取"), "收到新楼记一笔；开关关着也看得出为什么没提取");
+    st.enabled = true;
+    tavern.eventSource.emit("MESSAGE_RECEIVED", 8, "normal"); await wait(30);
+    ok(has("酒馆 #8 是你发的楼，不提取"), "点名的是 user 楼：以前一声不吭，现在记一笔");
+    ok(has("挂账｜收到新楼：自动挂账关着，没挂") || (await wait(600), has("挂账｜收到新楼：自动挂账关着，没挂")), "自动挂账关着收到新楼：记一笔为什么没挂");
+    // 接口：成功、失败都记，带地址和模型，不带 key
+    await w.eval("onExtract")();
+    ok(has("接口｜生图 → x.test · gpt-4.1：回了 7 字，用时"), "生图请求成功：记地址、模型、回了多少字、用时", L().filter(x => x.indexOf("接口") === 0).join(" / "));
+    w.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } }) });
+    w.ipeScheduleApiRetry = function(){};
+    await w.eval("onExtract")();
+    ok(has("接口｜生图 → x.test · gpt-4.1：失败：API 400：invalid_request_error：Your credit balance is too low") && has("余额不够"), "生图请求失败：记原因（报错翻成人话的那句也在）");
+    w.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>体检测试的账，够长够长够长够长够长够长。</ledger>" } }] }) });
+    await F("ipeLedgerRun")(9, false);
+    ok(has("接口｜挂账 → x.test · gpt-4.1：回了") && has("挂账｜已挂账 ✓ 第 10 楼（酒馆 #9）"), "挂账请求、落账都记了");
+    // 换聊天
+    tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.getCurrentChatId = () => "chat-B"; tavern.chatMetadata = {};
+    await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(has("系统｜换了聊天：顾寒 · chat-B"), "换聊天记一笔", L().filter(x => x.indexOf("系统") === 0).join(" / "));
+    tavern.eventSource.emit("GENERATION_STARTED", "swipe", {}, false);
+    tavern.eventSource.emit("GENERATION_STARTED", "normal", {}, true);
+    ok(has("系统｜酒馆开始生成（swipe）") && !has("酒馆开始生成（normal）"), "酒馆开始生成记类型（重 roll 看得出来）；干跑算 token 不记");
+    w.eval("ipeNotice")({ kind: "error", title: "小海螺 · 测试卡", body: "卡片正文", timeout: 50 });
+    ok(has("弹卡｜小海螺 · 测试卡｜卡片正文"), "弹过的报错卡也记（卡片关了还查得到）");
+    // key 不进记录
+    ok(JSON.stringify(w.eval("ipeLogAll")()).indexOf(KEY) < 0, "记录里没有 key");
+    // 报告
+    let rep = w.eval("ipeDiagReport")();
+    ok(rep.indexOf("🐚 小海螺体检 · v") === 0 && rep.indexOf("【现在】") > 0 && rep.indexOf("【可能有问题的地方】") > 0 && rep.indexOf("【最近发生了什么】") > 0, "报告三段：现在 / 可能有问题的地方 / 最近发生了什么");
+    ok(rep.indexOf(KEY) < 0 && rep.indexOf("key 已填") > 0, "报告里只说 key 填没填，不带 key 本身");
+    ok(rep.indexOf("生图接口：「中转甲」x.test · gpt-4.1") > 0 && rep.indexOf("挂账接口：「中转甲」x.test · gpt-4.1") > 0, "写明生图、挂账各用哪套接口", rep.split("\n").filter(x => x.indexOf("接口") >= 0).join(" / "));
+    ok(rep.indexOf("生图开关：自动提取 开｜自动注入 关") > 0 && rep.indexOf("挂账开关：自动挂账 关") > 0 && rep.indexOf("这张卡：顾寒") > 0, "开关、这张卡的状态都列出来");
+    const logPart = rep.slice(rep.indexOf("【最近发生了什么】")).split("\n");
+    ok(logPart[1].indexOf("弹卡｜小海螺 · 测试卡") > 0 && /^\d\d-\d\d \d\d:\d\d:\d\d /.test(logPart[1]), "最近发生了什么：新的在上，带时间", logPart[1]);
+    ok(rep.indexOf("（没发现明显问题）") > 0, "配置齐全时不乱报问题", rep.slice(rep.indexOf("【可能有问题的地方】"), rep.indexOf("【最近发生了什么】")));
+    // 有问题时点名
+    st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "中转甲", endpoint: "", key: "", model: "" }]);
+    st.enabled = false; st.ledgerAutoRun = true; st.ledgerApiProfile = "";
+    rep = w.eval("ipeDiagReport")();
+    ok(rep.indexOf("- 生图的 API 地址没填") > 0 && rep.indexOf("- 自动提取关着") > 0 && rep.indexOf("- 自动挂账开着，但没选挂账用哪套 API") > 0, "地址没填、自动提取关着、挂账没选 API：逐条点名", rep.slice(rep.indexOf("【可能有问题的地方】"), rep.indexOf("【最近发生了什么】")));
+    // 只留 80 条；存在本机，页面重载（内存清空）读得回来
+    for (let i = 0; i < 200; i++) w.eval("ipeLog")("测试", "条 " + i);
+    const all = w.eval("ipeLogAll")();
+    ok(all.length === 80 && all[0][2] === "条 120" && all[79][2] === "条 199", "只留最近 80 条", all.length + " " + all[0][2]);
+    w.eval("ipeLogFlush")();
+    ok(String(w.localStorage.getItem("ipe-log-v1")).indexOf("条 199") > 0 && !tavern.chatMetadata.ipe_log && JSON.stringify(st).indexOf("条 199") < 0, "存在本机 localStorage 里，不进聊天数据、不进扩展设置（不会引起酒馆存盘）");
+    w.eval("ipeLogBuf = null");
+    eq(w.eval("ipeLogAll")().slice(-1)[0][2], "条 199", "页面重新载入（内存清空）：记录还在");
+    // 弹层：面板标题栏的 🩺
+    const btn = d.querySelector("#ipe-diag-open");
+    ok(btn && !!btn.closest(".ipe-panel-header"), "面板标题栏有 🩺 入口（哪一页都点得到）");
+    btn.click();
+    const ov = d.querySelector("#ipe-zoom-overlay"), big = ov && ov.querySelector(".ipe-zoom-ta");
+    ok(ov && ov.querySelector(".ipe-zoom-title").textContent === "🩺 小海螺体检" && big.readOnly && big.value.indexOf("🐚 小海螺体检") === 0, "点开是全屏弹层，只读，内容就是报告");
+    let copied = "";
+    Object.defineProperty(w.navigator, "clipboard", { value: { writeText: async t => { copied = t; } }, configurable: true });
+    ov.querySelector(".ipe-diag-copy").click(); await wait(20);
+    ok(copied === big.value && ov.querySelector(".ipe-diag-copy").textContent === "已复制 ✓", "「复制」：整份报告进剪贴板，按钮说已复制");
+    ov.querySelector(".ipe-diag-clear").click();
+    ok(w.eval("ipeLogAll")().length === 0 && big.value.indexOf("（还没有记录）") > 0, "「清空」：记录清掉，报告跟着刷新");
+    ov.querySelector(".ipe-zoom-close").click();
+    ok(!d.querySelector("#ipe-zoom-overlay"), "「关闭」：弹层收起");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
