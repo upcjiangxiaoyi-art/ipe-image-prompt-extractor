@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.29.9";
+var IPE_VERSION = "2.29.10";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7001,9 +7001,14 @@ function ipeScheduleApiRetry(text, supplement, autoInjectNow, targetIdx, retryAt
         setStatus("API 请求失败，10 秒后自动重试一次…", "#d4726a");
     }
 
+    var retryChat = ipeChatKey();   // 2.29.10 这 10 秒里换了聊天就不重试
     ipeRetryTimer = setTimeout(function(){
         ipeRetryTimer = null;
         try {
+            if (ipeChatKey() !== retryChat) {
+                setStatus("自动重试已取消：已经换了聊天", "#888");
+                return;
+            }
             if (!cfg().enabled) {
                 setStatus("自动重试已取消：自动提取关了", "#888");
                 return;
@@ -10029,6 +10034,7 @@ function bindAll() {
         var cc = ctx();
         if (cc.eventSource && cc.event_types && cc.event_types.CHAT_CHANGED) {
             cc.eventSource.on(cc.event_types.CHAT_CHANGED, function(){
+                try { ipeImgChatGuard(); } catch(eG) {}   // 2.29.10 生图记着的楼号、预览框、排着的自动提取换聊天作废
                 ipeLedgerInlineRemeasure();   // 2.26.3 🐚 住哪重新量：不少卡自带美化样式，楼里怎么排跟着聊天变
                 ipeLedgerChatEpoch++;
                 ipeLedgerLastAutoInput = null;
@@ -10656,6 +10662,8 @@ function ipeSuppDeleteSelected() {
 
 function onReinject() {
     try {
+        ipeImgChatGuard();
+        if (currentIdx >= 0 && !ipeImgIdxAlive(currentIdx)) ipeImgDropIdx();   // 2.29.10 记着的那楼没了：按现在最后一条 AI 楼自己的记录来
         var r = reinjectDescToMessage(currentIdx);
         var nm = String((ipeGetActiveTemplateItem() || {}).name || "");
         if (r.injected) {
@@ -10699,8 +10707,53 @@ function ipeGreetingBindUI() {
 var IPE_AUTO_OFF_TEXT = "自动提取关着：收到新楼不会自动出图，要图点「手动提取」（只管生图，挂账不受影响）";
 function ipeIdleStatusText() { return cfg().enabled ? "等待新消息…" : IPE_AUTO_OFF_TEXT; }
 
+/* ============================================================
+   2.29.10 生图这边记在内存里的东西认聊天
+   「正在弄哪一楼」（currentIdx）、预览框、排着的自动提取、等着的自动重试、在路上的请求，都是某一个聊天的。
+   以前换聊天不清：A 卡玩到一半去 B 卡跑了七八十楼再回来，记着的还是 B 卡的第 80 楼——A 卡没这么多楼，
+   「重新生成」一声不吭就退出，「换画风重注入」报找不到楼；A 卡楼更多的话更糟，提的是 A 卡第 80 楼。只有新跑一楼才重新定位。
+   排着的自动提取、在路上的请求也一样：回来时按楼号贴，贴的是新聊天的楼。
+   现在认聊天（卡 + 聊天名）：换了就全部作废，按钮重新盯这个聊天最后一条 AI 楼。不只靠换聊天事件，每个入口用之前都核一遍。
+   同一个聊天重新载入（没换卡）不算换，什么都不动。
+   ============================================================ */
+var ipeImgChatSeen = null;
+function ipeImgChatGuard() {
+    var k = ipeChatKey();
+    if (ipeImgChatSeen === null) { ipeImgChatSeen = k; return false; }
+    if (k === ipeImgChatSeen) return false;
+    ipeImgChatSeen = k;
+    currentIdx = -1; currentDesc = ""; pendingAutoIdx = -1;
+    if (autoTimer) { try { clearTimeout(autoTimer); } catch(e) {} autoTimer = null; }
+    ipeClearApiRetry();
+    ipeImgLayersFresh = false;
+    if (processing && ipeAbortController) { try { ipeAbortController.abort(); } catch(eA) {} }   // 在路上的那份回来也没处贴，直接掐掉
+    try { setPreview(""); } catch(eP) {}
+    try { ipeImgRefreshLayerUI(); } catch(eL) {}
+    try { var ball = q("#ipe-chat-quick-entry"); if (ball) ball.classList.remove("has-result"); } catch(eB) {}
+    setBtns(true, false);
+    setStatus(ipeIdleStatusText(), "");
+    return true;
+}
+function ipeImgIdxAlive(i) {
+    try { var m = (ctx().chat || [])[i]; return !!m && !m.is_user && m.is_system !== true; } catch(e) { return false; }
+}
+/* 记着的那楼没了（删过楼）：预览框里是它的，不能贴给别的楼 */
+function ipeImgDropIdx() {
+    currentIdx = -1; currentDesc = ""; ipeImgLayersFresh = false;
+    try { setPreview(""); } catch(e) {}
+}
+/* 现在该弄哪一楼：记着的那楼还在、还是 AI 楼就用它；不在了就改盯最后一条 AI 楼。-1 = 没有可读的正文 */
+function ipeImgTargetIdx() {
+    ipeImgChatGuard();
+    if (currentIdx >= 0 && ipeImgIdxAlive(currentIdx)) return currentIdx;
+    if (currentIdx >= 0) ipeImgDropIdx();
+    try { var ch = ctx().chat || []; for (var i = ch.length - 1; i >= 0; i--) { if (ipeImgIdxAlive(i)) { currentIdx = i; break; } } } catch(e0) {}
+    return currentIdx;
+}
+
 function onMsgReceived(idx, type) {
     try {
+        ipeImgChatGuard();
         var chat = ctx().chat || [];
         var i = Number(idx);
         var msg = (Number.isFinite(i) && i >= 0) ? chat[i] : null;
@@ -10741,6 +10794,7 @@ function onMsgReceived(idx, type) {
 }
 
 function runPendingAutoExtract() {
+    ipeImgChatGuard();   // 2.29.10 等的这会儿换了聊天：排着的那楼是上一个聊天的，作废
     if (pendingAutoIdx < 0) return;
 
     if (processing) {
@@ -10769,6 +10823,7 @@ function runPendingAutoExtract() {
 
 async function onExtract() {
     if (processing) return;
+    ipeImgChatGuard();
     try {
         var chat=ctx().chat; if(!chat||!chat.length){setStatus("无法读取","#d4726a");return;}
         for(var i=chat.length-1;i>=0;i--){if(!chat[i].is_user){currentIdx=i;await runExtract(chat[i].mes, "", false, i);return;}}
@@ -10778,6 +10833,7 @@ async function onExtract() {
 
 async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttempt, lockOverride) {
     retryAttempt = Number(retryAttempt || 0);
+    ipeImgChatGuard();   // 2.29.10 从哪个入口进来都先认一遍聊天
     if (retryAttempt === 0) ipeClearApiRetry();
 
     processing = true;
@@ -10785,8 +10841,10 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
     var startText = retryAttempt > 0 ? "正在自动重试提取…" : (ipeImgLayeredOn() ? "正在分层提取…" : "正在提取…");
     setStatus(startText,"#6ec577"); setBtns(false,false);
     var layerNote = "";
+    var chatAtStart = ipeChatKey(), floorAtStart = (typeof targetIdx === "number" ? targetIdx : currentIdx) + 1;   // 2.29.10 回来时聊天换了就作废
     try {
         var desc = await callAPI(text, supplement||"", lockOverride, startText);   // 2.26.0 状态行接着这句往后报进度
+        if (ipeChatKey() !== chatAtStart) throw new Error("chat switched");
         var cast = ipeCastProcess(desc);
         var castPending = !!(cast && cast.block);
         if (cast) desc = cast.text;
@@ -10843,6 +10901,12 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         if(ball){ball.classList.remove("processing");}
         var s=q("#ipe-section-preview"); if(s){ s.classList.remove("collapsed"); var header=s.querySelector(".ipe-section-header"); if(header)header.setAttribute("aria-expanded", "true"); }
     } catch(e) {
+        if (ipeChatKey() !== chatAtStart) {
+            // 2.29.10 提取在路上人换了聊天：那份是上一个聊天的，不贴、不进预览框、不重试
+            ipeImgChatGuard();
+            setStatus("换了聊天：上一个聊天第 " + floorAtStart + " 楼的提取作废了，没注入", "#c9a227");
+            setBtns(true,false); if(ball)ball.classList.remove("processing");
+        } else {
         console.error("[IPE]",e);
         var userAbort = e && e.name === "AbortError" && ipeUserAbortRequested;
         var msg = userAbort ? "请求已被打断" : ipeErrorText(e);
@@ -10851,6 +10915,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
 
         if (ipeShouldRetryApiError(e, userAbort)) {
             ipeScheduleApiRetry(text, supplement || "", autoInjectNow, targetIdx, retryAttempt, msg, lockOverride, e);   // 2.28.4 原样带过去：重试也按「换掉原来那段」
+        }
         }
     }
     ipeAbortController = null;
@@ -10863,10 +10928,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
    以前提完只放进预览框，跟「手动提取」没两样。还没提取过（页面刚重新载入）就盯最后一条 AI 楼。 */
 async function onReroll() {
     if (processing) return;
-    if (currentIdx < 0) {
-        try { var ch = ctx().chat || []; for (var i = ch.length - 1; i >= 0; i--) { if (ch[i] && !ch[i].is_user && ch[i].is_system !== true) { currentIdx = i; break; } } } catch(e0) {}
-        if (currentIdx < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }
-    }
+    if (ipeImgTargetIdx() < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }   // 2.29.10 记着的楼不是这个聊天的 / 已经删了：改盯最后一条 AI 楼
     try{var msg=ctx().chat[currentIdx];if(!msg)return;
     var sup=q("#ipe-supplement");var supd=q("#iped-supplement");
     await runExtract(msg.mes,(sup&&sup.value)||(supd&&supd.value)||"", "replace", currentIdx);}catch(e){}
@@ -10875,11 +10937,7 @@ async function onReroll() {
 async function onRerollLayer(layer) {
     if (processing) return;
     if (!ipeImgLayeredOn()) { setStatus("先打开「分层提取」", "#c9a227"); return; }
-    if (currentIdx < 0) {
-        // 还没提取过：默认盯最后一条 AI 楼
-        try { var ch = ctx().chat || []; for (var i = ch.length - 1; i >= 0; i--) { if (ch[i] && !ch[i].is_user) { currentIdx = i; break; } } } catch(e) {}
-        if (currentIdx < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }
-    }
+    if (ipeImgTargetIdx() < 0) { setStatus("没找到可读的正文", "#d4726a"); return; }   // 还没提取过 / 记着的楼不在了：盯最后一条 AI 楼
     try {
         var msg = ctx().chat[currentIdx]; if (!msg) return;
         var ov = {}; IPE_IMG_LAYERS.forEach(function(x){ ov[x] = x !== layer; });   // 其余三层临时锁定
@@ -10890,7 +10948,8 @@ async function onRerollLayer(layer) {
 }
 
 function onInject() {
-    if(currentIdx<0) return;
+    ipeImgChatGuard();
+    if(currentIdx<0) { setStatus("预览框里没有这个聊天的提取结果：先点「手动提取」或「重新生成」", "#c9a227"); return; }
     try {
         var result = injectDescToMessage("", currentIdx);
         if (result && result.injected) {
@@ -10907,7 +10966,7 @@ function onInject() {
 
 function init() {
     if (initialized) return;
-    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; console.log("[IPE] ✓ 已加载"); }
+    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; try { ipeImgChatSeen = ipeChatKey(); } catch(eK) {} console.log("[IPE] ✓ 已加载"); }
     catch(e) { console.error("[IPE] 初始化失败:",e); }
 }
 

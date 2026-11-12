@@ -73,6 +73,7 @@ function boot(floors, reuse) {   // reuse：拿同一个聊天再开一个新页
     const shim = SRC + "\n;(function(){ " +
         exposed.map(n => `try{ window.__t_${n} = ${n}; }catch(e){}`).join(" ") +
         " try{ window.__t_failStreak = function(){ return ipeLedgerFailStreak; }; }catch(e){}" +
+        " try{ window.__t_imgState = function(){ return { idx: currentIdx, processing: processing, retry: ipeRetryTimer !== null, pending: pendingAutoIdx }; }; }catch(e){}" +
         " })();";
     try { w.eval(shim); } catch (e) { console.log("装载失败：" + e.message); }
     const F = n => w["__t_" + n];
@@ -2885,6 +2886,105 @@ await (async () => {
     ok(b1 && b2 && !!b1.closest("#ipe-section-backup") && !!b2.closest('[data-ipe-fold="drawer-image-backup"]'), "「瘦身本聊天的生图记录」按钮在备份与外观里");
     b1.click();
     ok(d.querySelector("#ipe-status").textContent.indexOf("没有可瘦的") >= 0, "点了：状态行说结果", d.querySelector("#ipe-status").textContent);
+})();
+
+console.log("\n【73】 换卡回来，原来那楼能直接重新生成 / 换画风（2.29.10）：生图记着的「正在弄哪一楼」、预览框、排着的自动提取都是上一个聊天的，换聊天要作废；以前回到原来的卡点「重新生成」一声不吭（或者提错楼），得新跑一楼才好");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const TPL = [{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }, { id: "tpl_2", name: "水墨", value: "<draw>INK: {Description}</draw>" }];
+    function setup(floorsA) {
+        const b = boot(floorsA);
+        const st = imgApi(b.w, b.tavern, b.F, "x");
+        st.ledgerAutoRun = false; st.imgLayered = false; st.imgStream = false;
+        st.baseTemplatesJson = JSON.stringify(TPL); st.activeBaseTemplate = "tpl_1";
+        const sent = []; let n = 0;
+        b.w.fetch = async (u, o) => { sent.push(String(JSON.parse(o.body).messages[1].content)); n++; return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "take " + n + "." } }] }) }; };
+        const d = b.w.document;
+        const chats = { A: { chat: b.tavern.chat.slice(), meta: b.tavern.chatMetadata, id: "test-chat", char: 0, name: "苑无忧" } };
+        let cur = "A";
+        const go = async (key, floors) => {
+            chats[cur].chat = b.tavern.chat.slice(); chats[cur].meta = b.tavern.chatMetadata;
+            if (!chats[key]) { const c = []; for (let i = 0; i < floors; i++) c.push({ is_user: i % 2 === 0, is_system: false, mes: key + " 卡第 " + (i + 1) + " 层正文，够长够长够长够长。" }); chats[key] = { chat: c, meta: {}, id: "chat-" + key, char: 1, name: "顾寒" }; }
+            const t = chats[key]; cur = key;
+            b.tavern.chat.length = 0; t.chat.forEach(m => b.tavern.chat.push(m));
+            b.tavern.chatMetadata = t.meta; b.tavern.characterId = t.char; b.tavern.name2 = t.name; b.tavern.getCurrentChatId = () => t.id;
+            await b.tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+        };
+        return Object.assign(b, { st, sent, d, go, mes: i => String(b.tavern.chat[i].mes || ""),
+            status: () => d.querySelector("#ipe-status").textContent, preview: () => d.querySelector("#ipe-preview-text").value, last: () => sent[sent.length - 1] || "" });
+    }
+    // 一：A 卡 10 楼，去 B 卡跑到第 80 楼，再回来
+    let r = setup(10);
+    await r.w.eval("onExtract")(); r.w.eval("onInject")();
+    ok(r.mes(9).indexOf("<draw>take 1.</draw>") >= 0, "A 卡第 10 楼：提取、注入", r.mes(9).slice(-40));
+    await r.go("B", 80);
+    ok(r.preview() === "" && r.d.querySelector("#ipe-btn-inject").disabled, "换到 B 卡：预览框清空、「确认注入」灰掉（上一张卡的描述不能贴到这张卡的楼上）", r.preview());
+    await r.w.eval("onExtract")(); r.w.eval("onInject")();
+    ok(r.mes(79).indexOf("<draw>take 2.</draw>") >= 0, "B 卡第 80 楼：提取、注入");
+    await r.go("A");
+    r.st.activeBaseTemplate = "tpl_2";
+    r.w.eval("onReinject")();
+    ok(r.mes(9).indexOf("<draw>INK: take 1.</draw>") >= 0 && r.mes(9).indexOf("take 2") < 0, "回到 A 卡点「换画风重注入」：按 A 卡第 10 楼自己的记录重拼（以前报「找不到要注入的楼」）", r.status() + " / " + r.mes(9).slice(-50));
+    let before = r.sent.length;
+    await r.w.eval("onReroll")();
+    ok(r.sent.length === before + 1 && r.last().indexOf("第 10 层正文") >= 0, "回到 A 卡点「重新生成」：真的发了请求，提的是 A 卡第 10 楼（以前记着 B 卡的第 80 楼，A 卡没这楼，一声不吭就退出）", r.status());
+    ok((r.mes(9).match(/<draw>/g) || []).length === 1 && r.mes(9).indexOf("take 3.") >= 0, "换掉原来那段，楼里只留新的一段", r.mes(9).slice(-50));
+    // 二：A 卡楼更多。以前不是没反应，是提错楼
+    r = setup(100);
+    await r.go("B", 20);
+    await r.w.eval("onExtract")();
+    await r.go("A");
+    await r.w.eval("onReroll")();
+    ok(r.last().indexOf("第 100 层正文") >= 0 && r.mes(99).indexOf("<draw>") >= 0 && r.mes(19).indexOf("<draw>") < 0, "A 卡楼比 B 卡多：提的是 A 卡最后一楼（第 100 楼），不是 B 卡记着的第 20 楼", r.last().slice(-40));
+    // 三：自动提取还在等，人已经换了聊天
+    r = setup(10); r.st.autoInject = true; r.st.autoInjectDelay = 500; r.st.enabled = true;
+    r.tavern.eventSource.emit("MESSAGE_RECEIVED", 9, "normal");
+    await wait(50);
+    await r.go("B", 20);
+    await wait(900);
+    ok(r.sent.length === 0 && r.mes(9).indexOf("<draw>") < 0, "A 卡新楼的自动提取还在等、人换到了 B 卡：不拿 B 卡同一个楼号去提，也不往 B 卡贴", r.status());
+    // 四：提取在路上就换了聊天
+    r = setup(10); r.st.autoInject = true;
+    let release = null, aborted = false;
+    const late = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "late take." } }] }) });
+    r.w.fetch = (u, o) => new Promise((res, rej) => {
+        release = () => res(late());
+        if (o && o.signal) o.signal.addEventListener("abort", () => { aborted = true; const e = new Error("aborted"); e.name = "AbortError"; rej(e); }, { once: true });
+    });
+    let p = r.F("runExtract")(r.tavern.chat[9].mes, "", true, 9);
+    await wait(30);
+    await r.go("B", 20);
+    if (release) release();
+    await p; await wait(50);
+    ok(aborted, "提取还在路上就换了聊天：请求直接掐掉（回来也没处贴，不白等）");
+    ok(r.mes(9).indexOf("<draw>") < 0 && r.preview() === "" && !r.F("imgState")().processing, "不往 B 卡贴、不进预览框、不卡在「提取中」", r.status());
+    ok(r.status().indexOf("换了聊天") >= 0, "状态行说那份作废了", r.status());
+    r = setup(10); r.st.autoInject = true;
+    r.w.fetch = () => new Promise(res => { release = () => res(late()); });   // 中转不理会掐断，结果晚到
+    p = r.F("runExtract")(r.tavern.chat[9].mes, "", true, 9);
+    await wait(30);
+    await r.go("B", 20);
+    release(); await p; await wait(50);
+    ok(r.mes(9).indexOf("<draw>") < 0 && r.preview() === "" && !r.tavern.chatMetadata.ipe_img_layers_v1, "掐不断、结果晚到：照样不贴、不进预览框、不写这个聊天的数据", r.status());
+    // 五：等着的自动重试，换聊天就取消
+    r = setup(10);
+    r.w.eval("ipeScheduleApiRetry")(r.tavern.chat[9].mes, "", true, 9, 0, "API 503：busy", null, new Error("API 503：busy"));
+    ok(r.F("imgState")().retry, "（先排上一次自动重试）");
+    await r.go("B", 20);
+    ok(!r.F("imgState")().retry, "等着的自动重试：换了聊天就取消（不然 10 秒后拿 A 卡的正文去贴 B 卡的楼）");
+    // 六：同一个聊天里，记着的那楼被删了
+    r = setup(10);
+    await r.w.eval("onExtract")();
+    r.tavern.chat.length = 8;
+    before = r.sent.length;
+    await r.w.eval("onReroll")();
+    ok(r.sent.length === before + 1 && r.last().indexOf("第 8 层正文") >= 0, "同一个聊天里记着的那楼被删了：「重新生成」改盯现在最后一条 AI 楼（以前一声不吭）", r.status());
+    // 七：同一个聊天重新载入（没换卡）不清
+    r = setup(10);
+    await r.w.eval("onExtract")();
+    const pv = r.preview();
+    await r.tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(!!pv && r.preview() === pv && r.F("imgState")().idx === 9 && !r.d.querySelector("#ipe-btn-inject").disabled, "同一个聊天重新载入（没换卡）：预览框、盯着的楼、「确认注入」都不动");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
