@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.31.0";
+var IPE_VERSION = "2.32.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -71,6 +71,7 @@ const DEFAULTS = {
     autoInjectDelay: 1800,
     supplementPresetsJson: "[]",   // 2.16.0 补充指令常用短语
     requestTimeout: 0,
+    anthropicNative: false, // 2.32.0 官方直连（api.anthropic.com）走原生接口 /v1/messages：规则吃缓存、能看思考摘要；中转不受影响。默认关
     imgStream: true,       // 2.26.0 生图提取流式接收：边收边看思考与输出，状态行按秒走；关 = 老的整包干等
     imgOpenTimeout: 120,   // 2.26.1 秒。开口时限：生图提取发出后这么多秒还没写出正文第一个字（思考不算）就掐断、自动重来一次，重来还不开口就弹窗劝换模型；开口后只防断流（连续 2 倍没字节）；0 = 不限
     apiEndpoint: "", apiKey: "", model: "",
@@ -1264,6 +1265,7 @@ function ipeLedgerBuildUser(text, extra, atFloor, dry) {
     if (note)  u += "\u3010\u672c\u5361\u8981\u70b9\u3011\n" + note + "\n\n";
     var order = String(st.order || "").trim();
     if (order) u += "\u3010User \u6307\u4ee4\u3011\n" + order + "\n\n";
+    ipeLedgerLastStableLen = u.length;   // 2.32.0 到这儿为止几乎不变（原生接口在这儿打缓存点）
 
     var floorNo = (Number.isFinite(Number(atFloor)) && Number(atFloor) > 0) ? Number(atFloor) : ipeFloorNo();
     var his = ipeLedgerHistoryBlock(dry, floorNo);
@@ -1356,6 +1358,38 @@ function ipeLedgerWatchdog(controller, idleMs) {
    2.26.0 onDelta(正文新字, 思考新字)：生图提取要把思考和输出边收边显示；挂账不传，照旧只计数、不留思考原文。 */
 async function ipeLedgerReadStream(res, onChunk, onProgress, onDelta) {
     var content = "", reasonChars = 0, sawData = false, buf = "", allText = "", finish = "";
+    var native = null;   // 2.32.0 收到的是官方原生事件（message_start / content_block_delta…）时记：用量、谁答的、拒答详情
+    function nativeUsage(u) {
+        if (!u || typeof u !== "object") return;
+        native.usage = native.usage || {};
+        ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].forEach(function(k){ if (u[k] != null) native.usage[k] = u[k]; });
+    }
+    /* 原生事件一条。正文在 text_delta 里，思考摘要在 thinking_delta 里；ping、content_block_stop、message_stop 这些不用管 */
+    function handleNative(j) {
+        native = native || { usage: null, model: "", fallback: "", stopDetails: null };
+        var piece = "", r = "";
+        if (j.type === "message_start") { var m = j.message || {}; if (m.model) native.model = String(m.model); nativeUsage(m.usage); }
+        else if (j.type === "content_block_start") {
+            var cb = j.content_block || {};
+            if (cb.type === "fallback") native.fallback = (cb.to && cb.to.model) || native.model || "另一个模型";
+            else if (cb.type === "text" && typeof cb.text === "string") piece = cb.text;
+            else if (cb.type === "thinking" && typeof cb.thinking === "string") r = cb.thinking;
+        }
+        else if (j.type === "content_block_delta") {
+            var d = j.delta || {};
+            if (d.type === "text_delta" && typeof d.text === "string") piece = d.text;
+            else if (d.type === "thinking_delta" && typeof d.thinking === "string") r = d.thinking;
+        }
+        else if (j.type === "message_delta") {
+            var md = j.delta || {};
+            if (md.stop_reason) finish = String(md.stop_reason);
+            if (md.stop_details || j.stop_details) native.stopDetails = md.stop_details || j.stop_details;
+            nativeUsage(j.usage);
+        }
+        content += piece;
+        reasonChars += r.length;
+        if (typeof onDelta === "function" && (piece || r)) { try { onDelta(piece, r); } catch(eD) {} }
+    }
     var lastReport = 0;
     function report(force) {
         if (typeof onProgress !== "function") return;
@@ -1376,6 +1410,7 @@ async function ipeLedgerReadStream(res, onChunk, onProgress, onDelta) {
             var em = (j.error && (j.error.message || j.error.msg)) || JSON.stringify(j.error);
             throw new Error("API 流内报错：" + String(em).slice(0, 180));
         }
+        if (j && typeof j.type === "string" && !j.choices && /^(message_|content_block_|ping$)/.test(j.type)) { handleNative(j); return; }
         var ch = j && j.choices && j.choices[0];
         if (!ch) return;
         if (ch.finish_reason) finish = String(ch.finish_reason);
@@ -1424,16 +1459,20 @@ async function ipeLedgerReadStream(res, onChunk, onProgress, onDelta) {
     }
     if (buf) handleLine(buf);
     report(true);
-    if (sawData) return { text: content.trim(), finish: finish, reasonChars: reasonChars };
+    if (sawData) return { text: content.trim(), finish: finish, reasonChars: reasonChars, native: native };
     // 一行 data: 都没见到 → 不是 SSE，按整包 JSON 处理
     var data;
     try { data = JSON.parse(allText); }
     catch(e) { throw new Error("返回既不是 SSE 也不是 JSON：" + allText.slice(0, 160)); }
-    return { text: parseChatResponse(data), finish: ipeLedgerFinishOf(data), reasonChars: 0 };
+    var nm = ipeNativeMetaOf(data);
+    return { text: parseChatResponse(data), finish: ipeLedgerFinishOf(data), reasonChars: nm ? nm.thinking.length : 0, native: nm };
 }
 
 function ipeLedgerFinishOf(data) {
-    try { var ch = data && data.choices && data.choices[0]; return ch && ch.finish_reason ? String(ch.finish_reason) : ""; }
+    try {
+        if (data && data.type === "message" && data.stop_reason) return String(data.stop_reason);   // 2.32.0 官方原生格式
+        var ch = data && data.choices && data.choices[0]; return ch && ch.finish_reason ? String(ch.finish_reason) : "";
+    }
     catch(e) { return ""; }
 }
 
@@ -1444,6 +1483,7 @@ function ipeLedgerEmptyReason(finish, reasonChars) {
         return "副 AI 回了个空：finish_reason=length，思考把输出额度吃光了，轮到写账本时一个 token 都不剩。"
              + "把「思考强度」调成 low；或在「输出上限」填个大数（如 16000）压过中转的默认值。";
     }
+    if (f === "refusal") return "副 AI 回了个空：官方拒答了（stop_reason=refusal）。换个模型，或者改写这楼再试。";
     if (f === "content_filter") return "副 AI 回了个空：finish_reason=content_filter，被内容过滤拦下了。换个模型或改写本卡要点。";
     return "副 AI 回了个空（流式已收完，正文为零字，finish_reason=" + (finish || "无")
          + (reasonChars > 0 ? "，思考 " + reasonChars + " 字" : "") + "）";
@@ -1464,8 +1504,6 @@ async function ipeLedgerCallAPICore(text, extra, atFloor, userOverride) {
     if (!item.model) throw new Error("这套 API 预设没有选模型");
     if (userOverride == null) ipeLedgerModeIngest(text, atFloor);      // 先读这楼的场景标记，再拼 system；压缩账本不读楼，沿用当前模式
 
-    var headers = ipeApiHeaders(item.endpoint, item.key, true);
-
     var useStream = cfg().ledgerStream !== false;
 
     // system 只放用户预设，代码不再追加任何内容
@@ -1477,6 +1515,7 @@ async function ipeLedgerCallAPICore(text, extra, atFloor, userOverride) {
         ],
         stream: useStream
     };
+    var stableLen = userOverride != null ? 0 : ipeLedgerLastStableLen;   // 2.32.0 原生接口：user 开头不变的那段有多长（打缓存点用）
     if (!ipeLedgerIsReasoningModel(item.model) && ipeApiTempOk(item.endpoint, item.model)) body.temperature = 0.2;
     ipeApiEffortApply(body, item.endpoint, item.model, cfg().ledgerReasoningEffort);   // 2.28.11 官方发 output_config.effort，中转发 reasoning_effort
     var maxT = Math.floor(Number(cfg().ledgerMaxTokens) || 0);
@@ -1508,26 +1547,26 @@ async function ipeLedgerCallAPICore(text, extra, atFloor, userOverride) {
 
     try {
         dog.kick();
-        var res = await fetch(buildChatUrl(item.endpoint), {
-            method: "POST", headers: headers, body: JSON.stringify(body),
-            signal: ipeLedgerAbort ? ipeLedgerAbort.signal : undefined
-        });
+        var res = await ipeApiChatFetch(item.endpoint, item.key, body, { signal: ipeLedgerAbort ? ipeLedgerAbort.signal : undefined, stableLen: stableLen });
         dog.kick();
         if (!res.ok) {
             var errRaw = await res.text();
             throw new Error("API " + res.status + "：" + ipeApiErrBody(res.status, errRaw, 180));
         }
-        var out, finish = "", reasonChars = 0;
+        var out, finish = "", reasonChars = 0, nativeMeta = null;
         if (useStream) {
             var got = await ipeLedgerReadStream(res, function(){ dog.relax(); dog.kick(); }, progress);
-            out = got.text; finish = got.finish; reasonChars = got.reasonChars;
+            out = got.text; finish = got.finish; reasonChars = got.reasonChars; nativeMeta = got.native || null;
         } else {
             var raw = await res.text();
             var data;
             try { data = JSON.parse(raw); } catch(e) { throw new Error("返回不是 JSON：" + raw.slice(0, 160)); }
             out = parseChatResponse(data);
             finish = ipeLedgerFinishOf(data);
+            nativeMeta = ipeNativeMetaOf(data);
+            if (nativeMeta) reasonChars = nativeMeta.thinking.length;
         }
+        ipeNativeAfter("挂账", nativeMeta, finish);   // 2.32.0 原生回复：记用量；官方拒答就在这儿抛（半截账本不能落）
         // 2.27.3 开头的 <think>…</think> 是思考不是账本：剥掉再交出去，免得副 AI 没写包裹时整段思考被当成账本落下
         var spOut = ipeSplitThink(out);
         if (spOut.think || spOut.open) { reasonChars += spOut.think.length; out = spOut.out.trim(); }
@@ -1941,7 +1980,7 @@ var ipeLedgerQueued = false;          // 2.18.0 补挂队列：跑着的时候�
 /* 可重试：5xx / 429 / 408 / 网络错 / 中转回了非 JSON。看门狗超时不重试——默认 300 秒一次，再等一轮太久，按老规矩计失败。 */
 var IPE_LEDGER_RETRYABLE_RE = /^API (5\d\d|429|408)|Failed to fetch|NetworkError|Load failed|network|ECONN|socket|返回不是 JSON/i;
 function ipeLedgerRetryable(e) {
-    if (!e || ipeLedgerIsAbort(e)) return false;
+    if (!e || ipeLedgerIsAbort(e) || e.ipeRefusal) return false;   // 2.32.0 官方拒答不重试
     return IPE_LEDGER_RETRYABLE_RE.test(String(e.message || e));
 }
 async function ipeLedgerRun(targetIdx, silent, retryAttempt) {
@@ -5213,6 +5252,130 @@ function ipeEffortStatusText(eff) {
     return eff ? "思考强度 = " + eff + "（中转发 reasoning_effort；A 社官方发 output_config.effort）" : "思考强度：自动（不发，模型自己定）";
 }
 
+/* ============================================================
+   🅰 官方 Claude 走原生接口 /v1/messages（2.32.0，开关默认关）
+   官方的 OpenAI 兼容层（/v1/chat/completions）是给「先试试」用的：不支持提示词缓存、不回思考内容。
+   挂账每楼都把同一份几千字的规则原样发一遍，走兼容层每次都按全价算；原生接口可以在规则末尾打一个缓存点，
+   之后读缓存只算一成左右的价钱。开关开着、地址又是 api.anthropic.com 时，请求在出门前换成原生格式：
+     · system 单独放（一组文字块），最后一块打缓存点；user 开头几乎不变的那段（本卡要点 / 锚点 / 提取规则）单独成块，也打一个
+     · 缓存留 1 小时：聊天是一楼一楼隔几分钟来的，默认的 5 分钟经常刚好过期，过期了等于白交一次写缓存的加价
+     · max_tokens 原生接口必填；temperature 不发（新版接口一律 400）
+     · 这代模型（5 系、Fable）本来就在思考，要一份摘要回来放进实况框；4 系不发 thinking 就不想，不替人打开
+     · 官方的安全检查拦下请求时（stop_reason=refusal）说人话、不落账、不重试；支持的模型带上官方的回退参数，由官方换模型重跑
+   中转、别家的地址、开关关着：一个字节都不变。插件里其它代码照旧只认 OpenAI 那种格式，转换只发生在出门和进门这两处。
+   ============================================================ */
+var IPE_NATIVE_VERSION = "2026-10-21";
+var IPE_NATIVE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+var IPE_NATIVE_CACHE = { type: "ephemeral", ttl: "1h" };
+var ipeNativeNoFallback = {};      // 这个页面里，哪些模型带 fallbacks 被官方 400 过：之后不带
+var ipeImgLastStableLen = 0;       // 生图 user 开头那段不变的有多长（buildVisionUserPrompt 记）
+var ipeLedgerLastStableLen = 0;    // 挂账 user 开头那段不变的有多长（ipeLedgerBuildUser 记）
+function ipeNativeOn(endpoint) {
+    try { return cfg().anthropicNative === true && ipeIsAnthropicOfficial(endpoint); } catch(e) { return false; }
+}
+function ipeNativeModel(model) {
+    var r = String(model || "").trim().toLowerCase().match(/claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
+    return r ? { fam: r[1], major: Number(r[2]), minor: r[3] ? Number(r[3]) : 0 } : null;
+}
+/* 5 系和 Fable / Mythos：不发 thinking 也在想（自适应），发 adaptive + summarized 只是把摘要要回来。
+   4.6～4.8 不发就不想，发了等于替人打开思考、多花输出；更老的不认 adaptive，发了 400。这两类都不发。 */
+function ipeNativeThinkingOk(model) {
+    var m = ipeNativeModel(model);
+    return !!m && (m.fam === "fable" || m.fam === "mythos" || m.major >= 5);
+}
+/* 官方文档点名默认该带回退的几个模型；别的不带（Haiku 5.5 没有服务端回退，老模型不认这个参数） */
+function ipeNativeFallbackOk(model) {
+    var id = String(model || "").trim().toLowerCase();
+    if (ipeNativeNoFallback[id]) return false;
+    return /^claude-(fable-5-[12]|opus-5(-5)?|sonnet-5-5)(-\d{8})?$/.test(id);
+}
+function ipeNativeText(content) {
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content.map(function(p){ return typeof p === "string" ? p : (p && typeof p.text === "string" ? p.text : ""); }).join("");
+}
+/* 插件内部统一的 OpenAI 格式请求体 → /v1/messages 的请求体。o.stableLen：user 开头有多少字是几乎不变的 */
+function ipeNativeBody(body, o) {
+    o = o || {};
+    var sys = [], msgs = [];
+    (body.messages || []).forEach(function(m){
+        if (!m) return;
+        var text = ipeNativeText(m.content);
+        if (m.role === "system") { if (text.trim()) sys.push({ type: "text", text: text }); return; }
+        msgs.push({ role: m.role === "assistant" ? "assistant" : "user", content: text });
+    });
+    if (sys.length) sys[sys.length - 1].cache_control = IPE_NATIVE_CACHE;
+    var n = Math.floor(Number(o.stableLen) || 0);
+    if (n > 0 && msgs.length && msgs[0].role === "user") {
+        var full = msgs[0].content, head = full.slice(0, n), rest = full.slice(n);
+        if (head.trim() && rest.trim()) msgs[0].content = [{ type: "text", text: head, cache_control: IPE_NATIVE_CACHE }, { type: "text", text: rest }];
+    }
+    var mt = Math.floor(Number(body.max_tokens || body.max_completion_tokens) || 0);
+    var out = { model: body.model, max_tokens: mt > 0 ? mt : (body.stream ? 32000 : 16000), messages: msgs };
+    if (sys.length) out.system = sys;
+    if (body.stream) out.stream = true;
+    if (ipeNativeThinkingOk(body.model)) out.thinking = { type: "adaptive", display: "summarized" };
+    if (body.output_config && body.output_config.effort) out.output_config = { effort: body.output_config.effort };
+    if (ipeNativeFallbackOk(body.model)) out.fallbacks = "default";
+    return out;
+}
+function ipeNativeHeaders(key, nb) {
+    var h = { "Content-Type": "application/json", "anthropic-version": IPE_NATIVE_VERSION, "anthropic-dangerous-direct-browser-access": "true" };
+    if (key) h["x-api-key"] = key;
+    if (nb && nb.fallbacks) h["anthropic-beta"] = IPE_NATIVE_FALLBACK_BETA;
+    return h;
+}
+/* 所有聊天请求都从这儿出门。中转、官方兼容层：原样发；官方 + 开关开着：换成原生格式。
+   o.signal 中止信号；o.fetcher(url, init) 调用方自己的 fetch 包装（带超时的那种）；o.stableLen 见上。返回 fetch 的 Response */
+async function ipeApiChatFetch(endpoint, key, body, o) {
+    o = o || {};
+    var doFetch = typeof o.fetcher === "function" ? o.fetcher : function(url, init){ return fetch(url, init); };
+    if (!ipeNativeOn(endpoint)) {
+        return doFetch(buildChatUrl(endpoint), { method: "POST", headers: ipeApiHeaders(endpoint, key, true), body: JSON.stringify(body), signal: o.signal });
+    }
+    var url = normalizeApiBase(endpoint) + "/messages";
+    for (var attempt = 0; ; attempt++) {
+        var nb = ipeNativeBody(body, o);
+        var res = await doFetch(url, { method: "POST", headers: ipeNativeHeaders(key, nb), body: JSON.stringify(nb), signal: o.signal });
+        if (res.ok || res.status !== 400 || !nb.fallbacks || attempt > 0) return res;
+        /* 带着 fallbacks 被 400：看报错是不是冲着它来的（这个模型不支持、beta 头换代了）。是就去掉重发一次，这个页面里之后都不带；
+           别的 400（余额不够、参数不对）原样交回去报错 */
+        var raw = "";
+        try { raw = await (typeof res.clone === "function" ? res.clone() : res).text(); } catch(e) {}
+        if (!/fallback/i.test(raw)) return res;
+        ipeNativeNoFallback[String(body.model || "").trim().toLowerCase()] = true;
+        ipeLog("接口", "官方不收这个模型的回退参数（fallbacks），去掉重发一次；这个页面里之后都不带");
+    }
+}
+/* 一份原生回复（整包）里除了正文以外要留的：用量、实际是哪个模型答的、有没有换过模型、拒答详情、思考摘要 */
+function ipeNativeMetaOf(data) {
+    if (!data || data.type !== "message" || !Array.isArray(data.content)) return null;
+    var meta = { usage: data.usage || null, model: data.model || "", fallback: "", stopDetails: data.stop_details || null, thinking: "" };
+    data.content.forEach(function(b){
+        if (!b) return;
+        if (b.type === "fallback") meta.fallback = (b.to && b.to.model) || data.model || "另一个模型";
+        if (b.type === "thinking" && typeof b.thinking === "string") meta.thinking += b.thinking;
+    });
+    return meta;
+}
+/* 收完一份原生回复之后：用量记进体检流水（缓存有没有生效只能看这个）；拒答就抛错——半截正文不能当结果用 */
+function ipeNativeAfter(side, meta, finish) {
+    if (!meta) return;
+    try {
+        var u = meta.usage || {}, num = function(v){ return Math.max(0, Math.floor(Number(v) || 0)); };
+        var rd = num(u.cache_read_input_tokens), wr = num(u.cache_creation_input_tokens), fresh = num(u.input_tokens);
+        ipeLog("接口", side + " 用量：输入 " + (rd + wr + fresh) + "（缓存读 " + rd + "｜缓存写 " + wr + "｜没缓存 " + fresh + "）｜输出 " + num(u.output_tokens) + " tokens"
+            + (meta.fallback ? "｜官方拦下后由 " + meta.fallback + " 接手" : ""));
+    } catch(e) {}
+    if (String(finish || "").toLowerCase() !== "refusal") return;
+    var sd = meta.stopDetails || {};
+    var err = new Error("官方拒答了（stop_reason=refusal" + (sd.category ? "，类别 " + sd.category : "") + "）"
+        + (sd.explanation ? "：" + String(sd.explanation).slice(0, 120) : "")
+        + "。这楼的内容被官方的安全检查拦下了：换个模型，或者改写这楼再试。同样的内容重发还是会被拦，所以不自动重试");
+    err.ipeRefusal = true;
+    throw err;
+}
+
 /* fetch 自己抛的 TypeError（Safari「Load failed」、Chrome「Failed to fetch」）= 浏览器没让插件看到任何回应：
    多半是这个地址不让网页直接调（跨域被拦），或者网络到不了。具体原因浏览器不告诉插件。 */
 function ipeIsNetworkError(e) {
@@ -5490,26 +5653,20 @@ async function testConnection() {
         return;
     }
 
-    var url = buildChatUrl(c.apiEndpoint);
-    var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, true);
-
     var model = c.model || "gpt-4o-mini";
 
     try {
         setStatus("正在测试连接…", "#6ec577");
 
-        var res = await ipeFetchWithTimeout(url, {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify({
-                model: model,
-                messages: [
-                    { role: "user", content: "Hi" }
-                ],
-                max_tokens: 5,
-                stream: false
-            })
-        }, Number(cfg().requestTimeout || 0));
+        // 2.32.0 跟正式请求走同一个出口：开着原生接口测的就是原生接口
+        var res = await ipeApiChatFetch(c.apiEndpoint, c.apiKey, {
+            model: model,
+            messages: [
+                { role: "user", content: "Hi" }
+            ],
+            max_tokens: ipeNativeOn(c.apiEndpoint) ? 64 : 5,
+            stream: false
+        }, { fetcher: function(url, init){ return ipeFetchWithTimeout(url, init, Number(cfg().requestTimeout || 0)); } });
 
         var raw = await res.text();
 
@@ -5517,7 +5674,7 @@ async function testConnection() {
             throw new Error("HTTP " + res.status + "：" + ipeApiErrBody(res.status, raw, 180));
         }
 
-        setStatus("连接成功 ✓", "#6ec577");
+        setStatus("连接成功 ✓" + (ipeNativeOn(c.apiEndpoint) ? "（官方原生接口）" : ""), "#6ec577");
     } catch(e) {
         console.error("[IPE] testConnection:", e);
         setStatus("连接失败：" + e.message + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a");
@@ -5526,6 +5683,11 @@ async function testConnection() {
 
 function parseChatResponse(data) {
     if (!data) return "";
+
+    // 2.32.0 官方原生格式：content 是一组块，正文只取 text 块（前面可能排着思考块、换模型的标记）
+    if (data.type === "message" && Array.isArray(data.content)) {
+        return data.content.map(function(b){ return (b && b.type === "text" && typeof b.text === "string") ? b.text : ""; }).join("").trim();
+    }
 
     if (data.choices && data.choices[0]) {
         var ch = data.choices[0];
@@ -5945,6 +6107,7 @@ function ipeImgRefreshLayerUI() {
 function ipeImgStreamRefreshUI() {
     var doc = ipeRootDocument();
     ["ipe-img-stream", "iped-img-stream"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().imgStream !== false; });
+    ["ipe-native", "iped-native"].forEach(function(id){ var el = q("#" + id); if (el) el.checked = cfg().anthropicNative === true; });
     ["ipe-img-open", "iped-img-open"].forEach(function(id){
         var el = q("#" + id); if (!el || doc.activeElement === el) return;
         var v = String(Math.max(0, Math.floor(Number(cfg().imgOpenTimeout) || 0)));
@@ -5952,6 +6115,17 @@ function ipeImgStreamRefreshUI() {
     });
 }
 function ipeImgStreamBindUI() {
+    ["ipe-native", "iped-native"].forEach(function(id){
+        var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
+        el.addEventListener("change", function(){
+            save("anthropicNative", !!el.checked); ipeImgStreamRefreshUI();
+            var official = false;
+            try { official = ipeIsAnthropicOfficial(cfg().apiEndpoint) || ipeIsAnthropicOfficial((ipeLedgerApiItem() || {}).endpoint); } catch(e) {}
+            setStatus(el.checked
+                ? "官方直连改走原生接口：规则那段按缓存价算、实况框能看到思考摘要" + (official ? "。点一下「测试连接」确认通不通" : "。现在选的不是官方地址（api.anthropic.com），这个开关暂时不起作用；中转不受影响")
+                : "官方直连改回兼容层（跟以前一样）", "#6ec577");
+        });
+    });
     ["ipe-img-stream", "iped-img-stream"].forEach(function(id){
         var el = q("#" + id); if (!el || el.__ipeBound) return; el.__ipeBound = true;
         el.addEventListener("change", function(){
@@ -6536,6 +6710,7 @@ function buildVisionUserPrompt(text, supplement, lockOverride) {
     var activeRules = ipeGetRuleValue();
     if (activeRules) user += "【提取规则】\n" + activeRules + "\n\n";
 
+    ipeImgLastStableLen = user.length;   // 2.32.0 到这儿为止几乎不变（原生接口在这儿打缓存点）
     user += "【正文内容】\n" + ipeTrimSourceText(ipeLedgerStripImageTag(text));   // 2.28.4 楼尾那段旧 <draw> 不算正文，重提时副 AI 不照着旧提示词抄
 
     if (supplement) user += "\n\n【补充指令】\n" + supplement;
@@ -6650,7 +6825,6 @@ async function ipeImgChatCore(body, opts) {
     var c = cfg();
     var useStream = c.imgStream !== false;
     body.stream = useStream;
-    var headers = ipeApiHeaders(c.apiEndpoint, c.apiKey, true);
     if (!ipeApiTempOk(c.apiEndpoint, body.model)) delete body.temperature;   // 2.28.8 官方直连 + Claude 4.7 起：发了就 400
     ipeApiEffortApply(body, c.apiEndpoint, body.model, c.imgReasoningEffort);   // 2.28.11 思考强度：提取、外貌整理都走这里
     var controller = opts.controller || (typeof AbortController !== "undefined" ? new AbortController() : null);
@@ -6709,17 +6883,17 @@ async function ipeImgChatCore(body, opts) {
     paint(true);
     try {
         if (!deadline) dog.kick();
-        var res = await ipeFetchWithTimeout(buildChatUrl(c.apiEndpoint), {
-            method: "POST", headers: headers, body: JSON.stringify(body),
-            signal: controller ? controller.signal : undefined
-        }, Number(c.requestTimeout || 0));
+        var res = await ipeApiChatFetch(c.apiEndpoint, c.apiKey, body, {
+            signal: controller ? controller.signal : undefined, stableLen: opts.stableLen,
+            fetcher: function(url, init){ return ipeFetchWithTimeout(url, init, Number(c.requestTimeout || 0)); }
+        });
         if (!deadline) dog.kick();
         connected = true; paint(true);
         if (!res.ok) {
             var errRaw = await res.text();
             throw new Error("API " + res.status + "：" + ipeApiErrBody(res.status, errRaw, 220));
         }
-        var text = "", finish = "";
+        var text = "", finish = "", nativeMeta = null;
         if (useStream) {
             var got = await ipeLedgerReadStream(res, function(){
                 if (!deadline) { dog.relax(); dog.kick(); }
@@ -6730,8 +6904,9 @@ async function ipeImgChatCore(body, opts) {
                 if (!opened && piece && ipeSplitThink(content).out.trim()) markOpened();
                 paint(false);
             });
-            text = got.text; finish = got.finish;
+            text = got.text; finish = got.finish; nativeMeta = got.native || null;
             if (!content && text) content = text;   // 中转不认流式、整包 JSON 回来：没有逐块的新字，整段一次到
+            if (nativeMeta && nativeMeta.thinking && !reasoning) reasoning = nativeMeta.thinking.slice(0, REASON_KEEP);
         } else {
             var raw = await res.text();
             var data;
@@ -6739,13 +6914,16 @@ async function ipeImgChatCore(body, opts) {
             text = parseChatResponse(data); finish = ipeLedgerFinishOf(data);
             content = text;
             try { var rc = data.choices[0].message.reasoning_content; if (typeof rc === "string" && rc.trim() !== text) reasoning = rc.slice(0, REASON_KEEP); } catch(eR) {}
+            nativeMeta = ipeNativeMetaOf(data);
+            if (nativeMeta && nativeMeta.thinking) reasoning = nativeMeta.thinking.slice(0, REASON_KEEP);
         }
         markOpened();   // 收完了：不管开没开口都不能再掐
+        ipeNativeAfter("生图", nativeMeta, finish);   // 2.32.0 原生回复：记用量；官方拒答就在这儿抛
         var sp = ipeSplitThink(text);
         var out = sp.out.trim();
         var f = String(finish || "").toLowerCase();
         /* 老整包那条路（parseChatResponse）在正文空、只有 reasoning_content 时拿它兜底——有的中转把正文塞在那儿。流式照做，被截断的不算 */
-        if (!out && !sp.think && reasoning.trim() && f !== "length" && f !== "max_tokens") out = reasoning.trim();
+        if (!out && !sp.think && !nativeMeta && reasoning.trim() && f !== "length" && f !== "max_tokens") out = reasoning.trim();   // 原生接口的思考摘要不是正文，不顶
         if (!out) {
             var thinkN = reasoning.length + sp.think.length;
             if (f === "length" || f === "max_tokens") throw new Error("模型返回为空，finish_reason=length：输出被截断" + (thinkN ? "（思考已用掉 " + thinkN + " 字）" : "") + "。插件不主动设 max_tokens，请检查中转 / 模型的默认输出上限，或换个不思考的模型。");
@@ -6803,7 +6981,7 @@ async function callAPI(text, supplement, lockOverride, statusText) {
     if (imgTemp != null) body.temperature = imgTemp;
 
     // 2.26.0 走流式（stream 由 ipeImgChat 按「流式接收」开关填）：连没连上、在想什么、写了什么，状态行和实况框边收边显示
-    return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "", openLimit: true });
+    return ipeImgChat(body, { controller: ipeAbortController, title: "🎨 提取实况", status: statusText || "", openLimit: true, stableLen: ipeImgLastStableLen });
 }
 
 /* ============================================================
@@ -6891,7 +7069,7 @@ function ipeDiagReport() {
         if (!String(it.endpoint || "").trim()) warn.push("生图的 API 地址没填（生图页 → API 配置）");
         else if (!String(it.model || "").trim()) warn.push("生图的 API 没选模型（生图页 → API 配置 → 加载模型）");
         return "「" + (it.name || "") + "」" + ipeLogHost(it.endpoint) + " · " + (it.model || "没选模型") + "｜key " + (it.key ? "已填" : "没填")
-            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连" : "") + "｜流式 " + onoff(c.imgStream !== false)
+            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连（" + (c.anthropicNative === true ? "原生接口" : "兼容层") + "）" : "") + "｜流式 " + onoff(c.imgStream !== false)
             + "｜思考强度 " + (c.imgReasoningEffort || "自动") + "｜温度 " + (c.imgTemperature === "" || c.imgTemperature == null ? "不发" : c.imgTemperature);
     });
     line("画风模板", function(){
@@ -6934,7 +7112,7 @@ function ipeDiagReport() {
         if (!it) { if (c.ledgerAutoRun === true) warn.push("自动挂账开着，但没选挂账用哪套 API（挂账页 → 副 AI 连接）"); return "还没选"; }
         if (!String(it.model || "").trim()) warn.push("挂账用的那套 API 没选模型");
         return "「" + (it.name || "") + "」" + ipeLogHost(it.endpoint) + " · " + (it.model || "没选模型") + "｜key " + (it.key ? "已填" : "没填")
-            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连" : "") + "｜流式 " + onoff(c.ledgerStream !== false)
+            + (ipeIsAnthropicOfficial(it.endpoint) ? "｜A 社官方直连（" + (c.anthropicNative === true ? "原生接口" : "兼容层") + "）" : "") + "｜流式 " + onoff(c.ledgerStream !== false)
             + "｜思考强度 " + (c.ledgerReasoningEffort || "自动") + "｜输出上限 " + (Number(c.ledgerMaxTokens) > 0 ? c.ledgerMaxTokens : "不发");
     });
     line("挂账规则", function(){ return "「" + (ipePresetItem.apply(null, LP).name || "") + "」" + ipeCardLockNote("lrule"); });
@@ -7027,6 +7205,7 @@ function ipeIsConfigError(e) {
 
 function ipeShouldRetryApiError(e, userAbort) {
     if (userAbort) return false;
+    if (e && e.ipeRefusal) return false;   // 2.32.0 官方拒答：同样的内容重发还是被拦
     if (ipeIsConfigError(e)) return false;
     return true;
 }
@@ -7811,6 +7990,7 @@ function createPanel() {
         '<div id="ipe-models-status" class="ipe-hint" style="display:none;white-space:pre-wrap;word-break:break-all"></div>'+
         '<div class="ipe-hint">可保存多个 API 预设；切换预设会同步地址、key 和模型。</div>'+
         '<div style="color:#888;font-size:12px;margin-top:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row">流式接收（边收边看思考与输出） <input type="checkbox" id="ipe-img-stream"></label></div>'+
+        '<div style="color:#888;font-size:12px;margin-top:6px"><label style="display:flex;align-items:center;gap:6px;flex-direction:row" title="只对 api.anthropic.com 生效，生图和挂账都管；中转不受影响。打开后：每楼都发的规则按缓存价算（省钱）、实况框能看到思考摘要。默认关">官方 Claude 走原生接口（省钱，只管官方地址） <input type="checkbox" id="ipe-native"></label></div>'+
         '<label>开口时限（秒，0 = 不限）<input type="text" id="ipe-img-open" placeholder="120"></label>'+
         '<div class="ipe-hint">流式默认开：模型边想边把字流回来，状态行按秒走，预览区「实况」框里看得到它在想什么、写了什么，连没连上一眼就知道；关了就是老的整包干等。开口时限：提取请求发出后这么多秒还没写出正文第一个字（光思考不算）就掐断，自动重来一次；重来还不开口就弹窗提醒换模型。开口之后不再卡时限，只防中途断流（连续两倍时长一个字节都没有才断）。自动提取人物外貌资料多，不卡开口，只防断流。</div>');
 
@@ -8341,7 +8521,7 @@ function ipeArrangeImageLayout() {
         if (apiBody) {
             var pf = ipeUiFold(d, p + "-img-params", "请求参数（流式 · 开口时限 · 温度 · 思考强度）", false);
             apiBody.appendChild(pf.fold);
-            ipeUiMove(pf.body, [p + "-img-stream", p + "-img-open", p + "-img-temp", p + "-img-effort"]);
+            ipeUiMove(pf.body, [p + "-img-stream", p + "-img-open", p + "-img-temp", p + "-img-effort", p + "-native"]);
         }
         var more = root.querySelector("details.ipe-cast-more");
         if (more && !more.querySelector("input,select,textarea")) more.remove();
@@ -8508,6 +8688,7 @@ function createDrawer() {
     h += '<div id="iped-models-status" style="display:none;color:#888;font-size:12px;margin:4px 0;white-space:pre-wrap;word-break:break-all"></div>';
     h += '<small style="color:#888">可保存多个 API 预设；切换预设会同步地址、key 和模型。</small>';
     h += '<div style="margin-top:6px"><label>流式接收（边收边看思考与输出） <input type="checkbox" id="iped-img-stream"></label></div>';
+    h += '<div style="margin-top:6px"><label title="只对 api.anthropic.com 生效，生图和挂账都管；中转不受影响。打开后：每楼都发的规则按缓存价算（省钱）、实况框能看到思考摘要。默认关">官方 Claude 走原生接口（省钱，只管官方地址） <input type="checkbox" id="iped-native"></label></div>';
     h += '<label>开口时限（秒，0 = 不限）</label><input type="text" id="iped-img-open" class="text_pole" placeholder="120">';
     h += '<small style="color:#888">流式默认开：状态行按秒走，预览区「实况」框边收边显示思考与输出；关了就是老的整包干等。开口时限 = 提取发出后这么多秒还没写出正文第一个字（思考不算）就掐断、自动重来一次，重来还不开口就弹窗提醒换模型；开口后只防断流。</small>';
     h += '<hr><small><b>系统提示</b></small>';
@@ -10172,14 +10353,12 @@ function bindAll() {
             if (!it || !it.endpoint) { ipeLedgerStatus("先选一套 API 预设", "#d4726a"); return; }
             ipeLedgerStatus("正在测试…", "#6ec577");
             try {
-                var hd = ipeApiHeaders(it.endpoint, it.key, true);
-                var res = await ipeFetchWithTimeout(buildChatUrl(it.endpoint), {
-                    method: "POST", headers: hd,
-                    body: JSON.stringify({ model: it.model, messages: [{ role: "user", content: "ping" }], stream: false })
-                }, 30000);
+                var tb = { model: it.model, messages: [{ role: "user", content: "ping" }], stream: false };
+                if (ipeNativeOn(it.endpoint)) tb.max_tokens = 64;
+                var res = await ipeApiChatFetch(it.endpoint, it.key, tb, { fetcher: function(url, init){ return ipeFetchWithTimeout(url, init, 30000); } });
                 var raw = await res.text();
                 if (!res.ok) { ipeLedgerStatus("连接失败 " + res.status + "：" + ipeApiErrBody(res.status, raw, 100), "#d4726a"); return; }
-                ipeLedgerStatus("连接正常 \u2713 模型 " + (it.model || "?"), "#6ec577");
+                ipeLedgerStatus("连接正常 \u2713 模型 " + (it.model || "?") + (ipeNativeOn(it.endpoint) ? "（官方原生接口）" : ""), "#6ec577");
             } catch(e) { ipeLedgerStatus("连接失败：" + (e && e.message ? e.message : e) + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a"); }
         });
     });

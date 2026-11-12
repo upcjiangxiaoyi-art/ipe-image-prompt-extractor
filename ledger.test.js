@@ -3176,6 +3176,173 @@ await (async () => {
     ok(/画风模板：[^\n]*🔒/.test(rep) && /挂账规则：[^\n]*🔒/.test(rep), "🩺 体检里：画风模板、挂账规则两行都标着 🔒", (rep.match(/画风模板：[^\n]*/) || [""])[0] + " / " + (rep.match(/挂账规则：[^\n]*/) || [""])[0]);
 })();
 
+console.log("\n【76】 官方 Claude 走原生接口 /v1/messages（2.32.0，开关默认关）：规则那段打缓存点、思考摘要进实况、拒答说人话；关着、或者填的是中转，一个字节都不变");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const OFFICIAL = "https://api.anthropic.com/v1";
+    const RULE = "原生接口测试用的挂账规则：记伤、记约定、记物品。" + "够长".repeat(30);
+    const sse = evs => evs.map(e => "event: " + e.type + "\ndata: " + JSON.stringify(e) + "\n\n").join("");
+    const stream = (text, o) => {
+        o = o || {};
+        const evs = [{ type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: o.model || "claude-sonnet-5-5", content: [], usage: { input_tokens: 120, cache_creation_input_tokens: o.write || 0, cache_read_input_tokens: o.read == null ? 5200 : o.read, output_tokens: 1 } } }];
+        let i = 0;
+        if (o.fallbackTo) evs.push({ type: "content_block_start", index: i, content_block: { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: o.fallbackTo } } }, { type: "content_block_stop", index: i++ });
+        if (o.think) evs.push({ type: "content_block_start", index: i, content_block: { type: "thinking", thinking: "" } }, { type: "content_block_delta", index: i, delta: { type: "thinking_delta", thinking: o.think } }, { type: "content_block_stop", index: i++ });
+        evs.push({ type: "ping" });
+        if (text) {
+            const half = Math.ceil(text.length / 2);
+            evs.push({ type: "content_block_start", index: i, content_block: { type: "text", text: "" } }, { type: "content_block_delta", index: i, delta: { type: "text_delta", text: text.slice(0, half) } }, { type: "content_block_delta", index: i, delta: { type: "text_delta", text: text.slice(half) } }, { type: "content_block_stop", index: i++ });
+        }
+        const md = { type: "message_delta", delta: { stop_reason: o.stop || "end_turn" }, usage: { output_tokens: 88 } };
+        if (o.stopDetails) md.delta.stop_details = o.stopDetails;
+        evs.push(md, { type: "message_stop" });
+        return { ok: true, status: 200, body: sseBody([sse(evs)]), text: async () => sse(evs) };
+    };
+    const LEDGER = "<ledger>原生接口挂的账本，够长够长够长够长够长够长。</ledger>";
+    function setup(model, on) {
+        const b = boot(10);
+        const st = b.tavern.extensionSettings[b.F("EXT_NAME")];
+        st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "官方", endpoint: OFFICIAL, key: "sk-ant-k", model: model }]);
+        st.ledgerApiProfile = "api_1"; st.apiEndpoint = OFFICIAL; st.apiKey = "sk-ant-k"; st.model = model;
+        st.ledgerAutoRun = false; st.imgLayered = false;
+        st.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp_1", name: "测试规则", value: RULE }]); st.activeLedgerPrompt = "lp_1";
+        st.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "本卡要点", value: "此人体质特殊，外伤两日即愈。" }]); st.activeLedgerNote = "ln_1";
+        st.ledgerNoteCardJson = JSON.stringify({ "char:yuan.png": "ln_1" });
+        if (on) st.anthropicNative = true;
+        const sent = [];
+        const reply = { next: () => stream(LEDGER, { think: "先看这楼发生了什么。" }) };
+        b.w.fetch = async (u, o) => { sent.push({ url: String(u), headers: o.headers || {}, body: JSON.parse(o.body) }); return reply.next(sent.length); };
+        return Object.assign(b, { st, sent, reply, last: () => sent[sent.length - 1], d: b.w.document });
+    }
+    const call = r => r.F("ipeLedgerCallAPI")("这一楼的正文，够长够长够长够长。", "", 10);
+    const logText = r => { try { return r.w.eval("ipeLogAll")().map(x => x[2]).join("\n"); } catch (e) { return ""; } };
+
+    // 一：开关关着（默认）——跟以前一样走兼容层
+    let r = setup("claude-sonnet-5-5", false);
+    r.reply.next = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: LEDGER } }] }) });
+    await call(r);
+    ok(r.last().url === OFFICIAL + "/chat/completions" && r.last().body.messages[0].role === "system" && r.last().headers["anthropic-version"] === "2023-06-01" && !("system" in r.last().body), "开关关着（默认）：官方地址照旧走兼容层 /chat/completions，请求体、版本头都没变", r.last().url);
+    const compatUser = r.last().body.messages[1].content;
+
+    // 二：打开——请求换成 /v1/messages 的格式
+    r = setup("claude-sonnet-5-5", true);
+    let out = await call(r);
+    let q = r.last(), bd = q.body;
+    eq(q.url, OFFICIAL + "/messages", "打开开关：请求发到 /v1/messages");
+    ok(q.headers["x-api-key"] === "sk-ant-k" && q.headers["anthropic-version"] === "2026-10-21" && q.headers["anthropic-dangerous-direct-browser-access"] === "true" && !q.headers["Authorization"], "请求头：x-api-key、anthropic-version 2026-10-21、浏览器直连那个头；不带 Authorization", JSON.stringify(q.headers));
+    ok(Array.isArray(bd.system) && bd.system.length === 1 && bd.system[0].type === "text" && bd.system[0].text.indexOf(RULE) === 0 && JSON.stringify(bd.system[0].cache_control) === JSON.stringify({ type: "ephemeral", ttl: "1h" }), "规则放进 system，整段打缓存点（1 小时）：每楼都发的那几千字以后按缓存价算", JSON.stringify(bd.system).slice(0, 120));
+    ok(bd.messages.length === 1 && bd.messages[0].role === "user" && !bd.messages.some(m => m.role === "system"), "messages 里只剩 user 那一条（system 不能放在里面）");
+    const blocks = bd.messages[0].content;
+    ok(Array.isArray(blocks) && blocks.length === 2 && blocks[0].text.indexOf("【本卡要点】") === 0 && blocks[0].text.indexOf("【账本历史") < 0 && !!blocks[0].cache_control && blocks[1].text.indexOf("【账本历史") === 0 && !blocks[1].cache_control, "user 开头几乎不变的那段（本卡要点、User 指令）单独成块、也打缓存点；每楼都变的在后面、不打", JSON.stringify(blocks).slice(0, 160));
+    eq(blocks.map(x => x.text).join(""), compatUser, "两块拼起来跟兼容层发的 user 一字不差（只是切开，内容没动）");
+    ok(!("temperature" in bd) && !("reasoning_effort" in bd) && !("max_completion_tokens" in bd), "不发 temperature、reasoning_effort（原生接口发了会 400）");
+    ok(bd.max_tokens >= 16000 && bd.stream === true, "max_tokens 原生接口必填：没设输出上限就给个够用的默认值；照常流式", String(bd.max_tokens));
+    eq(JSON.stringify(bd.thinking), JSON.stringify({ type: "adaptive", display: "summarized" }), "思考：自适应 + 要摘要（这代模型本来就在想，以前只是看不到）");
+    ok(bd.fallbacks === "default" && q.headers["anthropic-beta"] === "server-side-fallback-2026-07-01", "官方拒答时自动换官方指定的模型重跑一遍：fallbacks + 对应的 beta 头", JSON.stringify(bd.fallbacks) + " / " + q.headers["anthropic-beta"]);
+    eq(out, LEDGER, "流式收回来：text_delta 拼成正文，thinking_delta 不混进账本");
+    ok(/缓存读 5200/.test(logText(r)) && /输出 88/.test(logText(r)), "🩺 体检流水里记了这次的用量：缓存读了多少、输出多少（看缓存有没有生效就看这行）", logText(r).split("\n").filter(x => x.indexOf("缓存") >= 0).join(" | "));
+
+    // 三：思考强度、输出上限照旧能调
+    r.st.ledgerReasoningEffort = "low"; r.st.ledgerMaxTokens = 9000;
+    await call(r);
+    ok(r.last().body.output_config && r.last().body.output_config.effort === "low" && r.last().body.max_tokens === 9000, "思考强度 → output_config.effort；「输出上限」→ max_tokens", JSON.stringify(r.last().body.output_config) + " / " + r.last().body.max_tokens);
+
+    // 四：没有本卡要点、没有 User 指令：user 不切块
+    r = setup("claude-sonnet-5-5", true);
+    r.st.ledgerNoteCardJson = JSON.stringify({ "char:yuan.png": "" }); r.st.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "本卡要点", value: "" }]);
+    await call(r);
+    ok(typeof r.last().body.messages[0].content === "string" && r.last().body.messages[0].content.indexOf("【账本历史") === 0, "开头没有不变的那段：user 整条发，不硬切（空的文字块官方会拒）", JSON.stringify(r.last().body.messages[0].content).slice(0, 60));
+
+    // 五：老模型不认自适应思考、没有官方回退：不带这两样
+    r = setup("claude-haiku-4-5-20251001", true);
+    await call(r);
+    ok(!("thinking" in r.last().body) && !("fallbacks" in r.last().body) && !r.last().headers["anthropic-beta"] && Array.isArray(r.last().body.system), "claude-haiku-4-5：不发 thinking、不发 fallbacks（发了官方 400），缓存点照打", JSON.stringify(Object.keys(r.last().body)));
+    r = setup("claude-opus-4-8", true);
+    await call(r);
+    ok(!("thinking" in r.last().body) && !("fallbacks" in r.last().body), "claude-opus-4-8：这代不发 thinking 就不想，不替你打开（不然多花钱）");
+
+    // 六：流式关着——整包 JSON 也认
+    r = setup("claude-sonnet-5-5", true); r.st.ledgerStream = false;
+    r.reply.next = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ id: "msg_2", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "thinking", thinking: "想了一下。" }, { type: "text", text: LEDGER }], stop_reason: "end_turn", usage: { input_tokens: 50, cache_creation_input_tokens: 6100, cache_read_input_tokens: 0, output_tokens: 70 } }) });
+    out = await call(r);
+    ok(out === LEDGER && !("stream" in r.last().body && r.last().body.stream) && /缓存写 6100/.test(logText(r)), "流式关着：整包回来，取 text 块当正文（思考块不算），用量照记", out.slice(0, 20) + " / " + logText(r).split("\n").filter(x => x.indexOf("缓存") >= 0).join(" | "));
+
+    // 七：拒答——说人话、不落账、不自动重试
+    r = setup("claude-sonnet-5-5", true); r.st.ledgerRetryOnce = true; r.st.ledgerRetryDelayMs = 20;
+    r.F("ipeLedgerCommit")("拒答之前的账，够长够长够长够长够长。", 8);
+    r.reply.next = () => stream("<ledger>写到一半被拦下的半截账本", { stop: "refusal", stopDetails: { type: "refusal", category: "cyber", explanation: "network intrusion content" } });
+    let err = ""; try { await call(r); } catch (e) { err = String(e.message || e); }
+    ok(err.indexOf("拒答") >= 0 && err.indexOf("cyber") >= 0, "官方拒答（stop_reason=refusal）：报错说清楚是拒答、哪一类", err);
+    const before = r.sent.length;
+    await r.F("ipeLedgerRun")(9, false); await wait(200);
+    ok(r.sent.length === before + 1 && r.F("ipeLedgerRead")().current.indexOf("拒答之前的账") >= 0 && statusText(r.w).indexOf("拒答") >= 0, "拒答那一发：半截账本不落账，账本还是上一份；不自动重试（同样的内容重发还是被拦）", (r.sent.length - before) + " 次 / " + statusText(r.w));
+
+    // 八：被拦以后由回退的模型接手
+    r = setup("claude-sonnet-5-5", true);
+    r.reply.next = () => stream(LEDGER, { model: "claude-sonnet-5", fallbackTo: "claude-sonnet-5" });
+    out = await call(r);
+    ok(out === LEDGER && /claude-sonnet-5 接手/.test(logText(r)), "官方那边换了模型接手：正文照收，体检流水里记一笔是谁接手的", logText(r).split("\n").filter(x => x.indexOf("接手") >= 0).join(" | "));
+
+    // 九：官方不收 fallbacks（比如这个模型不支持）：去掉重发一次，之后不再带
+    r = setup("claude-sonnet-5-5", true);
+    r.reply.next = n => n === 1 ? { ok: false, status: 400, text: async () => JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "fallbacks: Extra inputs are not permitted" } }) } : stream(LEDGER);
+    out = await call(r);
+    ok(out === LEDGER && r.sent.length === 2 && r.sent[0].body.fallbacks === "default" && !("fallbacks" in r.sent[1].body) && !r.sent[1].headers["anthropic-beta"], "带 fallbacks 被官方 400：去掉它和 beta 头重发一次，照样挂上");
+    await call(r);
+    ok(r.sent.length === 3 && !("fallbacks" in r.sent[2].body), "这个页面里之后的请求不再带 fallbacks（不每次白撞一回）");
+    r = setup("claude-sonnet-5-5", true);
+    r.reply.next = () => ({ ok: false, status: 400, text: async () => JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } }) });
+    err = ""; try { await call(r); } catch (e) { err = String(e.message || e); }
+    ok(r.sent.length === 1 && err.indexOf("余额") >= 0, "别的 400（余额不够）：不重发，照常报错", r.sent.length + " 次 / " + err);
+
+    // 十：输出被截断
+    r = setup("claude-sonnet-5-5", true);
+    r.reply.next = () => stream("", { think: "想了很久很久。", stop: "max_tokens" });
+    err = ""; try { await call(r); } catch (e) { err = String(e.message || e); }
+    ok(err.indexOf("额度") >= 0 || err.indexOf("截断") >= 0, "stop_reason=max_tokens、正文是空的：说清楚是思考把额度吃光了", err);
+
+    // 十一：流里报错
+    r = setup("claude-sonnet-5-5", true);
+    r.reply.next = () => { const t = sse([{ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }]); return { ok: true, status: 200, body: sseBody([t]), text: async () => t }; };
+    err = ""; try { await call(r); } catch (e) { err = String(e.message || e); }
+    ok(err.indexOf("Overloaded") >= 0, "流里来了 error 事件：原话报出来", err);
+
+    // 十二：生图提取也走原生接口
+    r = setup("claude-sonnet-5-5", true);
+    r.st.imgStream = true;
+    r.st.rulePresetsJson = JSON.stringify([{ id: "rule_1", name: "测试提取规则", value: "输出英文自然语言描述；不要参数；不要解释。" }]); r.st.activeRulePreset = "rule_1";
+    r.reply.next = () => stream("a girl standing in the rain, soft light.", { think: "画面是雨里的女孩。" });
+    await r.w.eval("onExtract")();
+    q = r.last(); bd = q.body;
+    const ublocks = bd.messages[0].content;
+    ok(q.url === OFFICIAL + "/messages" && Array.isArray(bd.system) && !!bd.system[bd.system.length - 1].cache_control && bd.messages.length === 1 && !("temperature" in bd), "生图提取：也发到 /v1/messages，系统提示进 system 打缓存点，不发 temperature", q.url);
+    ok(Array.isArray(ublocks) && ublocks.length === 2 && ublocks[0].text.indexOf("【提取规则】") >= 0 && !!ublocks[0].cache_control && ublocks[1].text.indexOf("【正文内容】") === 0, "提取规则、锚点那段不变的单独成块打缓存点；正文在后面", JSON.stringify(ublocks).slice(0, 120));
+    ok(r.d.querySelector("#ipe-preview-text").value.indexOf("a girl standing in the rain") >= 0 && String(r.d.body.textContent).indexOf("画面是雨里的女孩") >= 0, "正文进预览框；思考摘要进实况框（不混进描述）", r.d.querySelector("#ipe-preview-text").value);
+    r.reply.next = () => stream("", { think: "只有思考摘要，没有正文。" });
+    await r.w.eval("onExtract")();
+    ok(r.d.querySelector("#ipe-preview-text").value.indexOf("只有思考摘要") < 0, "正文是空的：不拿思考摘要顶上去当描述（中转才有把正文塞在思考字段里的）", r.d.querySelector("#ipe-preview-text").value);
+
+    // 十三：中转不受影响
+    r = setup("claude-sonnet-5-5", true);
+    r.st.apiProfilesJson = JSON.stringify([{ id: "api_1", name: "中转", endpoint: "https://relay.example.com/v1", key: "sk-relay", model: "claude-sonnet-5-5" }]);
+    r.reply.next = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: LEDGER } }] }) });
+    await call(r);
+    ok(r.last().url === "https://relay.example.com/v1/chat/completions" && r.last().headers["Authorization"] === "Bearer sk-relay" && r.last().body.messages[0].role === "system" && !("system" in r.last().body), "开关开着但地址是中转：照旧 /chat/completions、Bearer、OpenAI 格式，一点不变", r.last().url);
+
+    // 十四：开关、测试连接、体检
+    r = setup("claude-sonnet-5-5", false);
+    await wait(200);   // 面板上的控件是载入后一百多毫秒才绑上的
+    const sw = r.d.querySelector("#ipe-native");
+    ok(!!sw && sw.checked === false, "API 配置 → 请求参数里有这个开关，默认关");
+    if (sw) { sw.checked = true; sw.dispatchEvent(new r.w.Event("change", { bubbles: true })); }
+    ok(r.st.anthropicNative === true && imgStatus(r.w).indexOf("原生接口") >= 0, "打开：存下来，状态行说一声", imgStatus(r.w));
+    r.reply.next = () => ({ ok: true, status: 200, text: async () => JSON.stringify({ id: "msg_3", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "text", text: "pong" }], stop_reason: "end_turn", usage: { input_tokens: 8, output_tokens: 2 } }) });
+    r.d.querySelector("#ipe-ledger-test").click(); await wait(60);
+    ok(r.last().url === OFFICIAL + "/messages" && statusText(r.w).indexOf("连接正常") >= 0, "「测试连接」测的也是原生接口这条路", r.last().url + " / " + statusText(r.w));
+    const rep = String(r.w.eval("typeof ipeDiagReport === 'function' ? ipeDiagReport() : ''"));
+    ok(/挂账接口：[^\n]*原生接口/.test(rep), "🩺 体检里写着走的是原生接口", (rep.match(/挂账接口：[^\n]*/) || [""])[0]);
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

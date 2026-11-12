@@ -447,6 +447,13 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             un[0].click();
             check(Object.keys(JSON.parse(settings[key] || '{}')).length === 0 && un.every(el => el.style.display === 'none') && inf.every(el => el.textContent.indexOf('还没锁') >= 0), pre + '：点浮窗那颗解锁，记录删掉，两边都回到还没锁');
         });
+        // 2.32.0 官方 Claude 走原生接口：浮窗、抽屉各一个开关，在「请求参数」折叠里挨着「流式接收」；默认关，改一个另一个跟着变
+        const nv = [d.querySelector('#ipe-native'), d.querySelector('#iped-native')];
+        check(nv.every(Boolean) && nv.every(el => el.checked === false) && nv.every((el, i) => el.closest('details') && el.closest('details') === d.querySelector(i ? '#iped-img-stream' : '#ipe-img-stream').closest('details') && el.closest('details').querySelector('summary').textContent.indexOf('请求参数') >= 0), '原生接口开关：浮窗、抽屉各一个，跟「流式接收」在同一个「请求参数」折叠里，默认关');
+        nv[1].checked = true; nv[1].dispatchEvent(new w.Event('change'));
+        check(settings.anthropicNative === true && nv[0].checked && d.querySelector('#ipe-status').textContent.indexOf('原生接口') >= 0, '打开抽屉那个：存下来，浮窗那个跟着开，状态行说一声');
+        nv[0].checked = false; nv[0].dispatchEvent(new w.Event('change'));
+        check(settings.anthropicNative === false && !nv[1].checked && d.querySelector('#ipe-status').textContent.indexOf('兼容层') >= 0, '关掉浮窗那个：抽屉那个跟着关，状态行说改回兼容层');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
