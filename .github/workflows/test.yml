@@ -1,0 +1,69 @@
+# 每次推到 main（或开 PR）自动把七套测试跑一遍。
+# 结果在仓库页面的 Actions 标签里，提交旁边会有 ✓ / ✗；本地照旧要先全过再推，这里是多一道保险。
+name: 测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 七套测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: 版本号四处一致（index.js / package.json / package-lock.json / manifest.json）
+        run: |
+          node -e '
+            const fs = require("fs");
+            const j = f => JSON.parse(fs.readFileSync(f, "utf8"));
+            const lock = j("package-lock.json");
+            const v = {
+              "index.js IPE_VERSION": (fs.readFileSync("index.js", "utf8").match(/var IPE_VERSION = "([^"]+)"/) || [])[1],
+              "package.json": j("package.json").version,
+              "package-lock.json": lock.version,
+              "package-lock.json packages": lock.packages[""].version,
+              "manifest.json": j("manifest.json").version,
+            };
+            console.log(v);
+            if (new Set(Object.values(v)).size !== 1) { console.error("版本号对不上"); process.exit(1); }
+          '
+
+      # 一套挂了后面的也照跑，一次看全
+      - name: 挂账（npm test）
+        if: ${{ !cancelled() }}
+        run: npm test
+      - name: 界面（test:ui）
+        if: ${{ !cancelled() }}
+        run: npm run test:ui
+      - name: 收尾负载（test:performance）
+        if: ${{ !cancelled() }}
+        run: npm run test:performance
+      - name: 挂账减负（test:dedup）
+        if: ${{ !cancelled() }}
+        run: npm run test:dedup
+      - name: 人物锁（test:cast）
+        if: ${{ !cancelled() }}
+        run: npm run test:cast
+      - name: 顺滑（test:smooth）
+        if: ${{ !cancelled() }}
+        run: npm run test:smooth
+      - name: 生图流式（test:stream）
+        if: ${{ !cancelled() }}
+        run: npm run test:stream

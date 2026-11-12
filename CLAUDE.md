@@ -17,6 +17,8 @@
 
 - `npm install` 之后七套全跑：`npm test`（挂账）、`npm run test:ui`、`test:performance`、`test:dedup`、`test:cast`、`test:smooth`、`test:stream`。全过再推。
 - 修 bug 先写能复现的测试，确认它在旧代码上会挂。
+- 推上去以后 GitHub Actions（`.github/workflows/test.yml`）会把七套再跑一遍，并核对版本号四处一致。提交旁边出 ✗ 就去 Actions 里看是哪一套，修好再推。
+- 测试里等异步结果不要按固定毫秒数等（机器忙就时过时不过），等到条件成立为止，像【43】里的 `until`。
 
 ## 背景
 
