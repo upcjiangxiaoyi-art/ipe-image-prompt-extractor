@@ -432,6 +432,21 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(!!dov && dov.querySelector('.ipe-zoom-ta').readOnly && dov.querySelector('.ipe-zoom-ta').value.indexOf('🐚 小海螺体检') === 0 && !!dov.querySelector('.ipe-diag-copy') && !!dov.querySelector('.ipe-diag-clear'), '抽屉的「🩺 体检」点开：只读报告，带「复制」「清空」');
         dov.querySelector('.ipe-zoom-close').click();
         check(!d.querySelector('#ipe-zoom-overlay'), '关闭后弹层收起');
+        // 2.31.0 画风模板、挂账规则「🔒 锁到这张卡」：浮窗、抽屉各一排，跟各自的预设下拉在同一块里；锁、解锁两边一起变
+        [['template', 'templateCardLockJson', 'activeBaseTemplate'], ['ledger-prompt', 'ledgerRuleCardLockJson', 'activeLedgerPrompt']].forEach(([pre, key, activeKey]) => {
+            const lk = [d.querySelector('#ipe-' + pre + '-lock'), d.querySelector('#iped-' + pre + '-lock')];
+            const un = [d.querySelector('#ipe-' + pre + '-unlock'), d.querySelector('#iped-' + pre + '-unlock')];
+            const inf = [d.querySelector('#ipe-' + pre + '-lock-info'), d.querySelector('#iped-' + pre + '-lock-info')];
+            const slot = [d.querySelector('#ipe-' + pre + '-slot'), d.querySelector('#iped-' + pre + '-slot')];
+            const home = (el, i) => el.closest(i ? '.ipe-fold' : '.ipe-section, .ipe-fold');
+            check(lk.every(Boolean) && un.every(Boolean) && inf.every(Boolean) && lk.every((el, i) => home(el, i) && home(el, i) === home(slot[i], i)), pre + '：浮窗、抽屉各有「锁到这张卡」「解锁」和说明行，跟预设下拉在同一块里');
+            check(un.every(el => el.style.display === 'none') && inf.every(el => el.textContent.indexOf('还没锁') >= 0), pre + '：没锁时「解锁」藏着，说明行写着还没锁');
+            lk[1].click();
+            const cardKey = Object.keys(JSON.parse(settings[key] || '{}'))[0] || '';
+            check(!!cardKey && JSON.parse(settings[key])[cardKey] === settings[activeKey] && un.every(el => el.style.display !== 'none') && inf.every(el => el.textContent.indexOf('🔒') === 0), pre + '：点抽屉那颗锁上，存下来，两边「解锁」都出现、说明行都带 🔒');
+            un[0].click();
+            check(Object.keys(JSON.parse(settings[key] || '{}')).length === 0 && un.every(el => el.style.display === 'none') && inf.every(el => el.textContent.indexOf('还没锁') >= 0), pre + '：点浮窗那颗解锁，记录删掉，两边都回到还没锁');
+        });
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

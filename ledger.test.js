@@ -3086,6 +3086,96 @@ await (async () => {
     ok(!d.querySelector("#ipe-zoom-overlay"), "「关闭」：弹层收起");
 })();
 
+console.log("\n【75】 画风模板、挂账规则可以「🔒 锁到这张卡」（2.31.0）：这两样以前选的是全局的一套，换卡得自己记着换，忘了就拿上一张卡的画风出图、拿上一张卡的规则记账。锁了的卡每次换过去自动切到锁的那套；没锁的卡跟以前一样");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const TPL = [{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }, { id: "tpl_2", name: "水墨", value: "<draw>INK: {Description}</draw>" }];
+    const RULES = [{ id: "lp_1", name: "现代", value: "现代规则：记伤、记约定。" + "够长".repeat(20) }, { id: "lp_2", name: "修仙", value: "修仙规则：记境界、记法宝。" + "够长".repeat(20) }];
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = imgApi(w, tavern, F, "x");
+    st.ledgerApiProfile = "api_1"; st.ledgerAutoRun = false; st.ledgerStream = false;
+    st.baseTemplatesJson = JSON.stringify(TPL); st.activeBaseTemplate = "tpl_1";
+    st.ledgerPromptPresetsJson = JSON.stringify(RULES); st.activeLedgerPrompt = "lp_1";
+    w.eval("ipeRefreshTemplateEditors")(); w.eval("ipeLedgerRefreshBotEditors")();
+    let sys = "";
+    w.fetch = async (u, o) => { sys = String(JSON.parse(o.body).messages[0].content); return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "<ledger>账本内容，够长够长够长够长够长够长。</ledger>" } }] }) }; };
+    const metas = [tavern.chatMetadata, {}];
+    const go = async (i, quiet) => {   // 换到第 i 张卡；quiet = 换聊天事件没来
+        tavern.characterId = i; tavern.name2 = tavern.characters[i].name; tavern.chatMetadata = metas[i]; tavern.getCurrentChatId = () => "chat-" + i;
+        if (!quiet) { await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260); }
+    };
+    const tag = () => String(F("buildInjectTag")("a girl"));
+    const rule = async () => { sys = ""; await F("ipeLedgerCallAPI")("正文正文正文，够长够长够长。", "", 10); return sys; };
+    const el = id => d.querySelector("#" + id);
+    const pick = (id, v) => { const e = el(id); e.value = v; e.dispatchEvent(new w.Event("change", { bubbles: true })); };
+    const info = id => (el(id) ? el(id).textContent : "（没有这一行）");
+    const label = id => { const e = el(id); return e ? (e.tagName === "INPUT" ? e.value : e.textContent) : ""; };
+    const locks = k => { try { return JSON.parse(st[k] || "{}"); } catch (e) { return {}; } };
+
+    // 一：没锁 = 跟以前一样
+    ok(el("ipe-template-lock") && el("ipe-ledger-prompt-lock"), "画风模板、挂账规则下面各有一颗「🔒 锁到这张卡」（抽屉里那两颗在 ui.test.js 里查）");
+    ok(info("ipe-template-lock-info").indexOf("还没锁") >= 0 && info("ipe-ledger-prompt-lock-info").indexOf("还没锁") >= 0, "没锁的卡：说明行写着还没锁", info("ipe-template-lock-info") + " / " + info("ipe-ledger-prompt-lock-info"));
+    pick("ipe-template-slot", "tpl_2"); pick("ipe-ledger-prompt-slot", "lp_2");
+    await go(1);
+    ok(tag().indexOf("INK:") >= 0 && (await rule()).indexOf("修仙规则") >= 0, "没锁：换到另一张卡，画风、规则还是刚才选的那套（跟以前一样）");
+
+    // 二：锁上，换走再换回来
+    await go(0);
+    if (el("ipe-template-lock")) el("ipe-template-lock").click();
+    if (el("ipe-ledger-prompt-lock")) el("ipe-ledger-prompt-lock").click();
+    eq(locks("templateCardLockJson")["char:yuan.png"], "tpl_2", "画风模板点「锁到这张卡」：记下 苑无忧 → 水墨");
+    eq(locks("ledgerRuleCardLockJson")["char:yuan.png"], "lp_2", "挂账规则点「锁到这张卡」：记下 苑无忧 → 修仙");
+    ok(info("ipe-template-lock-info").indexOf("🔒") >= 0 && info("ipe-template-lock-info").indexOf("水墨") >= 0 && el("ipe-template-unlock") && el("ipe-template-unlock").style.display !== "none", "说明行写着锁的是哪套，「解锁」出现", info("ipe-template-lock-info"));
+    ok(imgStatus(w).indexOf("水墨") >= 0 && statusText(w).indexOf("修仙") >= 0, "两边状态行各说一声锁上了", imgStatus(w) + " / " + statusText(w));
+    await go(1);
+    pick("ipe-template-slot", "tpl_1"); pick("ipe-ledger-prompt-slot", "lp_1");
+    ok(tag().indexOf("INK:") < 0 && (await rule()).indexOf("现代规则") >= 0, "没锁的那张卡上换成另一套：照换");
+    ok(info("ipe-template-lock-info").indexOf("顾寒") >= 0 && info("ipe-template-lock-info").indexOf("还没锁") >= 0, "说明行换成这张卡的：顾寒 还没锁", info("ipe-template-lock-info"));
+    await go(0);
+    ok(st.activeBaseTemplate === "tpl_2" && tag().indexOf("INK:") >= 0, "换回锁了的卡：画风自动切回「水墨」（以前还是上一张卡选的「默认」）", st.activeBaseTemplate + " / " + tag());
+    ok(st.activeLedgerPrompt === "lp_2" && (await rule()).indexOf("修仙规则") >= 0, "换回锁了的卡：挂账规则自动切回「修仙」（以前还是上一张卡选的「现代」）", st.activeLedgerPrompt + " / " + sys.slice(0, 20));
+    ok(el("ipe-template-slot").value === "tpl_2" && el("ipe-reinject-tpl").value === "tpl_2" && el("ipe-ledger-prompt-slot").value === "lp_2", "几个下拉也跟着切过来（下拉显示的就是在用的）");
+    ok(imgStatus(w).indexOf("🔒") >= 0 && imgStatus(w).indexOf("水墨") >= 0 && statusText(w).indexOf("🔒") >= 0 && statusText(w).indexOf("修仙") >= 0, "状态行说一声切到了锁的那套", imgStatus(w) + " / " + statusText(w));
+
+    // 三：换聊天事件没到
+    await go(1); pick("ipe-template-slot", "tpl_1"); pick("ipe-ledger-prompt-slot", "lp_1");
+    await go(0, true);
+    ok(tag().indexOf("INK:") >= 0, "换聊天事件没到（手机上偶尔会漏）：拼注入段之前自己核一遍，还是按锁的「水墨」", tag());
+    await go(1); pick("ipe-template-slot", "tpl_1"); pick("ipe-ledger-prompt-slot", "lp_1");
+    await go(0, true);
+    ok((await rule()).indexOf("修仙规则") >= 0, "挂账请求发出去之前也核一遍，还是按锁的「修仙」", sys.slice(0, 20));
+
+    // 四：锁了的卡上临时换一套
+    pick("ipe-reinject-tpl", "tpl_1");
+    ok(tag().indexOf("INK:") < 0 && tag().indexOf("<draw>a girl</draw>") >= 0, "锁了的卡上从下拉临时换一套画风：照换（「换画风重注入」要靠它）", tag());
+    ok(info("ipe-template-lock-info").indexOf("临时") >= 0 && info("ipe-template-lock-info").indexOf("水墨") >= 0 && label("ipe-template-lock").indexOf("改锁") >= 0, "说明行说清楚：锁的是「水墨」，现在临时用「默认」；按钮变成「改锁成当前这套」", info("ipe-template-lock-info") + " / " + label("ipe-template-lock"));
+    ok(tag().indexOf("INK:") < 0, "同一张卡里再拼一次：不会自己跳回去");
+    await go(1); await go(0);
+    ok(tag().indexOf("INK:") >= 0, "换走再换回来：切回锁的「水墨」");
+    pick("ipe-template-slot", "tpl_1"); if (el("ipe-template-lock")) el("ipe-template-lock").click();
+    eq(locks("templateCardLockJson")["char:yuan.png"], "tpl_1", "「改锁成当前这套」：苑无忧 → 默认");
+    await go(1); pick("ipe-template-slot", "tpl_2"); await go(0);
+    ok(tag().indexOf("INK:") < 0, "改锁以后换回来：切到新锁的「默认」");
+
+    // 五：解锁；锁的那套被删
+    if (el("ipe-template-unlock")) el("ipe-template-unlock").click();
+    ok(!("char:yuan.png" in locks("templateCardLockJson")) && info("ipe-template-lock-info").indexOf("还没锁") >= 0 && el("ipe-template-unlock") && el("ipe-template-unlock").style.display === "none", "「解锁」：记录删掉，说明行回到还没锁，「解锁」藏起来", info("ipe-template-lock-info"));
+    await go(1); pick("ipe-template-slot", "tpl_2"); await go(0);
+    ok(tag().indexOf("INK:") >= 0, "解锁以后：换回来不再自动切，用的是下拉当前那套");
+    await go(1);
+    st.ledgerPromptPresetsJson = JSON.stringify([RULES[0]]); st.activeLedgerPrompt = "lp_1";
+    await go(0);
+    ok((await rule()).indexOf("现代规则") >= 0 && info("ipe-ledger-prompt-lock-info").indexOf("删") >= 0, "锁的那套规则被删了：当没锁，用下拉当前的，说明行说一声", sys.slice(0, 20) + " / " + info("ipe-ledger-prompt-lock-info"));
+
+    // 六：页面重新载入（Safari 切后台）——锁记在扩展设置里，还在
+    st.ledgerPromptPresetsJson = JSON.stringify(RULES); st.activeLedgerPrompt = "lp_1";
+    st.templateCardLockJson = JSON.stringify({ "char:yuan.png": "tpl_2" }); st.activeBaseTemplate = "tpl_1";
+    const r2 = boot(10, tavern); await wait(260);
+    ok(st.activeBaseTemplate === "tpl_2" && st.activeLedgerPrompt === "lp_2" && String(r2.F("buildInjectTag")("a girl")).indexOf("INK:") >= 0, "页面重新载入：这张卡锁的画风、规则都还在，载入就切过去", st.activeBaseTemplate + " / " + st.activeLedgerPrompt);
+    const rep = String(r2.w.eval("typeof ipeDiagReport === 'function' ? ipeDiagReport() : ''"));
+    ok(/画风模板：[^\n]*🔒/.test(rep) && /挂账规则：[^\n]*🔒/.test(rep), "🩺 体检里：画风模板、挂账规则两行都标着 🔒", (rep.match(/画风模板：[^\n]*/) || [""])[0] + " / " + (rep.match(/挂账规则：[^\n]*/) || [""])[0]);
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
