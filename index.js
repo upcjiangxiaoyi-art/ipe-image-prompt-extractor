@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.33.0";
+var IPE_VERSION = "2.34.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7140,19 +7140,7 @@ function ipeDiagReport() {
     log.forEach(function(x){ out.push(stamp(x[0]) + " " + x[1] + "｜" + x[2] + (x[3] > 1 ? "（×" + x[3] + "）" : "")); });
     return out.join("\n");
 }
-function ipeDiagCopy(big, btn) {
-    var text = String(big.value || "");
-    var done = function(ok){ btn.textContent = ok ? "已复制 ✓" : "长按全选"; setTimeout(function(){ btn.textContent = "复制"; }, 1800); };
-    var fallback = function(){
-        try { big.focus(); big.select(); big.setSelectionRange(0, text.length); done(!!ipeRootDocument().execCommand("copy")); } catch(e) { done(false); }
-    };
-    try {
-        var nav = (ipeRootWindow() || window).navigator;
-        if (nav && nav.clipboard && nav.clipboard.writeText) nav.clipboard.writeText(text).then(function(){ done(true); }, fallback);
-        else fallback();
-    } catch(e) { fallback(); }
-}
-/* 借「⤢ 放大编辑」那个全屏弹层显示（手机上各种层级的坑它都踩过了），只读；标题栏多放「复制」「清空」两颗按钮 */
+/* 借「⤢ 放大编辑」那个全屏弹层显示（手机上各种层级的坑它都踩过了），只读；「复制」是弹层自带的，这里再放一颗清记录的「清空」 */
 function ipeDiagOpen() {
     var d = ipeRootDocument();
     var ta = d.createElement("textarea");
@@ -7167,7 +7155,8 @@ function ipeDiagOpen() {
         b.style.cssText = close.style.cssText; b.addEventListener("click", function(){ fn(b); });
         head.insertBefore(b, close); return b;
     };
-    mk("ipe-diag-copy", "复制", function(b){ ipeDiagCopy(big, b); }).style.marginLeft = "auto";
+    var cp = ov.querySelector(".ipe-zoom-copy");   // 2.34.0 「复制」放大编辑框自己带了，这里只认领一下
+    if (cp) cp.classList.add("ipe-diag-copy");
     mk("ipe-diag-clear", "清空", function(b){ ipeLogBuf = []; ipeLogFlush(); big.value = ipeDiagReport(); b.textContent = "已清空"; setTimeout(function(){ b.textContent = "清空"; }, 1500); });
     close.textContent = "关闭";
     big.style.fontSize = "13px"; big.style.lineHeight = "1.55";
@@ -9383,6 +9372,36 @@ function ipeZoomClose() {
         }
     } catch(e) {}
 }
+/* 2.34.0 放大编辑框标题栏的「复制」「清空」：手机上一万多字的模板，长按全选再拷、再删很费劲。
+   复制：有剪贴板接口用接口；没有（不是 https 的地址，Safari 不给）就全选了用老办法拷——拷的那一下临时设成只读，免得键盘弹出来。
+   清空：清了以后这颗按钮变「↩ 撤销」，点一下原文回来；写了新内容才算数、不再撤销。
+   手滑清空又点了「完成」：原文还记在内存里，再点开同一格（还空着、卡和各预设都没换过）按钮还是「撤销」。页面重载就没了。 */
+var ipeZoomLastCleared = null;   // { id, ctx, text }
+function ipeZoomCtx() {
+    try {
+        var c = cfg();
+        return ipeChatKey() + "|" + Object.keys(c).filter(function(k){ return /^active/.test(k); }).sort().map(function(k){ return String(c[k]); }).join("|");
+    } catch(e) { return ""; }
+}
+function ipeZoomCopy(big, btn) {
+    var text = String(big.value || "");
+    var done = function(ok){ btn.textContent = ok ? "已复制 ✓" : "长按全选"; setTimeout(function(){ btn.textContent = "复制"; }, 1800); };
+    if (!text) { btn.textContent = "没有内容"; setTimeout(function(){ btn.textContent = "复制"; }, 1500); return; }   // 空的不拷：别把剪贴板里刚拷好要贴的东西冲掉
+    var fallback = function(){
+        var ro = big.readOnly;
+        try {
+            big.readOnly = true;
+            big.focus(); big.select(); big.setSelectionRange(0, text.length);
+            done(!!ipeRootDocument().execCommand("copy"));
+        } catch(e) { done(false); }
+        big.readOnly = ro;
+    };
+    try {
+        var nav = (ipeRootWindow() || window).navigator;
+        if (nav && nav.clipboard && nav.clipboard.writeText) nav.clipboard.writeText(text).then(function(){ done(true); }, fallback);
+        else fallback();
+    } catch(e) { fallback(); }
+}
 function ipeZoomOpen(ta) {
     if (!ta) return;
     var d = ipeRootDocument();
@@ -9416,9 +9435,11 @@ function ipeZoomOpen(ta) {
         + ';background:' + boxBg + ';color:' + fg + ';border:1px solid ' + bd + ';border-radius:' + (small ? '0' : '14px') + (mist ? ';box-shadow:0 10px 40px rgba(84,100,116,.28),0 0 0 1px rgba(255,255,255,.55)' : '')
         + ';display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.5);font-family:-apple-system,\'PingFang SC\',\'Microsoft YaHei\',sans-serif;font-size:13px;box-sizing:border-box">'
         + '<div class="ipe-zoom-head" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ' + bd + ';flex-shrink:0;background:' + headBg + '">'
-        + '<span class="ipe-zoom-title" style="font-weight:600;font-size:14px;color:' + (mist ? '#46525E' : '#e8e8e8') + '"></span>'
-        + '<span class="ipe-zoom-count" style="font-size:11px;opacity:.7;margin-left:auto"></span>'
-        + '<button type="button" class="ipe-zoom-close" style="padding:6px 14px;border-radius:8px;' + closeCss + ';cursor:pointer;font-size:13px;font-family:inherit">完成</button></div>'
+        + '<span class="ipe-zoom-title" style="font-weight:600;font-size:14px;color:' + (mist ? '#46525E' : '#e8e8e8') + ';flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>'
+        + '<span class="ipe-zoom-count" style="font-size:11px;opacity:.7;margin-left:auto;flex-shrink:0;white-space:nowrap"></span>'
+        + '<button type="button" class="ipe-zoom-copy" style="padding:6px 10px;border-radius:8px;' + closeCss + ';cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0;white-space:nowrap">复制</button>'
+        + (ta.readOnly ? '' : '<button type="button" class="ipe-zoom-clear" style="padding:6px 10px;border-radius:8px;' + closeCss + ';cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0;white-space:nowrap">清空</button>')
+        + '<button type="button" class="ipe-zoom-close" style="padding:6px 14px;border-radius:8px;' + closeCss + ';cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0;white-space:nowrap">完成</button></div>'
         + '<textarea class="ipe-zoom-ta" spellcheck="false" style="flex:1;margin:' + (small ? '8px' : '12px') + ';padding:12px;background:' + taBg + ';color:' + fg + ';border:1px solid ' + bd
         + ';border-radius:10px;font-size:' + (small ? '16px' : '15px') + ';line-height:1.6;resize:none;outline:none;font-family:inherit;box-sizing:border-box;width:auto;min-height:0"></textarea></div>';
     ov.querySelector(".ipe-zoom-title").textContent = ipeZoomTitleFor(ta);
@@ -9428,8 +9449,33 @@ function ipeZoomOpen(ta) {
     big.readOnly = !!ta.readOnly; big.disabled = false;
     function upd(){ count.textContent = big.value.length + " 字"; }
     upd();
+    var copyBtn = ov.querySelector(".ipe-zoom-copy"), clearBtn = ov.querySelector(".ipe-zoom-clear");
+    var zid = String(ta.id || "").replace(/^iped-/, "ipe-"), undoText = null;
+    function setAll(v) {   // 跟打字一样：外面那格同步、照常触发它自己的保存
+        big.value = v; ta.value = v; upd();
+        try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch(e) {}
+    }
+    function clearLabel() { if (clearBtn) clearBtn.textContent = undoText != null ? "↩ 撤销" : "清空"; }
+    if (copyBtn) copyBtn.addEventListener("click", function(){ ipeZoomCopy(big, copyBtn); });
+    if (clearBtn) {
+        var lc = ipeZoomLastCleared;
+        if (lc && zid && lc.id === zid && lc.ctx === ipeZoomCtx() && !big.value) undoText = lc.text;   // 上次清空完就关了：还能找回
+        else if (lc && lc.id === zid) ipeZoomLastCleared = null;                                       // 这格后来有了内容、或者换了卡 / 预设：旧的作废
+        clearLabel();
+        clearBtn.addEventListener("click", function(){
+            if (undoText != null) { var back = undoText; undoText = null; ipeZoomLastCleared = null; setAll(back); }
+            else {
+                if (!big.value) return;
+                undoText = big.value;
+                ipeZoomLastCleared = zid ? { id: zid, ctx: ipeZoomCtx(), text: undoText } : null;
+                setAll("");
+            }
+            clearLabel();
+        });
+    }
     big.addEventListener("input", function(){
         ta.value = big.value; upd();
+        if (undoText != null) { undoText = null; ipeZoomLastCleared = null; clearLabel(); }   // 清空后写了新内容：不再撤销
         try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch(e) {}
     });
     function done(){

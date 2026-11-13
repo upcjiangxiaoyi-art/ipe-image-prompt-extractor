@@ -3419,6 +3419,94 @@ await (async () => {
     ok(/提取规则[^\n]*🔒/.test(rep), "🩺 体检里「提取规则」那行标着 🔒", (rep.match(/提取规则[^\n]*/) || [""])[0]);
 })();
 
+console.log("\n【78】 放大编辑框里一键「复制」「清空」（2.34.0）：手机上一万多字的模板，长按全选再拷、再删很费劲。清空带撤销，手滑能找回来");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const TPL = "<draw>\nComposition: {Camera}\nQuality: AAA cinematic CG rendering.\n" + "long style words. ".repeat(40) + "\n</draw>";
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "余晖未尽", value: TPL }]); st.activeBaseTemplate = "tpl_1";
+    w.eval("ipeRefreshTemplateEditors")();
+    let copied = null;
+    Object.defineProperty(w.navigator, "clipboard", { configurable: true, value: { writeText: async t => { copied = t; } } });
+    const src = d.querySelector("#ipe-base-template");
+    const open = el => { F("ipeZoomOpen")(el || src); return d.querySelector("#ipe-zoom-overlay"); };
+    const txt = b => (b ? b.textContent : "（没有这颗按钮）");
+    const tplNow = () => String((F("ipeGetBaseTemplates")()[0] || {}).value);
+    const type = (big, v) => { big.value = v; big.dispatchEvent(new w.Event("input", { bubbles: true })); };
+
+    let ov = open(), big = ov.querySelector(".ipe-zoom-ta");
+    let cp = ov.querySelector(".ipe-zoom-copy"), cl = ov.querySelector(".ipe-zoom-clear"), fin = ov.querySelector(".ipe-zoom-close");
+    ok(!!cp && !!cl && txt(cp) === "复制" && txt(cl) === "清空" && !!(cp.compareDocumentPosition(fin) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !!(cl.compareDocumentPosition(fin) & w.Node.DOCUMENT_POSITION_FOLLOWING), "放大编辑框标题栏：「复制」「清空」排在「完成」前面", txt(cp) + " / " + txt(cl));
+    if (cp) cp.click(); await wait(20);
+    ok(copied === TPL && txt(cp) === "已复制 ✓", "「复制」：整格内容进剪贴板（不用长按全选），按钮说已复制", String(copied).slice(0, 30) + " / " + txt(cp));
+    ok(big.value === TPL && src.value === TPL, "复制不动内容");
+
+    if (cl) cl.click();
+    ok(big.value === "" && src.value === "" && tplNow() === "" && ov.querySelector(".ipe-zoom-count").textContent === "0 字", "「清空」：格子清掉，外面那格和存的模板跟着清，字数归零", JSON.stringify(big.value).slice(0, 30) + " / " + tplNow().length);
+    ok(txt(cl).indexOf("撤销") >= 0, "清空之后这颗按钮变成「撤销」", txt(cl));
+    if (cl) cl.click();
+    ok(big.value === TPL && src.value === TPL && tplNow() === TPL && txt(cl) === "清空", "点「撤销」：原文回来，外面那格和存的模板也回来，按钮变回「清空」", big.value.length + " / " + txt(cl));
+
+    if (cl) cl.click();
+    type(big, "<draw>新模板 {Description}</draw>");
+    ok(txt(cl) === "清空" && src.value === "<draw>新模板 {Description}</draw>" && tplNow() === "<draw>新模板 {Description}</draw>", "清空后贴进新内容：照常存下来，按钮变回「清空」（已经写了新的，不再撤销）", txt(cl) + " / " + tplNow());
+
+    // 清空了就关掉：再点开还能找回
+    type(big, TPL);
+    if (cl) cl.click();
+    fin.click();
+    ok(!d.querySelector("#ipe-zoom-overlay") && src.value === "" && tplNow() === "", "清空后直接点「完成」：存的就是空的");
+    ov = open(); big = ov.querySelector(".ipe-zoom-ta"); cl = ov.querySelector(".ipe-zoom-clear");
+    ok(big.value === "" && txt(cl).indexOf("撤销") >= 0, "手滑清空又关掉了：再点开，这格还空着，按钮还是「撤销」", txt(cl));
+    if (cl) cl.click();
+    ok(big.value === TPL && tplNow() === TPL, "点一下找回刚才清掉的原文", big.value.length + " 字");
+    ov.querySelector(".ipe-zoom-close").click();
+
+    // 清空完关掉，然后换了一套模板（新的那套本来就是空的）：不能把上一套的原文「撤销」到这套里来
+    ov = open(); cl = ov.querySelector(".ipe-zoom-clear"); if (cl) cl.click(); ov.querySelector(".ipe-zoom-close").click();
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "余晖未尽", value: "" }, { id: "tpl_2", name: "新的空模板", value: "" }]); st.activeBaseTemplate = "tpl_2";
+    w.eval("ipeRefreshTemplateEditors")();
+    ov = open(); cl = ov.querySelector(".ipe-zoom-clear");
+    ok(txt(cl) === "清空", "清空完换了另一套（空的）模板再点开：按钮是「清空」，不会把上一套的原文找回到这套里", txt(cl));
+    ov.querySelector(".ipe-zoom-close").click();
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "余晖未尽", value: TPL }]); st.activeBaseTemplate = "tpl_1";
+    w.eval("ipeRefreshTemplateEditors")();
+
+    // 别的格子不串
+    const other = d.querySelector("#ipe-extract-rules");
+    ov = open(other); cl = ov.querySelector(".ipe-zoom-clear");
+    ok(txt(cl) === "清空", "换一个格子点开：按钮是「清空」，不会把上一格清掉的东西找回到这格来", txt(cl));
+    ov.querySelector(".ipe-zoom-close").click();
+
+    // 空格子
+    const empty = d.querySelector("#ipe-supplement"); empty.value = "";
+    ov = open(empty); big = ov.querySelector(".ipe-zoom-ta"); cl = ov.querySelector(".ipe-zoom-clear");
+    if (cl) cl.click();
+    ok(big.value === "" && txt(cl) === "清空", "本来就是空的格子：点「清空」没反应，不变成「撤销」", txt(cl));
+    copied = "刚从别处拷好、准备贴进来的新模板";
+    cp = ov.querySelector(".ipe-zoom-copy"); if (cp) cp.click(); await wait(20);
+    ok(copied === "刚从别处拷好、准备贴进来的新模板" && txt(cp) === "没有内容", "空格子点「复制」：不动剪贴板（不然把刚拷好要贴的东西冲掉了），按钮说没有内容", copied + " / " + txt(cp));
+    ov.querySelector(".ipe-zoom-close").click();
+
+    // 剪贴板接口用不了（http 局域网地址上的 Safari）：退回老办法
+    Object.defineProperty(w.navigator, "clipboard", { configurable: true, value: undefined });
+    let execd = 0, selAt = "", roAt = null;   // 拷的那一下选区和只读状态：之后弹层自己会把光标挪到末尾，事后看不准
+    d.execCommand = c => { if (c === "copy") { execd++; const b = d.querySelector("#ipe-zoom-overlay .ipe-zoom-ta"); selAt = b.selectionStart + "-" + b.selectionEnd; roAt = b.readOnly; } return true; };
+    ov = open(); big = ov.querySelector(".ipe-zoom-ta"); cp = ov.querySelector(".ipe-zoom-copy");
+    if (cp) cp.click(); await wait(20);
+    ok(execd === 1 && txt(cp) === "已复制 ✓" && selAt === "0-" + big.value.length, "剪贴板接口用不了（不是 https 的地址）：自动全选再用老办法拷，照样说已复制", execd + " / " + txt(cp) + " / 选区 " + selAt + " / 共 " + big.value.length);
+    ok(roAt === true && big.readOnly === false, "老办法拷的那一下临时设成只读（手机键盘不弹出来），拷完恢复成能编辑", roAt + " / " + big.readOnly);
+    ov.querySelector(".ipe-zoom-close").click();
+
+    // 只读的（体检页）：只有复制，没有清空格子的那颗
+    Object.defineProperty(w.navigator, "clipboard", { configurable: true, value: { writeText: async t => { copied = t; } } });
+    w.eval("ipeDiagOpen")();
+    ov = d.querySelector("#ipe-zoom-overlay");
+    ok(ov.querySelectorAll(".ipe-zoom-copy").length === 1 && ov.querySelector(".ipe-zoom-copy").classList.contains("ipe-diag-copy") && !ov.querySelector(".ipe-zoom-clear") && !!ov.querySelector(".ipe-diag-clear"), "体检页（只读）：还是一颗「复制」、一颗清记录的「清空」，没有多出来的");
+    ov.querySelector(".ipe-zoom-close").click();
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
