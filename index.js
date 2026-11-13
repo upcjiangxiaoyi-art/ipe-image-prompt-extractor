@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.32.0";
+var IPE_VERSION = "2.33.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -88,6 +88,7 @@ const DEFAULTS = {
     anchorCardLockJson: "{}",      // 2.24.1 角色卡（头像文件名）/ 群 → 锁定的锚点预设 id
     templateCardLockJson: "{}",    // 2.31.0 同上：这张卡锁定的画风模板 id
     ledgerRuleCardLockJson: "{}",  // 2.31.0 同上：这张卡锁定的挂账规则预设 id
+    ruleCardLockJson: "{}",        // 2.33.0 同上：这张卡锁定的提取规则预设 id
     rulePresetsJson: "",
     activeRulePreset: "rule_1",
     systemPromptPresetsJson: "",
@@ -4515,8 +4516,8 @@ function ipeRefreshAnchorLockUI() {
 }
 
 /* ============================================================
-   🔒 画风模板、挂账规则 锁到卡（2.31.0）
-   这两样选的是全局的一套：换卡得自己记着换，忘了就拿上一张卡的画风出图、拿上一张卡的规则记账。
+   🔒 画风模板、挂账规则 锁到卡（2.31.0）；提取规则也接进来（2.33.0）
+   这几样选的是全局的一套：换卡得自己记着换，忘了就拿上一张卡的画风出图、拿上一张卡的规则记账。
    锁了的卡，每次换到它（换聊天、页面重新载入）自动把下拉切到锁的那套；没锁的卡照旧，下拉停在哪套就用哪套。
    跟锚点锁不一样的地方：这里下拉显示的永远就是在用的。在锁了的卡上从下拉换一套，照换（「换画风重注入」靠的就是它），
    只是下次再换到这张卡会切回锁的那套；想长期换，点「改锁成当前这套」。
@@ -4525,21 +4526,24 @@ function ipeRefreshAnchorLockUI() {
    ============================================================ */
 var IPE_CARD_LOCKS = {
     tpl:   { key: "templateCardLockJson",   what: "画风",     pre: "template" },
+    rule:  { key: "ruleCardLockJson",       what: "提取规则", pre: "rule" },
     lrule: { key: "ledgerRuleCardLockJson", what: "挂账规则", pre: "ledger-prompt" }
 };
-var IPE_CARD_LOCK_KINDS = ["tpl", "lrule"];
+var IPE_CARD_LOCK_KINDS = ["tpl", "rule", "lrule"];
 var ipeCardLockSeen = null;    // 上一次核对时是哪张卡；null = 这个页面还没核过
 function ipeCardLockMap(kind) {
     var m = ipeSafeJsonParse(cfg()[IPE_CARD_LOCKS[kind].key], null);
     return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
 }
-function ipeCardLockList(kind) { return kind === "tpl" ? ipeGetBaseTemplates() : ipePresetList.apply(null, LP); }
-function ipeCardLockActive(kind) { return kind === "tpl" ? ipeGetActiveTemplateItem() : ipePresetItem.apply(null, LP); }
+function ipeCardLockList(kind) { return kind === "tpl" ? ipeGetBaseTemplates() : kind === "rule" ? ipeGetRulePresets() : ipePresetList.apply(null, LP); }
+function ipeCardLockActive(kind) { return kind === "tpl" ? ipeGetActiveTemplateItem() : kind === "rule" ? ipeGetActiveRuleItem() : ipePresetItem.apply(null, LP); }
 function ipeCardLockSetActive(kind, id) {
     if (kind === "tpl") { saveCritical("activeBaseTemplate", id); try { ipeRefreshTemplateEditors(); } catch(e) {} }
+    else if (kind === "rule") { saveCritical("activeRulePreset", id); try { ipeRefreshRuleEditors(); } catch(e1) {} }
     else { saveCritical(LP[1], id); try { ipeLedgerRefreshBotEditors(); } catch(e2) {} }
 }
-function ipeCardLockSay(kind, t, color) { if (kind === "tpl") setStatus(t, color); else ipeLedgerStatus(t, color); }
+/* 画风、提取规则是生图那边的，说在生图状态行；挂账规则说在挂账状态行 */
+function ipeCardLockSay(kind, t, color) { if (kind === "lrule") ipeLedgerStatus(t, color); else setStatus(t, color); }
 /* 这张卡锁的那套；没锁 / 没开卡 / 锁的被删了 → null */
 function ipeCardLockedItem(kind) {
     var k = ipeAnchorCardKey(); if (!k) return null;
@@ -4567,21 +4571,27 @@ function ipeCardUnlock(kind) {
     return true;
 }
 /* 核一遍：换了卡（或这个页面第一次核）就把锁的那套切上来。同一张卡里不重复切，在锁了的卡上手动换的那套要留得住。
-   say = 切了就在状态行说一声（换聊天、载入时）；请求路上核出来的只记进体检流水，不抢状态行。返回切了哪几样。 */
-function ipeCardLockSync(say) {
+   say = 切了就在状态行说一声（换聊天、载入时）；请求路上核出来的只记进体检流水，不抢状态行。
+   imgNote = 生图状态行上要一起说的另一句（换聊天时刚切过去的锚点），只在这边也切了东西时才并进来。返回切了哪几样。 */
+function ipeCardLockSync(say, imgNote) {
     var k = "";
     try { k = ipeAnchorCardKey(); } catch(e) {}
     if (k === ipeCardLockSeen) return [];
     ipeCardLockSeen = k;
-    var switched = [];
+    var switched = [], img = imgNote ? [String(imgNote)] : [], led = [];   // 同一条状态行的几样合成一句说，不然后一句盖掉前一句
     if (k) IPE_CARD_LOCK_KINDS.forEach(function(kind){
         try {
             var it = ipeCardLockedItem(kind); if (!it || ipeCardLockActive(kind).id === it.id) return;
             ipeCardLockSetActive(kind, it.id); switched.push(kind);
-            var note = "🔒 这张卡锁定的" + IPE_CARD_LOCKS[kind].what + "：「" + (it.name || "") + "」";
-            if (say) ipeCardLockSay(kind, note, "#6ec577"); else ipeLog("系统", note + "（换卡了，自动切过去）");
+            (kind === "lrule" ? led : img).push(IPE_CARD_LOCKS[kind].what + "：「" + (it.name || "") + "」");
         } catch(e2) {}
     });
+    if (switched.length) {
+        if (say) {
+            if (img.length) setStatus("🔒 这张卡锁定的" + img.join("、"), "#6ec577");
+            if (led.length) ipeLedgerStatus("🔒 这张卡锁定的" + led.join("、"), "#6ec577");
+        } else ipeLog("系统", "🔒 这张卡锁定的" + img.concat(led).join("、") + "（换卡了，自动切过去）");
+    }
     try { ipeCardLockRefreshUI(); } catch(e3) {}
     return switched;
 }
@@ -4975,6 +4985,7 @@ function ipeRefreshRuleEditors() {
     ["ipe-extract-rules","iped-extract-rules"].forEach(function(id){
         var el = q("#" + id); if (el && el !== document.activeElement) el.value = item.value || "";
     });
+    try { ipeCardLockRefreshUI(); } catch(eK) {}
 }
 
 /* 2.19.15：预设下拉按名字的拼音排序（数字按数值比：预设2 排在 预设10 前面）。
@@ -6696,6 +6707,7 @@ function ipeCastBindUI() {
 }
 
 function buildVisionUserPrompt(text, supplement, lockOverride) {
+    try { ipeCardLockSync(); } catch(eK) {}   // 2.33.0 换聊天事件漏了也按这张卡锁的提取规则来
     var c = cfg();
     var user = ipeCardOrderBlock();   // 2.28.0 本卡长期指令打头，最高优先级
 
@@ -7079,7 +7091,7 @@ function ipeDiagReport() {
         if (!phs.length) warn.push("画风模板「" + (it.name || "") + "」里一个占位符都没有（{Description} 之类），描述会直接接在模板后面");
         return "「" + (it.name || "") + "」" + ipeCardLockNote("tpl") + "｜公共块：" + (blk ? "「" + (blk.name || "") + "」" : "不挂") + "｜占位符：" + (phs.length ? phs.filter(function(x, i){ return phs.indexOf(x) === i; }).join(" ") : "没有");
     });
-    line("提取规则 / 系统提示", function(){ return "「" + ((ipeGetActiveRuleItem() || {}).name || "") + "」/「" + ((ipeGetActiveSystemPromptItem() || {}).name || "") + "」"; });
+    line("提取规则 / 系统提示", function(){ return "「" + ((ipeGetActiveRuleItem() || {}).name || "") + "」" + ipeCardLockNote("rule") + " /「" + ((ipeGetActiveSystemPromptItem() || {}).name || "") + "」"; });
     line("正文标签", function(){
         var tags = ipeBodyTagNames(), chat = ctx().chat || [], i = -1;
         for (var k = chat.length - 1; k >= 0; k--) { if (chat[k] && !chat[k].is_user && chat[k].is_system !== true) { i = k; break; } }
@@ -8084,6 +8096,11 @@ function createPanel() {
             '<button id="ipe-rule-add" class="ipe-btn" type="button">新增规则</button>'+
             '<button id="ipe-rule-delete" class="ipe-btn" type="button">删除当前</button>'+
         '</div>'+
+        '<div class="ipe-preview-actions" style="margin-top:6px">'+
+            '<button id="ipe-rule-lock" class="ipe-btn" type="button">🔒 锁到这张卡</button>'+
+            '<button id="ipe-rule-unlock" class="ipe-btn" type="button" style="display:none">🔓 解锁</button>'+
+        '</div>'+
+        '<div id="ipe-rule-lock-info" class="ipe-hint"></div>'+
         '<textarea id="ipe-extract-rules" rows="5" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>'+
         '<div class="ipe-hint">当前选中的提取规则会随提取请求一起发送</div>'+
         '<label style="margin-top:8px">正文标签（主 AI 拿哪个标签包正文）<input type="text" id="ipe-body-tag" placeholder="content"></label>'+
@@ -8731,6 +8748,8 @@ function createDrawer() {
     h += '<label>规则预设</label><select id="iped-rule-slot" class="text_pole"></select>';
     h += '<label>规则名称</label><input type="text" id="iped-rule-name" class="text_pole" value="" placeholder="例如：GPT-image-2 / NAI / NanoBanana">';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-add" class="menu_button" value="新增规则"><input type="button" id="iped-rule-delete" class="menu_button" value="删除当前"></div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-rule-lock" class="menu_button" value="🔒 锁到这张卡"><input type="button" id="iped-rule-unlock" class="menu_button" value="🔓 解锁" style="display:none"></div>';
+    h += '<small id="iped-rule-lock-info" style="color:#888"></small>';
     h += '<textarea id="iped-extract-rules" class="text_pole" rows="4" placeholder="例：输出英文自然语言描述；不要参数；不要解释；适配当前生图模型..."></textarea>';
     h += '<label>正文标签（主 AI 拿哪个标签包正文）</label><input type="text" id="iped-body-tag" class="text_pole" placeholder="content">';
     h += '<small style="color:#888">生图和挂账都只从这个标签里取正文（这楼没有就用整楼）；新楼这个标签没收尾 = 没写完，自动生图、自动挂账先不跑。默认 content，不用带尖括号，几个就逗号隔开。留空 = 不认标签：照老样子认 &lt;content&gt;，只拦空回。跟挂账页「高级设置」里那格是同一个。</small>';
@@ -9800,7 +9819,9 @@ function bindAll() {
     ["ipe-rule-slot","iped-rule-slot"].forEach(function(id){
         var el=q("#"+id); if(!el) return;
         el.addEventListener("change", function(){
-            saveCritical("activeRulePreset", el.value);
+            var picked = el.value;
+            try { ipeCardLockSync(); } catch(eK) {}   // 2.33.0 先核卡，再记你选的
+            saveCritical("activeRulePreset", picked);
             ipeRefreshRuleEditors();
         });
     });
@@ -10558,11 +10579,12 @@ function bindAll() {
                     try { ipeLedgerModeRefresh(); } catch(eS) {}   // 卡槽显示换成这张卡的
                     try { ipeLedgerNoteCardSync(); } catch(eN) {}  // 2.29.4 本卡要点换成这张卡记的那套
                     try { ipeImgRefreshLayerUI(); } catch(eL) {}   // 四个层框换成本聊天的
+                    var ab = null;
                     try {                                            // 锁了锚点的卡：下拉切到锁定的那套
-                        var ab = ipeAnchorLockApply();
+                        ab = ipeAnchorLockApply();
                         if (ab) setStatus("🔒 这张卡锁定的锚点：「" + ab + "」", "#6ec577");
                     } catch(eA) {}
-                    try { ipeCardLockSync(true); } catch(eK) {}    // 2.31.0 锁了画风 / 挂账规则的卡：切到锁的那套
+                    try { ipeCardLockSync(true, ab ? "锚点：「" + ab + "」" : ""); } catch(eK) {}    // 2.31.0 锁了画风 / 提取规则 / 挂账规则的卡：切到锁的那套
                     try { ipeInstallMesButtonsObserver(); ipeInstallMesButtons(); } catch(eM) {}   // 楼层 🎨 按钮换成本聊天的
                 }, 200);
             });

@@ -432,8 +432,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(!!dov && dov.querySelector('.ipe-zoom-ta').readOnly && dov.querySelector('.ipe-zoom-ta').value.indexOf('🐚 小海螺体检') === 0 && !!dov.querySelector('.ipe-diag-copy') && !!dov.querySelector('.ipe-diag-clear'), '抽屉的「🩺 体检」点开：只读报告，带「复制」「清空」');
         dov.querySelector('.ipe-zoom-close').click();
         check(!d.querySelector('#ipe-zoom-overlay'), '关闭后弹层收起');
-        // 2.31.0 画风模板、挂账规则「🔒 锁到这张卡」：浮窗、抽屉各一排，跟各自的预设下拉在同一块里；锁、解锁两边一起变
-        [['template', 'templateCardLockJson', 'activeBaseTemplate'], ['ledger-prompt', 'ledgerRuleCardLockJson', 'activeLedgerPrompt']].forEach(([pre, key, activeKey]) => {
+        // 2.31.0 画风模板、挂账规则（2.33.0 加上提取规则）「🔒 锁到这张卡」：浮窗、抽屉各一排，跟各自的预设下拉在同一块里；锁、解锁两边一起变
+        [['template', 'templateCardLockJson', 'activeBaseTemplate'], ['ledger-prompt', 'ledgerRuleCardLockJson', 'activeLedgerPrompt'], ['rule', 'ruleCardLockJson', 'activeRulePreset']].forEach(([pre, key, activeKey]) => {
             const lk = [d.querySelector('#ipe-' + pre + '-lock'), d.querySelector('#iped-' + pre + '-lock')];
             const un = [d.querySelector('#ipe-' + pre + '-unlock'), d.querySelector('#iped-' + pre + '-unlock')];
             const inf = [d.querySelector('#ipe-' + pre + '-lock-info'), d.querySelector('#iped-' + pre + '-lock-info')];

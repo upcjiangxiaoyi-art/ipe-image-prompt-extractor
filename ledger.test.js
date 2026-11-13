@@ -3343,6 +3343,82 @@ await (async () => {
     ok(/挂账接口：[^\n]*原生接口/.test(rep), "🩺 体检里写着走的是原生接口", (rep.match(/挂账接口：[^\n]*/) || [""])[0]);
 })();
 
+console.log("\n【77】 提取规则也能「🔒 锁到这张卡」（2.33.0）：跟画风模板、挂账规则同一套——锁了的卡换过去自动切到那套提取规则，没锁的卡跟以前一样");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const RULES = [{ id: "rule_1", name: "写实", value: "规则甲：写实摄影，自然光。" }, { id: "rule_2", name: "二次元", value: "规则乙：日系动画，赛璐璐上色。" }];
+    const TPL = [{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }, { id: "tpl_2", name: "水墨", value: "<draw>INK: {Description}</draw>" }];
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = imgApi(w, tavern, F, "a girl.");
+    st.ledgerAutoRun = false; st.imgLayered = false; st.imgStream = false;
+    st.rulePresetsJson = JSON.stringify(RULES); st.activeRulePreset = "rule_1";
+    st.baseTemplatesJson = JSON.stringify(TPL); st.activeBaseTemplate = "tpl_1";
+    w.eval("ipeRefreshRuleEditors")(); w.eval("ipeRefreshTemplateEditors")();
+    const metas = [tavern.chatMetadata, {}];
+    const go = async (i, quiet) => {
+        tavern.characterId = i; tavern.name2 = tavern.characters[i].name; tavern.chatMetadata = metas[i]; tavern.getCurrentChatId = () => "chat-" + i;
+        if (!quiet) { await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260); }
+    };
+    const prompt = () => String(F("buildVisionUserPrompt")("这一楼的正文。", ""));
+    const el = id => d.querySelector("#" + id);
+    const pick = (id, v) => { const e = el(id); e.value = v; e.dispatchEvent(new w.Event("change", { bubbles: true })); };
+    const info = id => (el(id) ? el(id).textContent : "（没有这一行）");
+    const label = id => { const e = el(id); return e ? (e.tagName === "INPUT" ? e.value : e.textContent) : ""; };
+    const locks = () => { try { return JSON.parse(st.ruleCardLockJson || "{}"); } catch (e) { return {}; } };
+
+    ok(!!el("ipe-rule-lock") && !!el("ipe-rule-unlock") && info("ipe-rule-lock-info").indexOf("还没锁") >= 0 && info("ipe-rule-lock-info").indexOf("提取规则") >= 0, "提取规则下面有「🔒 锁到这张卡」「解锁」和说明行；没锁时写着还没锁", info("ipe-rule-lock-info"));
+    pick("ipe-rule-slot", "rule_2");
+    await go(1);
+    ok(prompt().indexOf("规则乙") >= 0, "没锁：换到另一张卡，提取规则还是刚才选的那套（跟以前一样）");
+
+    await go(0);
+    if (el("ipe-rule-lock")) el("ipe-rule-lock").click();
+    eq(locks()["char:yuan.png"], "rule_2", "点「锁到这张卡」：记下 苑无忧 → 二次元");
+    ok(info("ipe-rule-lock-info").indexOf("🔒") === 0 && info("ipe-rule-lock-info").indexOf("二次元") >= 0 && el("ipe-rule-unlock") && el("ipe-rule-unlock").style.display !== "none" && imgStatus(w).indexOf("二次元") >= 0, "说明行写着锁的是哪套，「解锁」出现，状态行说一声", info("ipe-rule-lock-info") + " / " + imgStatus(w));
+    await go(1);
+    pick("ipe-rule-slot", "rule_1");
+    ok(prompt().indexOf("规则甲") >= 0 && prompt().indexOf("规则乙") < 0 && info("ipe-rule-lock-info").indexOf("顾寒") >= 0, "没锁的那张卡上换成另一套：照换，说明行是这张卡的");
+    await go(0);
+    ok(st.activeRulePreset === "rule_2" && prompt().indexOf("规则乙") >= 0 && el("ipe-rule-slot").value === "rule_2", "换回锁了的卡：提取规则自动切回「二次元」，下拉也跟着（以前还是上一张卡选的「写实」）", st.activeRulePreset);
+    ok(imgStatus(w).indexOf("🔒") >= 0 && imgStatus(w).indexOf("提取规则") >= 0 && imgStatus(w).indexOf("二次元") >= 0, "状态行说一声切到了锁的那套", imgStatus(w));
+
+    // 画风和提取规则都锁了：状态行两样都说，不是后一句盖掉前一句
+    st.templateCardLockJson = JSON.stringify({ "char:yuan.png": "tpl_2" });
+    await go(1); pick("ipe-rule-slot", "rule_1"); pick("ipe-template-slot", "tpl_1");
+    await go(0);
+    ok(imgStatus(w).indexOf("水墨") >= 0 && imgStatus(w).indexOf("二次元") >= 0, "画风和提取规则都锁了：状态行一句话里两样都有", imgStatus(w));
+    st.templateCardLockJson = "{}";
+
+    // 换聊天事件没到：发提取请求之前自己核一遍
+    await go(1); pick("ipe-rule-slot", "rule_1");
+    await go(0, true);
+    const cap = {}; imgApi(w, tavern, F, "a girl.", cap);
+    await w.eval("onExtract")();
+    ok(String(cap.body.messages[1].content).indexOf("规则乙") >= 0 && String(cap.body.messages[1].content).indexOf("规则甲") < 0, "换聊天事件没到（手机上偶尔会漏）：提取请求发出去之前自己核一遍，带的还是锁的「二次元」", String(cap.body && cap.body.messages[1].content).slice(0, 80));
+
+    // 锁了的卡上临时换一套
+    pick("ipe-rule-slot", "rule_1");
+    ok(prompt().indexOf("规则甲") >= 0 && info("ipe-rule-lock-info").indexOf("临时") >= 0 && label("ipe-rule-lock").indexOf("改锁") >= 0, "锁了的卡上从下拉临时换一套：照换；说明行说清楚，按钮变成「改锁成当前这套」", info("ipe-rule-lock-info") + " / " + label("ipe-rule-lock"));
+    await go(1); await go(0);
+    ok(prompt().indexOf("规则乙") >= 0, "换走再换回来：切回锁的「二次元」");
+
+    // 解锁；锁的那套被删
+    if (el("ipe-rule-unlock")) el("ipe-rule-unlock").click();
+    ok(!("char:yuan.png" in locks()) && info("ipe-rule-lock-info").indexOf("还没锁") >= 0 && el("ipe-rule-unlock").style.display === "none", "「解锁」：记录删掉，说明行回到还没锁", info("ipe-rule-lock-info"));
+    st.ruleCardLockJson = JSON.stringify({ "char:yuan.png": "rule_2" });
+    await go(1);
+    st.rulePresetsJson = JSON.stringify([RULES[0]]); st.activeRulePreset = "rule_1";
+    await go(0);
+    ok(prompt().indexOf("规则甲") >= 0 && info("ipe-rule-lock-info").indexOf("删") >= 0, "锁的那套被删了：当没锁，用下拉当前的，说明行说一声", info("ipe-rule-lock-info"));
+
+    // 页面重新载入
+    st.rulePresetsJson = JSON.stringify(RULES); st.activeRulePreset = "rule_1";
+    const r2 = boot(10, tavern); await wait(260);
+    ok(st.activeRulePreset === "rule_2" && String(r2.F("buildVisionUserPrompt")("正文。", "")).indexOf("规则乙") >= 0, "页面重新载入：这张卡锁的提取规则还在，载入就切过去", st.activeRulePreset);
+    const rep = String(r2.w.eval("ipeDiagReport")());
+    ok(/提取规则[^\n]*🔒/.test(rep), "🩺 体检里「提取规则」那行标着 🔒", (rep.match(/提取规则[^\n]*/) || [""])[0]);
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);
