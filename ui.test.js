@@ -252,19 +252,20 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         tt.click();
         check(settings.mistTheme === true && settings.dangoTheme === true && settings.lemonTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon'), '草莓团子 = 浅色皮 + ipe-dango，柠檬海滩标记清掉');
         check(d.body.classList.contains('ipe-skin-dango') && !d.body.classList.contains('ipe-skin-lemon') && tt.title.indexOf('草莓团子') >= 0, 'body 上是 ipe-skin-dango，按钮提示写着草莓团子');
-        check(css.includes('html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-header::after') && css.includes('html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango') && css.includes('ipe-cap-pulse-dango') && css.includes('ipe-cap-ledger-pulse-dango') && css.includes('.ipe-zoom-overlay.ipe-skin-dango') && css.includes('.ipe-notice.ipe-skin-dango'), '样式里有草莓团子的花边标题栏、浮标团子、忙碌脉冲、放大编辑框和通知卡');
+        check(css.includes('html #ipe-panel#ipe-panel.ipe-dango .ipe-panel-header::after') && css.includes('html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango') && css.includes('ipe-cap-pulse-dango') && css.includes('ipe-cap-ledger-pulse-dango') && css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-dango'), '样式里有草莓团子的花边标题栏、浮标团子、忙碌脉冲、放大编辑框和通知卡');
         const capD = d.querySelector('#ipe-chat-quick-entry');
         check(!!capD && capD.querySelectorAll('svg > g.ipe-cap-dango circle').length === 3 && capD.querySelector('svg > g.ipe-cap-dango').style.display === 'none', '浮标里有一串三色团子，平时藏着（别的皮肤照旧是海螺），由样式在草莓团子皮里换出来');
         check(String(capD.style.getPropertyValue('filter')).indexOf('240,120,155') >= 0, '草莓团子皮：浮标投影换成淡粉（' + capD.style.getPropertyValue('filter') + '）');
         d.querySelector('#ipe-base-template').value = 'x'; w.eval('ipeZoomOpen')(d.querySelector('#ipe-base-template'));
         check(d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-skin-dango') && d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-mist'), '放大编辑框带着当前皮肤的类（它挂在页面最外层，吃不到 body 上的类）');
         d.querySelector('#ipe-zoom-overlay .ipe-zoom-close').click();
-        // 2.36.0 七套老皮肤的细节打磨：开关同尺寸同颜色体系、⤢ 小圆钮、状态行浅底、弹层各用各的颜色；草莓团子不吃这一层
-        check(['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon'].every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')), '七套老皮肤各有一组自己的开关颜色（--ipe-sw-*）');
-        check(css.includes('html #ipe-panel:not(.ipe-dango) .ipe-toggle { width: 38px') && css.includes('html #ipe-panel:not(.ipe-dango) .ipe-section-body input[type="checkbox"]:checked') && css.includes('var(--ipe-sw-knob-on) 0 8px'), '总开关和小开关同一个尺寸（38×22）、同一套颜色');
-        check(css.includes('html #ipe-panel:not(.ipe-dango) .ipe-zoom-btn') && css.includes('.ipe-zoom-wrap.ipe-zoom-wrap > textarea { padding-right: 38px'), '⤢ 换成小圆钮，文字给它让出位置');
-        check(['apricot', 'jade', 'beach', 'pearl', 'lemon'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --ipe-o-ink')), '放大编辑框、通知卡：后来加的五套皮肤各有自己的颜色');
-        check(css.indexOf('2.36.0 七套老皮肤的细节打磨') > 0 && css.indexOf('2.36.0 七套老皮肤的细节打磨') < css.indexOf('2.35.0 草莓团子') && (css.match(/html #ipe-panel:not\(\.ipe-dango\)/g) || []).length >= 15, '打磨层排在草莓团子前面，换外观的规则都带 :not(.ipe-dango)，不动草莓团子');
+        // 2.37.0 八套皮肤共用一套「贴纸」做工：形状规则只有一份，颜色走变量，每套皮肤各配一组（2.36.0 的打磨层并进来了）
+        const skinSel = ['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon', '.ipe-dango'];
+        check(css.includes('2.37.0 八套皮肤共用一套「贴纸」做工') && !css.includes('2.36.0 七套老皮肤的细节打磨') && !css.includes('html #ipe-panel.ipe-mist.ipe-dango '), '样式表里是共用做工层，旧的打磨层和草莓团子专用的面板规则都并掉了');
+        check(skinSel.every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')) && skinSel.every(k => new RegExp('html #ipe-panel' + k.replace('.', '\\.') + ' \\{\\s+--dg-a: ').test(css)) && (css.match(/--dg-bullet: "/g) || []).length === 8, '八套皮肤各有一组自己的颜色（--dg-*）、开关颜色（--ipe-sw-*）和一个小标记');
+        check(css.includes('html #ipe-panel#ipe-panel .ipe-toggle { width: 38px') && /html #ipe-panel#ipe-panel \.ipe-section-body input\[type="checkbox"\] \{\s+width: 38px/.test(css), '总开关和小开关同一个尺寸（38×22）');
+        check(css.includes('html #ipe-panel#ipe-panel .ipe-zoom-btn') && css.includes('.ipe-zoom-wrap > textarea { padding-right: 38px') && css.includes('html #ipe-panel#ipe-panel .ipe-panel-header::after') && css.includes('-webkit-mask: radial-gradient'), '⤢ 是小圆钮、文字给它让位；标题栏花边用遮罩切，什么底色都接得上');
+        check(['mist', 'apricot', 'jade', 'beach', 'pearl', 'lemon', 'dango'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --o-rim')) && css.includes(':is(.ipe-zoom-overlay, .ipe-notice) { --o-rim'), '放大编辑框、通知卡：八套各有一组颜色（月潮是默认那组）');
         tt.click();
         check(settings.mistTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '草莓团子再点一下回到月潮');
         check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango'), '月潮：body 上没有任何 ipe-skin-* 类');
