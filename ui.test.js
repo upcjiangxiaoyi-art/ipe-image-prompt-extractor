@@ -259,6 +259,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         d.querySelector('#ipe-base-template').value = 'x'; w.eval('ipeZoomOpen')(d.querySelector('#ipe-base-template'));
         check(d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-skin-dango') && d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-mist'), '放大编辑框带着当前皮肤的类（它挂在页面最外层，吃不到 body 上的类）');
         d.querySelector('#ipe-zoom-overlay .ipe-zoom-close').click();
+        // 2.36.0 七套老皮肤的细节打磨：开关同尺寸同颜色体系、⤢ 小圆钮、状态行浅底、弹层各用各的颜色；草莓团子不吃这一层
+        check(['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon'].every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')), '七套老皮肤各有一组自己的开关颜色（--ipe-sw-*）');
+        check(css.includes('html #ipe-panel:not(.ipe-dango) .ipe-toggle { width: 38px') && css.includes('html #ipe-panel:not(.ipe-dango) .ipe-section-body input[type="checkbox"]:checked') && css.includes('var(--ipe-sw-knob-on) 0 8px'), '总开关和小开关同一个尺寸（38×22）、同一套颜色');
+        check(css.includes('html #ipe-panel:not(.ipe-dango) .ipe-zoom-btn') && css.includes('.ipe-zoom-wrap.ipe-zoom-wrap > textarea { padding-right: 38px'), '⤢ 换成小圆钮，文字给它让出位置');
+        check(['apricot', 'jade', 'beach', 'pearl', 'lemon'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --ipe-o-ink')), '放大编辑框、通知卡：后来加的五套皮肤各有自己的颜色');
+        check(css.indexOf('2.36.0 七套老皮肤的细节打磨') > 0 && css.indexOf('2.36.0 七套老皮肤的细节打磨') < css.indexOf('2.35.0 草莓团子') && (css.match(/html #ipe-panel:not\(\.ipe-dango\)/g) || []).length >= 15, '打磨层排在草莓团子前面，换外观的规则都带 :not(.ipe-dango)，不动草莓团子');
         tt.click();
         check(settings.mistTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '草莓团子再点一下回到月潮');
         check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango'), '月潮：body 上没有任何 ipe-skin-* 类');

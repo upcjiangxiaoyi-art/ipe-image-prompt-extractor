@@ -2605,6 +2605,104 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 .ipe-switch-row.ipe-switch-col .ipe-switch-item > .ipe-toggle { order: -1; flex: none; }
 
 /* ============================================================
+   2.36.0 七套老皮肤的细节打磨（草莓团子有自己的一套，不在这里）
+   颜色一概不动，只修几处一直糙着的地方：
+     · 开关：最上面的总开关比下面几颗大一圈、还往左突出一截；下面几颗不管哪套皮肤都是同一个蓝紫色。
+       现在大小一样、左边对齐，颜色各用各皮肤总开关的那一套（--ipe-sw-*）
+     · ⤢：原来是个灰方块，还压着文字。换成跟皮肤走的小圆钮，文字给它让出位置
+     · 状态行：衬一块浅底，看得出是一条状态
+     · 折叠箭头衬个小圆底；按钮按下去有一点回弹；输入框聚焦时一圈皮肤色的光
+     · 放大编辑框、通知卡：杏岸 / 碧岸 / 粉蓝海滩 / 珠光海螺 / 柠檬海滩 以前都借海雾的灰蓝，现在各用各的颜色
+   ============================================================ */
+html #ipe-panel { --ipe-sw-off: rgba(93,114,137,.22); --ipe-sw-knob: #dce8ef; --ipe-sw-on: linear-gradient(90deg,#6478aa,#778fc0 52%,#72a7bc); --ipe-sw-knob-on: #d8c79f; --ipe-sw-edge-on: rgba(132,156,207,.48); }
+html #ipe-panel.ipe-mist { --ipe-sw-off: rgba(92,121,150,.17); --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#7d9fc9,#9589c5); --ipe-sw-knob-on: #fff8e8; --ipe-sw-edge-on: rgba(126,137,193,.42); }
+html #ipe-panel.ipe-apricot { --ipe-sw-on: #959e96; --ipe-sw-edge-on: rgba(149,158,150,.60); }
+html #ipe-panel.ipe-jade { --ipe-sw-on: #488883; --ipe-sw-edge-on: rgba(72,136,131,.60); }
+html #ipe-panel.ipe-beach { --ipe-sw-off: rgba(232,178,198,.55); --ipe-sw-on: rgba(114,177,207,.65); --ipe-sw-knob-on: #0091bd; --ipe-sw-edge-on: rgba(0,145,189,.35); }
+html #ipe-panel.ipe-pearl { --ipe-sw-off: rgba(201,208,216,.80); --ipe-sw-knob: #fffdfa; --ipe-sw-on: rgba(111,127,146,.70); --ipe-sw-knob-on: #f6f2d8; --ipe-sw-edge-on: rgba(111,127,146,.50); }
+html #ipe-panel.ipe-lemon { --ipe-sw-off: rgba(175,197,230,.55); --ipe-sw-on: #8fabdc; --ipe-sw-knob-on: #f7ea5e; --ipe-sw-edge-on: rgba(127,157,214,.70); }
+
+/* 开关：总开关和小开关同一个尺寸、同一条左边线、同一套颜色 */
+html #ipe-panel:not(.ipe-dango) .ipe-toggle { width: 38px !important; height: 22px !important; flex: 0 0 38px !important; margin: 0 2px 0 7px !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-toggle .ipe-toggle-slider { border: 1px solid var(--ipe-ui-line-strong) !important; background: var(--ipe-sw-off) !important; box-shadow: none !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-toggle .ipe-toggle-slider::before { top: 2px !important; left: 2px !important; width: 16px !important; height: 16px !important; background: var(--ipe-sw-knob) !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-toggle input:checked + .ipe-toggle-slider { border-color: var(--ipe-sw-edge-on) !important; background: var(--ipe-sw-on) !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-toggle input:checked + .ipe-toggle-slider::before { transform: translateX(16px) !important; background: var(--ipe-sw-knob-on) !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-section-body input[type="checkbox"],
+html #ipe-panel:not(.ipe-dango) .ipe-section-body > div:has(input[type="checkbox"]) > label > input[type="checkbox"] {
+    width: 38px !important; min-width: 38px !important; max-width: 38px !important;
+    height: 22px !important; min-height: 22px !important; flex: 0 0 38px !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    background: radial-gradient(circle at 10px 50%, var(--ipe-sw-knob) 0 8px, transparent 8.6px), var(--ipe-sw-off) !important;
+}
+html #ipe-panel:not(.ipe-dango) .ipe-section-body input[type="checkbox"]:checked,
+html #ipe-panel:not(.ipe-dango) .ipe-section-body > div:has(input[type="checkbox"]) > label > input[type="checkbox"]:checked {
+    border-color: var(--ipe-sw-edge-on) !important;
+    background: radial-gradient(circle at calc(100% - 10px) 50%, var(--ipe-sw-knob-on) 0 8px, transparent 8.6px), var(--ipe-sw-on) !important;
+}
+
+/* ⤢：跟皮肤走的小圆钮；所有皮肤的文字都给它让出位置 */
+html #ipe-panel .ipe-section-body .ipe-zoom-wrap.ipe-zoom-wrap > textarea { padding-right: 38px !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-zoom-btn {
+    top: 6px !important; right: 7px !important;
+    width: 24px !important; height: 24px !important; min-height: 0 !important; line-height: 21px !important;
+    padding: 0 !important;
+    border: 1px solid var(--ipe-ui-line-strong) !important;
+    border-radius: 50% !important;
+    background: var(--ipe-ui-card-strong) !important;
+    color: var(--ipe-ui-muted) !important; -webkit-text-fill-color: var(--ipe-ui-muted) !important;
+    font-size: 12px !important;
+    box-shadow: 0 2px 6px var(--ipe-ui-shadow) !important;
+    opacity: .95 !important;
+}
+
+/* 状态行衬一块浅底；空着就收起来 */
+html #ipe-panel:not(.ipe-dango) .ipe-preview-status {
+    padding: 6px 10px !important;
+    border: 1px solid var(--ipe-ui-line) !important;
+    border-radius: 10px !important;
+    background: var(--ipe-ui-card) !important;
+    line-height: 1.5 !important;
+}
+html #ipe-panel .ipe-preview-status:empty { display: none !important; }
+
+/* 折叠箭头、按钮回弹、聚焦光圈、滚动条、挤扁的下拉 */
+html #ipe-panel:not(.ipe-dango) .ipe-collapse-icon {
+    display: inline-flex !important; align-items: center; justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--ipe-ui-line);
+    color: var(--ipe-ui-muted) !important;
+    font-size: 9px !important;
+}
+html #ipe-panel:not(.ipe-dango) .ipe-btn { transition: transform .08s ease, background-color .15s ease, border-color .15s ease !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-btn:active:not(:disabled) { transform: translateY(1px) scale(.985) !important; }
+html #ipe-panel:not(.ipe-dango) .ipe-section-body :is(input[type="text"], input[type="password"], input[type="number"], textarea, select):focus {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ipe-ui-blue) 24%, transparent) !important;
+    outline: none !important;
+}
+html #ipe-panel:not(.ipe-dango) .ipe-sections::-webkit-scrollbar-thumb { background: var(--ipe-ui-line-strong) !important; }
+html #ipe-panel .ipe-preview-actions > select { min-width: 92px !important; }
+
+/* 放大编辑框、通知卡：五套后来加的皮肤各用各的颜色（月潮、海雾本来就有自己的，不动） */
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-apricot { --ipe-o-ink: #514940; --ipe-o-sub: #70665d; --ipe-o-edge: rgba(149,158,150,.55); --ipe-o-bg: #fffaf3; --ipe-o-head: linear-gradient(110deg,#f1d6c6,#fdeadb 60%,#ece6dc); --ipe-o-accent: #7b8c80; }
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-jade { --ipe-o-ink: #245053; --ipe-o-sub: #486b68; --ipe-o-edge: rgba(144,186,171,.65); --ipe-o-bg: #f7fdf9; --ipe-o-head: linear-gradient(110deg,#b6d5c9,#dfeee7 60%,#eedbce); --ipe-o-accent: #488883; }
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-beach { --ipe-o-ink: #2f5670; --ipe-o-sub: #5f7f95; --ipe-o-edge: rgba(114,177,207,.60); --ipe-o-bg: #fbfdff; --ipe-o-head: linear-gradient(110deg,#bcdbec,#dfe8f3 50%,#f4d2df); --ipe-o-accent: #3d93b8; }
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-pearl { --ipe-o-ink: #3f4b5a; --ipe-o-sub: #6f7f92; --ipe-o-edge: rgba(111,127,146,.45); --ipe-o-bg: #fdfbf7; --ipe-o-head: linear-gradient(110deg,#b2bdca,#d9dee4 50%,#f3eee7); --ipe-o-accent: #6f7f92; }
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-lemon { --ipe-o-ink: #3a4a68; --ipe-o-sub: #62739a; --ipe-o-edge: rgba(175,197,230,.95); --ipe-o-bg: #ffffff; --ipe-o-head: linear-gradient(110deg,#fbf0a0,#dbe6f6 55%,#f9d3e3); --ipe-o-accent: #7f9dd6; }
+.ipe-zoom-overlay:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-zoom-box { border-color: var(--ipe-o-edge) !important; background: var(--ipe-o-bg) !important; color: var(--ipe-o-ink) !important; }
+.ipe-zoom-overlay:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-zoom-head { border-bottom-color: var(--ipe-o-edge) !important; background: var(--ipe-o-head) !important; }
+.ipe-zoom-overlay:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-zoom-title { color: var(--ipe-o-ink) !important; }
+.ipe-zoom-overlay:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-zoom-head button { border-color: var(--ipe-o-edge) !important; background: rgba(255,255,255,.72) !important; color: var(--ipe-o-ink) !important; }
+.ipe-zoom-overlay:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-zoom-ta { border-color: var(--ipe-o-edge) !important; background: #ffffff !important; color: var(--ipe-o-ink) !important; }
+.ipe-notice:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) { border-color: var(--ipe-o-edge) !important; border-left-color: var(--ipe-o-accent) !important; background: var(--ipe-o-bg) !important; color: var(--ipe-o-ink) !important; }
+.ipe-notice.ipe-notice-error:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) { border-left-color: #c9837a !important; }
+.ipe-notice:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-notice-title { color: var(--ipe-o-ink) !important; -webkit-text-fill-color: var(--ipe-o-ink) !important; }
+.ipe-notice:is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) :is(.ipe-notice-body, .ipe-notice-x) { color: var(--ipe-o-sub) !important; -webkit-text-fill-color: var(--ipe-o-sub) !important; }
+.ipe-notice:not(.ipe-notice-error):is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) :is(.ipe-notice-ok, .ipe-notice-act) { border-color: var(--ipe-o-accent) !important; color: var(--ipe-o-accent) !important; -webkit-text-fill-color: var(--ipe-o-accent) !important; }
+.ipe-notice:not(.ipe-notice-error):is(.ipe-skin-apricot, .ipe-skin-jade, .ipe-skin-beach, .ipe-skin-pearl, .ipe-skin-lemon) .ipe-notice-bar { background: var(--ipe-o-accent) !important; }
+
+/* ============================================================
    2.35.0 草莓团子 🍡 · 第八档
    三色团子的颜色：草莓奶粉 #FFB3C6 · 奶油白 #FFFAF3 · 薄荷绿 #BDEAD5，墨色用可可梅子 #6A5560。
    前七档都是同一套形状只换颜色；这一档连形状一起换，走「贴纸 / 软糖」的路子：
