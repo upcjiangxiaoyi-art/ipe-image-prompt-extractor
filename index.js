@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.34.0";
+var IPE_VERSION = "2.35.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -61,6 +61,7 @@ function ipeImgTplLineRest(line) {
 }
 const DEFAULTS = {
     enabled: true,
+    dangoTheme: false, // 2.35.0 草莓团子：草莓奶粉、薄荷绿、奶油白；不只换色，按钮、卡片、标题栏的形状也换成圆滚滚的贴纸感，叠在浅色皮上
     lemonTheme: false, // 2.19.14 柠檬海滩：柠檬黄、长春花蓝与樱花粉，明媚，叠在浅色皮上
     pearlTheme: false, // 2.19.13 珠光海螺：灰蓝莫兰迪渐到珍珠白，叠在浅色皮上
     beachTheme: false, // 2.19.12 粉蓝海滩：海蓝与粉霞，叠在浅色皮上
@@ -251,11 +252,12 @@ function ipeRootDocument() {
 // 全部配色交给 style.css 级联；不动任何功能逻辑。
 /* 配色七档（2.19.14 加柠檬海滩）：月潮 🌙 → 海雾 ☀️ → 杏岸 🌅 → 碧岸 🌊 → 粉蓝海滩 🏝️ → 珠光海螺 🐚 → 柠檬海滩 🍋 → 月潮。
    除月潮外都是浅色皮 .ipe-mist 再叠一层自己的类只换颜色；设置里各存一个布尔，老设置照常。 */
-var IPE_THEME_ORDER = ["night", "mist", "apricot", "jade", "beach", "pearl", "lemon"];
-var IPE_THEME_ICON = { night: "🌙", mist: "☀️", apricot: "🌅", jade: "🌊", beach: "🏝️", pearl: "🐚", lemon: "🍋" };
-var IPE_THEME_NAME = { night: "月潮", mist: "海雾", apricot: "杏岸", jade: "碧岸", beach: "粉蓝海滩", pearl: "珠光海螺", lemon: "柠檬海滩" };
+var IPE_THEME_ORDER = ["night", "mist", "apricot", "jade", "beach", "pearl", "lemon", "dango"];
+var IPE_THEME_ICON = { night: "🌙", mist: "☀️", apricot: "🌅", jade: "🌊", beach: "🏝️", pearl: "🐚", lemon: "🍋", dango: "🍡" };
+var IPE_THEME_NAME = { night: "月潮", mist: "海雾", apricot: "杏岸", jade: "碧岸", beach: "粉蓝海滩", pearl: "珠光海螺", lemon: "柠檬海滩", dango: "草莓团子" };
 function ipeThemeCurrent() {
     var c = cfg();
+    if (c.dangoTheme === true) return "dango";
     if (c.lemonTheme === true) return "lemon";
     if (c.pearlTheme === true) return "pearl";
     if (c.beachTheme === true) return "beach";
@@ -271,13 +273,22 @@ function ipeThemeSet(name) {
     save("beachTheme", name === "beach");
     save("pearlTheme", name === "pearl");
     save("lemonTheme", name === "lemon");
+    save("dangoTheme", name === "dango");
 }
 function ipeThemeCycle() {
     var i = IPE_THEME_ORDER.indexOf(ipeThemeCurrent());
     ipeThemeSet(IPE_THEME_ORDER[(i + 1) % IPE_THEME_ORDER.length]);
 }
+/* 浮标的投影：默认一团深灰；草莓团子皮换成淡粉的（灰的压在奶油色上显脏）。写在行内带 important，CSS 盖不动，所以由这里给 */
+function ipeCapsuleShadow() {
+    return ipeThemeCurrent() === "dango" ? "drop-shadow(0 2px 5px rgba(240,120,155,.40))" : "drop-shadow(0 3px 7px rgba(0,0,0,.30))";
+}
 function ipeApplyTheme() {
     try {
+        try {
+            var cap = ipeRootDocument().getElementById("ipe-chat-quick-entry");
+            if (cap && cfg().quickEntryMotion !== false) cap.style.setProperty("filter", ipeCapsuleShadow(), "important");
+        } catch(eC) {}
         var p = ipeRootDocument().getElementById("ipe-panel");
         if (!p) return;
         var mist = cfg().mistTheme === true;
@@ -287,6 +298,7 @@ function ipeApplyTheme() {
         p.classList.toggle("ipe-beach", cfg().beachTheme === true);
         p.classList.toggle("ipe-pearl", cfg().pearlTheme === true);
         p.classList.toggle("ipe-lemon", cfg().lemonTheme === true);
+        p.classList.toggle("ipe-dango", cfg().dangoTheme === true);
         /* 2.19.15：抽屉和浮标的配色以前靠 body:has(#ipe-panel.ipe-xxx) 跟着面板走，
            :has() 盯着整棵 body，聊天区流式输出每改一次 DOM 浏览器都要重算一遍匹配。
            现在直接把当前配色写到 body 的类上（ipe-skin-xxx），CSS 不再需要 :has()。 */
@@ -305,7 +317,7 @@ function ipeApplyTheme() {
         if (tg) {
             var cur = ipeThemeCurrent();
             tg.textContent = IPE_THEME_ICON[cur];
-            tg.title = "配色：" + IPE_THEME_NAME[cur] + " · 点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋）";
+            tg.title = "配色：" + IPE_THEME_NAME[cur] + " · 点击切换（🌙 → ☀️ → 🌅 → 🌊 → 🏝️ → 🐚 → 🍋 → 🍡）";
             tg.setAttribute("aria-label", tg.title);
         }
     } catch(e) {}
@@ -7311,7 +7323,7 @@ function ipeNotice(opts) {
     var bd  = mist ? "rgba(140,156,172,.30)" : "rgba(255,255,255,.10)";
 
     var card = d.createElement("div");
-    card.className = "ipe-notice ipe-notice-" + kind + (mist ? " ipe-mist" : "");
+    card.className = "ipe-notice ipe-notice-" + kind + (mist ? " ipe-mist" : "") + " ipe-skin-" + ipeThemeCurrent();
     card.setAttribute("role", "alert");
     card.setAttribute("data-ipe-sticky", sticky ? "1" : "0");
     card.style.cssText = "pointer-events:auto;position:relative;overflow:hidden;border-radius:10px;border:1px solid " + bd
@@ -7786,7 +7798,12 @@ function createChatQuickButton() {
     btn.id = "ipe-chat-quick-entry";
     btn.type = "button";
     /* 月灰入米霜 · SVG 胶囊皮肤（按钮外壳透明，视觉全由 SVG 承担） */
-    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="7" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.7"><animate attributeName="r" values="6;16" dur="3.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="3.4s" repeatCount="indefinite"/></circle><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text></svg>';
+    btn.innerHTML = '<svg viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg" aria-label="IPE" style="height:100%;width:auto;display:block;pointer-events:none"><defs><linearGradient id="pkIPE-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#B0B1CF"/><stop offset="100%" stop-color="#F1E2D2"/></linearGradient></defs><rect x="1" y="1" width="118" height="42" rx="21" fill="url(#pkIPE-bg)"/><circle cx="24" cy="22" r="7" fill="none" stroke="#FBF3E8" stroke-width="1.2" opacity="0.7"><animate attributeName="r" values="6;16" dur="3.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="3.4s" repeatCount="indefinite"/></circle><g transform="translate(9.5 10.5) scale(0.48)"><path d="M25 24 a1.5 1.5 0 0 1 -3 0 a3.5 3.5 0 0 1 7 0 a6 6 0 0 1 -12 0 a9 9 0 0 1 18 0" fill="none" stroke="#FDF7EE" stroke-width="3.2" stroke-linecap="round"/></g><text x="47" y="28.5" font-size="16.5" font-weight="700" fill="#797EAC" letter-spacing="2.5" font-family="-apple-system,sans-serif">IPE</text>'
+        /* 2.35.0 草莓团子皮肤的浮标：一串三色团子。平时藏着（别的皮肤照旧是海螺 + 涟漪），style.css 里 ipe-skin-dango 才把它换出来 */
+        + '<g class="ipe-cap-dango" style="display:none"><line x1="6" y1="22" x2="55" y2="22" stroke="#E2B98F" stroke-width="2.2" stroke-linecap="round"/>'
+        + '<circle cx="16" cy="22" r="6.8" fill="#FFB3C6"><animate attributeName="cy" values="22;19.5;22;22" keyTimes="0;.18;.36;1" dur="3.6s" begin="0s" repeatCount="indefinite"/></circle>'
+        + '<circle cx="30.5" cy="22" r="6.8" fill="#FFFDF7"><animate attributeName="cy" values="22;19.5;22;22" keyTimes="0;.18;.36;1" dur="3.6s" begin="0.25s" repeatCount="indefinite"/></circle>'
+        + '<circle cx="45" cy="22" r="6.8" fill="#BDEAD5"><animate attributeName="cy" values="22;19.5;22;22" keyTimes="0;.18;.36;1" dur="3.6s" begin="0.5s" repeatCount="indefinite"/></circle></g></svg>';
     btn.title = "可移动 IPE 快捷入口：拖动移动，点击打开小面板";
 
     function imp(k, v) {
@@ -7828,7 +7845,7 @@ function createChatQuickButton() {
         try { btn.querySelectorAll("animate").forEach(function(a){ a.remove(); }); } catch(eA) {}
         imp("filter", "none");
     } else {
-        imp("filter", "drop-shadow(0 3px 7px rgba(0,0,0,.30))");
+        imp("filter", ipeCapsuleShadow());
     }
     imp("z-index", "2147483647");
     imp("cursor", "grab");
@@ -9409,7 +9426,7 @@ function ipeZoomOpen(ta) {
     var mist = cfg().mistTheme === true;
     var ov = d.createElement("div");
     ov.id = "ipe-zoom-overlay";
-    ov.className = "ipe-zoom-overlay" + (mist ? " ipe-mist" : "");
+    ov.className = "ipe-zoom-overlay" + (mist ? " ipe-mist" : "") + " ipe-skin-" + ipeThemeCurrent();
     /* 关键样式全部内联：酒馆会缓存扩展的 style.css，更新后 JS 是新的、CSS 可能还是旧的，
        只靠外部 CSS 的话弹窗会变成一个躺在页面底部看不见的 div。外部 CSS 只做锦上添花。 */
     ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;min-height:100%;background:" + (mist ? "rgba(70,82,94,.38)" : "rgba(0,0,0,.55)") + ";"

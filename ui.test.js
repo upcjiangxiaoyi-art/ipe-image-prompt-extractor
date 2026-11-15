@@ -156,7 +156,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const capCss = fs.readFileSync(__dirname + '/style.css', 'utf8');
         const lampSizes = [...capCss.matchAll(/#ipe-chat-quick-entry\.[\w-]+::(?:before|after)\s*\{[^}]*?width:\s*([\d.]+)px;\s*height:\s*([\d.]+)px/g)].map(m => m[1] + 'x' + m[2]);
         check(cap.style.height === '15px' && cap.style.minHeight === '15px' && cap.querySelector('svg').getAttribute('viewBox') === '0 0 120 44' && String(cap.getAttribute('style')).includes('drop-shadow(0 3px 7px'), '浮标高 15px（原来 30px），投影同比减半，SVG 画布比例原样');
-        check(lampSizes.length === 3 && lampSizes.every(s => s === '4x4') && !/0 0 0 9px/.test(capCss) && (capCss.match(/0 0 0 4\.5px/g) || []).length === 8, '三颗小灯都是整数 4px、八套忙碌脉冲外扩都减半到 4.5px（' + lampSizes.join(' ') + '）');
+        check(lampSizes.length === 3 && lampSizes.every(s => s === '4x4') && !/0 0 0 9px/.test(capCss) && (capCss.match(/0 0 0 4\.5px/g) || []).length === 10, '三颗小灯都是整数 4px、十套忙碌脉冲外扩都减半到 4.5px（2.35.0 草莓团子加了两套）（' + lampSizes.join(' ') + '）');
         // 2.19.16 浮标动效开关：关 = 无 <animate>、无 drop-shadow；开 = 恢复；面板 / 抽屉两个勾同步
         w.eval('window.ui.ipeRebuildQuickButton = ipeRebuildQuickButton;');
         const motionCb = d.querySelector('#ipe-quick-motion'), motionCbD = d.querySelector('#iped-quick-motion');
@@ -228,12 +228,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         // 2.19.12 粉蓝海滩：配色按钮五档循环，海滩叠在浅色皮上
         w.eval('window.ui.ipeApplyTheme = ipeApplyTheme;');
-        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; settings.lemonTheme = false; w.ui.ipeApplyTheme();
+        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; settings.lemonTheme = false; settings.dangoTheme = false; w.ui.ipeApplyTheme();
         const tt = d.querySelector('#ipe-theme-toggle');
-        const modeOf = () => ['lemon','pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
+        const modeOf = () => ['dango','lemon','pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
         const seq = [modeOf() + tt.textContent];
-        for (let i = 0; i < 7; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
-        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 night🌙', '配色七档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 月潮（' + seq.join(' ') + '）');
+        for (let i = 0; i < 8; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
+        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 dango🍡 night🌙', '配色八档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 草莓团子 → 月潮（' + seq.join(' ') + '）');
         for (let i = 0; i < 4; i++) tt.click();
         check(settings.mistTheme === true && settings.beachTheme === true && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-beach') && !panel.classList.contains('ipe-jade'), '粉蓝海滩 = 浅色皮 + ipe-beach，杏岸 / 碧岸标记都清掉');
         check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg stop:first-child'), '浮标有海滩配色规则');
@@ -248,9 +248,21 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.mistTheme === true && settings.lemonTheme === true && settings.pearlTheme === false && settings.beachTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-pearl'), '柠檬海滩 = 浅色皮 + ipe-lemon，珠光海螺标记清掉');
         check(css.includes('html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg stop:first-child') && css.includes('ipe-cap-pulse-lemon') && css.includes('ipe-cap-ledger-pulse-lemon'), '浮标有柠檬海滩配色规则（渐变与忙碌脉冲）');
         check(d.body.classList.contains('ipe-skin-mist') && d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-pearl') && !css.includes('body:has(#ipe-panel'), '2.19.15 配色写在 body 的 ipe-skin-* 类上，CSS 不再用 body:has()');
+        // 2.35.0 草莓团子：第八档。不只换色，形状也换（贴纸感）；浮标换成一串三色团子，投影换成淡粉
         tt.click();
-        check(settings.mistTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '柠檬海滩再点一下回到月潮');
-        check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon'), '月潮：body 上没有任何 ipe-skin-* 类');
+        check(settings.mistTheme === true && settings.dangoTheme === true && settings.lemonTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon'), '草莓团子 = 浅色皮 + ipe-dango，柠檬海滩标记清掉');
+        check(d.body.classList.contains('ipe-skin-dango') && !d.body.classList.contains('ipe-skin-lemon') && tt.title.indexOf('草莓团子') >= 0, 'body 上是 ipe-skin-dango，按钮提示写着草莓团子');
+        check(css.includes('html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-header::after') && css.includes('html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango') && css.includes('ipe-cap-pulse-dango') && css.includes('ipe-cap-ledger-pulse-dango') && css.includes('.ipe-zoom-overlay.ipe-skin-dango') && css.includes('.ipe-notice.ipe-skin-dango'), '样式里有草莓团子的花边标题栏、浮标团子、忙碌脉冲、放大编辑框和通知卡');
+        const capD = d.querySelector('#ipe-chat-quick-entry');
+        check(!!capD && capD.querySelectorAll('svg > g.ipe-cap-dango circle').length === 3 && capD.querySelector('svg > g.ipe-cap-dango').style.display === 'none', '浮标里有一串三色团子，平时藏着（别的皮肤照旧是海螺），由样式在草莓团子皮里换出来');
+        check(String(capD.style.getPropertyValue('filter')).indexOf('240,120,155') >= 0, '草莓团子皮：浮标投影换成淡粉（' + capD.style.getPropertyValue('filter') + '）');
+        d.querySelector('#ipe-base-template').value = 'x'; w.eval('ipeZoomOpen')(d.querySelector('#ipe-base-template'));
+        check(d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-skin-dango') && d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-mist'), '放大编辑框带着当前皮肤的类（它挂在页面最外层，吃不到 body 上的类）');
+        d.querySelector('#ipe-zoom-overlay .ipe-zoom-close').click();
+        tt.click();
+        check(settings.mistTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '草莓团子再点一下回到月潮');
+        check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango'), '月潮：body 上没有任何 ipe-skin-* 类');
+        check(String(capD.style.getPropertyValue('filter')).indexOf('rgba(0,0,0') >= 0, '回到月潮：浮标投影换回原来的');
 
         // 2.19.15 预设下拉按拼音排序（显示顺序），存储顺序与选中项不动
         w.eval('window.ui.ipeRefreshTemplateEditors = ipeRefreshTemplateEditors; window.ui.ipeGetBaseTemplates = ipeGetBaseTemplates; window.ui.ipeRefreshAnchorEditors = ipeRefreshAnchorEditors;');

@@ -2603,3 +2603,473 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
 .ipe-switch-row.ipe-switch-col label > input[type="checkbox"] { order: -1; margin: 0 2px 0 0; flex: none; }
 #ipe-ledger-status:empty, #iped-ledger-status:empty { display: none; }
 .ipe-switch-row.ipe-switch-col .ipe-switch-item > .ipe-toggle { order: -1; flex: none; }
+
+/* ============================================================
+   2.35.0 草莓团子 🍡 · 第八档
+   三色团子的颜色：草莓奶粉 #FFB3C6 · 奶油白 #FFFAF3 · 薄荷绿 #BDEAD5，墨色用可可梅子 #6A5560。
+   前七档都是同一套形状只换颜色；这一档连形状一起换，走「贴纸 / 软糖」的路子：
+     · 面板一圈白边，底是奶油色加淡淡的波点；标题栏下沿是一排花边
+     · 卡片、按钮都是白底 + 两像素粉 / 绿描边 + 一道实心的「厚度」（往下 3～4px 的同色阴影），按下去会陷一点
+     · 按钮、页签全是圆角胶囊；分区标题前面一朵小花，粉绿相间
+     · 字体优先用系统的圆体（iPhone / Mac 上是 SF Rounded），中文照旧
+   叠在浅色皮（.ipe-mist）上：没写到的地方自动沿用浅色皮。只有外观，ID、布局挂点、事件一概不动。
+   ============================================================ */
+html #ipe-panel.ipe-mist.ipe-dango {
+    --dg-cream: #FFFAF3;
+    --dg-pink: #FFB3C6;
+    --dg-pink-deep: #FF8FAB;
+    --dg-pink-line: #FFD0DC;
+    --dg-pink-soft: #FFE6ED;
+    --dg-mint: #BDEAD5;
+    --dg-mint-deep: #6CCBA8;
+    --dg-mint-line: #C6EDDD;
+    --dg-mint-soft: #EAF8F1;
+    --dg-butter: #FFE7A0;
+    --dg-butter-soft: #FFF6D6;
+    --dg-ink: #6A5560;
+    --dg-muted: #937D89;
+    --dg-faint: #B9A7B0;
+    --dg-berry: #8A3B58;
+    --ipe-ui-ink: var(--dg-ink);
+    --ipe-ui-muted: var(--dg-muted);
+    --ipe-ui-faint: var(--dg-faint);
+    --ipe-ui-line: var(--dg-pink-soft);
+    --ipe-ui-line-strong: var(--dg-pink-line);
+    --ipe-ui-card: #ffffff;
+    --ipe-ui-card-strong: #ffffff;
+    --ipe-ui-field: #ffffff;
+    --ipe-ui-blue: var(--dg-mint-deep);
+    --ipe-ui-purple: var(--dg-pink-deep);
+    --ipe-ui-sand: var(--dg-butter);
+    --ipe-ui-error: #E0708A;
+    --ipe-ui-shadow: rgba(255,143,171,.10);
+    --ipe-desk-action: linear-gradient(180deg,#FFC9D7,#FFAAC1);
+    --ipe-desk-action-ink: var(--dg-berry);
+    --ipe-desk-ink: var(--dg-ink);
+    --ipe-desk-muted: var(--dg-muted);
+    --ipe-desk-line: var(--dg-mint-line);
+    --ipe-desk-card: #ffffff;
+    --ipe-desk-glow: var(--dg-mint-soft);
+    border: 3px solid #ffffff !important;
+    border-radius: 28px !important;
+    background:
+        radial-gradient(circle, rgba(255,179,198,.38) 1.3px, transparent 1.8px) 0 0 / 20px 20px,
+        radial-gradient(circle, rgba(189,234,213,.55) 1.3px, transparent 1.8px) 10px 10px / 20px 20px,
+        linear-gradient(180deg, #FFFAF3 0%, #FFFAF3 34%, #F4FBF7 100%) !important;
+    color: var(--dg-ink) !important;
+    color-scheme: light !important;
+    box-shadow: 0 0 0 1.5px var(--dg-pink-line), 0 16px 40px rgba(255,143,171,.26) !important;
+    font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango :is(button, input, select, textarea, summary, label, h3, span, div, small) { font-family: inherit !important; }
+
+/* ---- 标题栏：粉 → 奶油 → 薄荷，下沿一排花边 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-header {
+    position: relative !important;
+    min-height: 60px !important;
+    padding: 12px 13px 17px 16px !important;
+    border-bottom: 0 !important;
+    background: linear-gradient(112deg, #FFD0DD 0%, #FFE8D4 50%, #CDF0E0 100%) !important;
+    box-shadow: none !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-header::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 9px;
+    background: radial-gradient(circle at 9px 9px, #FFFAF3 8.6px, transparent 9.1px) 0 0 / 18px 9px repeat-x;
+    pointer-events: none;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-title {
+    color: var(--dg-ink) !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+    letter-spacing: .05em !important;
+    text-shadow: 0 1.5px 0 rgba(255,255,255,.95) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-title::after {
+    content: "✿ IMAGE PROMPT EXTRACTOR ✿";
+    margin-top: 4px;
+    color: #E58AA6;
+    font-size: 7.5px;
+    font-weight: 700;
+    letter-spacing: .2em;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-panel-header .ipe-btn,
+html #ipe-panel.ipe-mist.ipe-dango #ipe-diag-open,
+html #ipe-panel.ipe-mist.ipe-dango #ipe-theme-toggle,
+html #ipe-panel.ipe-mist.ipe-dango #ipe-panel-close {
+    width: 36px !important; min-width: 36px !important; max-width: 36px !important;
+    height: 36px !important; min-height: 36px !important; flex: 0 0 36px !important;
+    padding: 0 !important;
+    border: 2px solid #ffffff !important;
+    border-radius: 50% !important;
+    background: rgba(255,255,255,.82) !important;
+    color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink) !important;
+    box-shadow: 0 3px 0 rgba(255,160,186,.55) !important;
+}
+
+/* ---- 页签：一颗长胶囊，选中的那半是白团子 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tabs {
+    gap: 5px !important;
+    margin: 12px 12px 6px !important;
+    padding: 5px !important;
+    padding-right: calc(var(--ipe-thumb) * .7) !important;
+    border: 2px solid #ffffff !important;
+    border-radius: 999px !important;
+    background: var(--dg-pink-soft) !important;
+    box-shadow: 0 3px 0 var(--dg-pink-line) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tab {
+    min-height: 36px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: transparent !important;
+    color: var(--dg-muted) !important; -webkit-text-fill-color: var(--dg-muted) !important;
+    box-shadow: none !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tab::before { font-size: 13.5px !important; font-weight: 700 !important; letter-spacing: .12em; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tab.ipe-tab-on {
+    border: 0 !important;
+    background: #ffffff !important;
+    color: var(--dg-berry) !important; -webkit-text-fill-color: var(--dg-berry) !important;
+    box-shadow: 0 2.5px 0 var(--dg-pink) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tab.ipe-tab-on[data-ipe-tabbtn="image"]::before { content: "✿ 生图"; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-tab.ipe-tab-on[data-ipe-tabbtn="ledger"]::before { content: "✿ 挂账"; }
+
+/* ---- 分区卡片：白底、粗描边、一道厚度；粉绿相间 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-sections {
+    padding: 6px 12px 16px !important;
+    scrollbar-color: var(--dg-pink-line) transparent !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-sections::-webkit-scrollbar-thumb { background: var(--dg-pink-line) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section {
+    --dg-edge: var(--dg-pink-line);
+    --dg-edge-soft: var(--dg-pink-soft);
+    --dg-flower: var(--dg-pink-deep);
+    margin: 11px 0 !important;
+    border: 2px solid var(--dg-edge) !important;
+    border-radius: 22px !important;
+    background: #ffffff !important;
+    box-shadow: 0 4px 0 var(--dg-edge) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section:nth-of-type(even) {
+    --dg-edge: var(--dg-mint-line);
+    --dg-edge-soft: var(--dg-mint-soft);
+    --dg-flower: var(--dg-mint-deep);
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section.collapsed { box-shadow: 0 3px 0 var(--dg-edge) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-header {
+    min-height: 46px !important;
+    padding: 11px 14px !important;
+    color: var(--dg-ink) !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: .06em !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section.collapsed .ipe-section-header { color: var(--dg-muted) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-header > span:first-child::before {
+    content: "✿";
+    margin-right: 7px;
+    color: var(--dg-flower);
+    font-size: 12px;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-collapse-icon {
+    display: inline-flex !important;
+    align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--dg-edge-soft);
+    color: var(--dg-flower) !important;
+    font-size: 11px !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body {
+    gap: 10px !important;
+    padding: 12px 11px 15px !important;
+    border-top: 2px dashed var(--dg-edge-soft) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body label { color: var(--dg-muted) !important; font-size: 11.5px !important; font-weight: 500 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-hint,
+html #ipe-panel.ipe-mist.ipe-dango [style*="color:#888"] { color: var(--dg-faint) !important; }
+
+/* 挂账页那个大分区本来就没有壳，照旧 */
+html #ipe-panel.ipe-mist.ipe-dango #ipe-section-ledger { border: 0 !important; background: transparent !important; box-shadow: none !important; margin: 4px 0 !important; }
+html #ipe-panel.ipe-mist.ipe-dango #ipe-section-ledger > .ipe-section-header { padding: 6px 4px 10px !important; }
+html #ipe-panel.ipe-mist.ipe-dango #ipe-section-ledger > .ipe-section-header > span:first-child::before { content: none; }
+html #ipe-panel.ipe-mist.ipe-dango #ipe-section-ledger > .ipe-section-body { padding: 0 !important; border: 0 !important; }
+
+/* ---- 开关那一栏：薄荷色的虚线小盒 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body .ipe-switch-row.ipe-switch-row {
+    min-height: 0 !important;
+    margin: 0 0 2px !important;
+    padding: 10px 8px !important;
+    border: 2px dashed var(--dg-mint-line) !important;
+    border-radius: 18px !important;
+    background: var(--dg-mint-soft) !important;
+    gap: 9px !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-switch-row > div,
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body .ipe-switch-row > div:has(input[type="checkbox"]) {
+    min-height: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-switch-item,
+html #ipe-panel.ipe-mist.ipe-dango .ipe-switch-row label { color: var(--dg-ink) !important; font-size: 11.5px !important; font-weight: 500 !important; letter-spacing: 0 !important; gap: 8px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body > div:has(input[type="checkbox"]):not(.ipe-switch-row):not(.ipe-desk-overview) {
+    border: 2px solid var(--dg-mint-soft) !important;
+    border-radius: 16px !important;
+    background: #ffffff !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body > .ipe-desk-overview.ipe-desk-overview { min-height: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-overview [id$="-ledger-chatkey"] { padding: 6px 6px 0 !important; }
+/* 开关：关着是奶灰，开着是薄荷；最上面那颗总开关开着是草莓粉 */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-toggle { width: 38px !important; height: 22px !important; flex: 0 0 38px !important; margin: 0 2px 0 4px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-switch-row input[type="checkbox"] { margin: 0 2px 0 4px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-toggle-slider {
+    border: 1.5px solid #E3D5DB !important;
+    background: #EADFE4 !important;
+    box-shadow: none !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-toggle-slider::before { top: 2px !important; left: 2px !important; width: 15px !important; height: 15px !important; background: #ffffff !important; box-shadow: 0 1.5px 3px rgba(106,85,96,.28) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slider { border-color: #FF93B0 !important; background: linear-gradient(90deg, #FF9DB8, #FFB9A6) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slider::before { transform: translateX(16px) !important; background: #ffffff !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body input[type="checkbox"],
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body > div:has(input[type="checkbox"]) > label > input[type="checkbox"] {
+    width: 38px !important; min-width: 38px !important; max-width: 38px !important;
+    height: 22px !important; min-height: 22px !important; flex: 0 0 38px !important;
+    border: 1.5px solid #E3D5DB !important;
+    background: radial-gradient(circle at 10px 50%, #ffffff 0 7.5px, transparent 8.1px), #EADFE4 !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body input[type="checkbox"]:checked,
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body > div:has(input[type="checkbox"]) > label > input[type="checkbox"]:checked {
+    border-color: var(--dg-mint-deep) !important;
+    background: radial-gradient(circle at calc(100% - 10px) 50%, #ffffff 0 7.5px, transparent 8.1px), linear-gradient(90deg, #74D0AE, #A6E3CB) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango input:checked { accent-color: var(--dg-mint-deep) !important; }
+
+/* ---- 输入框 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body :is(input[type="text"], input[type="password"], input[type="number"], select, textarea) {
+    border: 2px solid var(--dg-pink-soft) !important;
+    border-radius: 16px !important;
+    background: #ffffff !important;
+    color: var(--dg-ink) !important;
+    box-shadow: none !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body :is(input[type="text"], input[type="password"], input[type="number"], select) { min-height: 38px !important; padding: 7px 12px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body textarea { padding: 10px 12px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body :is(input, textarea, select):focus {
+    border-color: var(--dg-pink) !important;
+    box-shadow: 0 0 0 3px rgba(255,179,198,.32) !important;
+    outline: none !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-section-body ::placeholder { color: #CDBFC6 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-zoom-btn {
+    top: 7px !important; right: 8px !important;
+    width: 24px !important; height: 24px !important; min-height: 0 !important; line-height: 19px !important;
+    padding: 0 !important;
+    border: 2px solid var(--dg-pink-line) !important;
+    border-radius: 50% !important;
+    background: #ffffff !important;
+    color: var(--dg-pink-deep) !important; -webkit-text-fill-color: var(--dg-pink-deep) !important;
+    font-size: 12px !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+}
+
+/* ---- 按钮：白团子；主动作是草莓团子。都有一道厚度，按下去陷 2px ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn {
+    min-height: 38px !important;
+    padding: 7px 9px !important;
+    border: 2px solid var(--dg-pink-line) !important;
+    border-radius: 999px !important;
+    background: #ffffff !important;
+    color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    box-shadow: 0 3px 0 var(--dg-pink-line) !important;
+    transition: transform .08s ease, box-shadow .08s ease !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn:hover:not(:disabled) { border-color: var(--dg-pink) !important; background: #FFF8FA !important; color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn:active:not(:disabled) { transform: translateY(2px) !important; box-shadow: 0 1px 0 var(--dg-pink-line) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn-primary,
+html #ipe-panel.ipe-mist.ipe-dango [id="ipe-ledger-run"] {
+    border-color: #FF9DB7 !important;
+    background: linear-gradient(180deg, #FFCBD8, #FFAAC1) !important;
+    color: var(--dg-berry) !important; -webkit-text-fill-color: var(--dg-berry) !important;
+    box-shadow: 0 3px 0 #F58CA9 !important;
+    text-shadow: 0 1px 0 rgba(255,255,255,.55) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn-primary:hover:not(:disabled),
+html #ipe-panel.ipe-mist.ipe-dango [id="ipe-ledger-run"]:hover:not(:disabled) { background: linear-gradient(180deg, #FFC0D0, #FF9FB9) !important; color: var(--dg-berry) !important; -webkit-text-fill-color: var(--dg-berry) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn-primary:active:not(:disabled),
+html #ipe-panel.ipe-mist.ipe-dango [id="ipe-ledger-run"]:active:not(:disabled) { box-shadow: 0 1px 0 #F58CA9 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn:disabled { opacity: .5 !important; box-shadow: none !important; background: #FBF6F8 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-btn-grid { gap: 10px 8px !important; margin-top: 8px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-preview-actions { gap: 9px 8px !important; padding-bottom: 3px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-preview-actions > select { min-width: 92px !important; padding-left: 10px !important; padding-right: 22px !important; }
+
+/* ---- 状态行：一条奶黄小纸条 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-preview-status {
+    padding: 7px 12px !important;
+    border-radius: 14px !important;
+    background: var(--dg-butter-soft) !important;
+    color: var(--dg-muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 500 !important;
+    line-height: 1.55 !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-preview-status:empty { display: none !important; }
+
+/* ---- 折叠小卡 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-fold {
+    margin: 9px 0 !important;
+    border: 2px solid var(--dg-butter-soft) !important;
+    border-radius: 18px !important;
+    background: #FFFDF6 !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-fold[open] { border-color: var(--dg-butter) !important; background: #ffffff !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-fold > summary { min-height: 40px !important; padding: 9px 13px !important; color: var(--dg-muted) !important; font-size: 12px !important; font-weight: 700 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-fold[open] > summary { border-bottom: 2px dashed var(--dg-butter-soft) !important; color: var(--dg-ink) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-fold-body { padding: 8px 12px 13px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-ledger-age,
+html #ipe-panel.ipe-mist.ipe-dango .ipe-anchor-guide { border: 2px solid var(--dg-mint-soft) !important; border-radius: 16px !important; background: #FAFEFC !important; color: var(--dg-muted) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-anchor-guide-title { color: var(--dg-ink) !important; }
+html #ipe-panel.ipe-mist.ipe-dango hr { border-top: 2px dashed var(--dg-pink-soft) !important; }
+
+/* ---- 挂账页的三张卡：薄荷边 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-overview { padding: 0 !important; background: transparent !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-card {
+    margin: 12px 0 !important;
+    border: 2px solid var(--dg-mint-line) !important;
+    border-radius: 22px !important;
+    background: #ffffff !important;
+    box-shadow: 0 4px 0 var(--dg-mint-line) !important;
+}
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-card.ipe-desk-request { border-color: var(--dg-pink-line) !important; box-shadow: 0 4px 0 var(--dg-pink-line) !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-card > h3 { padding: 14px 15px 0 !important; color: var(--dg-ink) !important; font-size: 13.5px !important; font-weight: 800 !important; letter-spacing: .08em !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-card > h3::before { content: "✿"; margin-right: 7px; color: var(--dg-mint-deep); font-size: 12px; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-card.ipe-desk-request > h3::before { color: var(--dg-pink-deep); }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-content { gap: 9px !important; padding: 10px 14px 15px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-content > label { color: var(--dg-muted) !important; font-size: 11.5px !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-settings > h3 { margin: 20px 6px 8px !important; color: var(--dg-faint) !important; font-size: 11px !important; font-weight: 700 !important; letter-spacing: .2em !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-settings > .ipe-fold { margin: 9px 0 !important; border-radius: 18px !important; background: #FFFDF6 !important; }
+html #ipe-panel.ipe-mist.ipe-dango .ipe-desk-settings > .ipe-fold[open] { background: #ffffff !important; }
+
+/* ---- 页脚 ---- */
+html #ipe-panel.ipe-mist.ipe-dango .ipe-footer {
+    padding: 8px 16px 10px !important;
+    border-top: 2px dashed var(--dg-pink-soft) !important;
+    background: rgba(255,255,255,.55) !important;
+    color: var(--dg-faint) !important;
+    font-size: 9.5px !important;
+    letter-spacing: .06em !important;
+}
+
+/* ---- 放大编辑框、通知卡：跟着换成奶油粉 ---- */
+.ipe-zoom-overlay.ipe-skin-dango { background: rgba(255,214,224,.45) !important; }
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-box {
+    border: 3px solid #ffffff !important;
+    background: #FFFAF3 !important;
+    color: #6A5560 !important;
+    box-shadow: 0 0 0 1.5px #FFD0DC, 0 16px 40px rgba(255,143,171,.28) !important;
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+}
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-head { border-bottom: 2px dashed #FFE6ED !important; background: linear-gradient(112deg, #FFD0DD 0%, #FFE8D4 50%, #CDF0E0 100%) !important; }
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-title { color: #6A5560 !important; }
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-head button {
+    border: 2px solid #FFD0DC !important;
+    border-radius: 999px !important;
+    background: #ffffff !important;
+    color: #6A5560 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2.5px 0 #FFD0DC !important;
+}
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-head .ipe-zoom-close { border-color: #FF9DB7 !important; background: linear-gradient(180deg, #FFCBD8, #FFAAC1) !important; color: #8A3B58 !important; box-shadow: 0 2.5px 0 #F58CA9 !important; }
+.ipe-zoom-overlay.ipe-skin-dango .ipe-zoom-ta { border: 2px solid #FFE6ED !important; border-radius: 18px !important; background: #ffffff !important; color: #6A5560 !important; }
+
+/* 通知卡：白团子卡片。出错是草莓边，成功 / 提示是薄荷边；左边那条色杠不要了 */
+.ipe-notice.ipe-skin-dango {
+    padding: 9px 12px 8px !important;
+    border: 2px solid #C6EDDD !important;
+    border-radius: 18px !important;
+    background: #ffffff !important;
+    color: #6A5560 !important;
+    box-shadow: 0 4px 0 #C6EDDD, 0 10px 24px rgba(255,143,171,.16) !important;
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+}
+.ipe-notice.ipe-skin-dango.ipe-notice-error { border-color: #FFB3C6 !important; box-shadow: 0 4px 0 #FFB3C6, 0 10px 24px rgba(255,143,171,.20) !important; }
+.ipe-notice.ipe-skin-dango .ipe-notice-title { color: #6A5560 !important; -webkit-text-fill-color: #6A5560 !important; font-weight: 700 !important; }
+.ipe-notice.ipe-skin-dango .ipe-notice-body,
+.ipe-notice.ipe-skin-dango .ipe-notice-x { color: #937D89 !important; -webkit-text-fill-color: #937D89 !important; }
+.ipe-notice.ipe-skin-dango .ipe-notice-ok,
+.ipe-notice.ipe-skin-dango .ipe-notice-act {
+    padding: 4px 13px !important;
+    border: 2px solid #FF9DB7 !important;
+    border-radius: 999px !important;
+    background: linear-gradient(180deg, #FFCBD8, #FFAAC1) !important;
+    color: #8A3B58 !important; -webkit-text-fill-color: #8A3B58 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2.5px 0 #F58CA9 !important;
+}
+.ipe-notice.ipe-skin-dango .ipe-notice-ok { border-color: #FFD0DC !important; background: #ffffff !important; color: #6A5560 !important; -webkit-text-fill-color: #6A5560 !important; box-shadow: 0 2.5px 0 #FFD0DC !important; }
+.ipe-notice.ipe-skin-dango .ipe-notice-bar { background: #6CCBA8 !important; height: 3px !important; }
+.ipe-notice.ipe-skin-dango.ipe-notice-error .ipe-notice-bar { background: #FF8FAB !important; }
+
+/* ---- 抽屉（酒馆「扩展」页里那一份）：只换颜色和开关，形状跟着酒馆走 ---- */
+html body.ipe-skin-dango:not(#_) #ipe-drawer {
+    --iped-ink: #6A5560;
+    --iped-muted: #937D89;
+    --iped-faint: #B9A7B0;
+    --iped-line: #FFE6ED;
+    --iped-line-strong: #FFD0DC;
+    --iped-card: rgba(255,255,255,.80);
+    --iped-field: #ffffff;
+    --iped-blue: #6CCBA8;
+    --iped-purple: #FF8FAB;
+    --iped-sand: #FFE7A0;
+    --ipe-desk-action: linear-gradient(180deg,#FFC9D7,#FFAAC1);
+    --ipe-desk-action-ink: #8A3B58;
+    --ipe-desk-card: #ffffff;
+    --ipe-desk-glow: #EAF8F1;
+}
+html body.ipe-skin-dango:not(#_) #ipe-drawer > .inline-drawer {
+    background:
+        radial-gradient(circle, rgba(255,179,198,.34) 1.3px, transparent 1.8px) 0 0 / 20px 20px,
+        radial-gradient(circle, rgba(189,234,213,.50) 1.3px, transparent 1.8px) 10px 10px / 20px 20px,
+        linear-gradient(180deg, #FFF1F4 0%, #FFFAF3 30%, #F4FBF7 100%) !important;
+}
+html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"] {
+    border-color: #E3D5DB !important;
+    background: radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px), #EADFE4 !important;
+}
+html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"]:checked {
+    border-color: #6CCBA8 !important;
+    background: radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px), linear-gradient(90deg, #7FD6B6, #A6E3CB) !important;
+}
+
+/* ---- 浮标：一串三色团子 + IPE。海螺和涟漪收起来，团子换出来（团子会轮流轻轻跳一下，关了「浮标动效」就不跳） ---- */
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #FFD3DF !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #D3F2E5 !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > rect { stroke: #ffffff !important; stroke-width: 2.6px !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > circle,
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g:not(.ipe-cap-dango) { display: none !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango { display: inline !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango circle { stroke-width: 1.5px !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango circle:nth-of-type(1) { stroke: #F58CA9 !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango circle:nth-of-type(2) { stroke: #E6C7AD !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango circle:nth-of-type(3) { stroke: #63C6A2 !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-dango line { stroke: #E2B98F !important; }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg text {
+    fill: #8A5A6C !important;
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, sans-serif !important;
+    font-weight: 800 !important;
+    transform: translateX(15px);
+}
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-dango; }
+@keyframes ipe-cap-pulse-dango { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,143,171,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(255,143,171,0); } }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy,
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-dango; }
+@keyframes ipe-cap-ledger-pulse-dango { 0%, 100% { box-shadow: 0 0 0 0 rgba(108,203,168,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(108,203,168,0); } }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #6CCBA8; box-shadow: 0 0 2.5px rgba(108,203,168,.95); }
+html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.processing::after { background: #FF8FAB; box-shadow: 0 0 2.5px rgba(255,143,171,.95); }
