@@ -2622,6 +2622,7 @@ html #ipe-panel.ipe-jade { --ipe-sw-on: #488883; --ipe-sw-edge-on: rgba(72,136,1
 html #ipe-panel.ipe-beach { --ipe-sw-off: rgba(232,178,198,.55); --ipe-sw-on: rgba(114,177,207,.65); --ipe-sw-knob-on: #0091bd; --ipe-sw-edge-on: rgba(0,145,189,.35); }
 html #ipe-panel.ipe-pearl { --ipe-sw-off: rgba(201,208,216,.80); --ipe-sw-knob: #fffdfa; --ipe-sw-on: rgba(111,127,146,.70); --ipe-sw-knob-on: #f6f2d8; --ipe-sw-edge-on: rgba(111,127,146,.50); }
 html #ipe-panel.ipe-lemon { --ipe-sw-off: rgba(175,197,230,.55); --ipe-sw-on: #8fabdc; --ipe-sw-knob-on: #f7ea5e; --ipe-sw-edge-on: rgba(127,157,214,.70); }
+html #ipe-panel.ipe-oreo { --ipe-sw-off: #e2e2e2; --ipe-sw-knob: #ffffff; --ipe-sw-on: #111111; --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #111111; }
 html #ipe-panel.ipe-dango { --ipe-sw-off: #EADFE4; --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#74D0AE,#A6E3CB); --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #6CCBA8; }
 
 /* ---- 每套皮肤的一组颜色 ---- */
@@ -2759,6 +2760,34 @@ html #ipe-panel.ipe-dango {
         linear-gradient(180deg, #FFFAF3 0%, #FFFAF3 34%, #F4FBF7 100%) !important;
     color-scheme: light !important;
 }
+/* 🍪 奥利奥（2.38.0）：黑白两色，给喜欢极简的人。白底黑字、黑描边、黑色的厚度，像漫画的勾线；
+   标题栏和页脚是两片黑饼干，中间夹着白的；底上一层很淡的网点（漫画里的网点纸），越往下越明显 */
+html #ipe-panel.ipe-oreo {
+    --dg-a: #111111; --dg-a-line: #111111; --dg-a-soft: #dcdcdc;
+    --dg-b: #111111; --dg-b-line: #111111; --dg-b-soft: #f3f3f3;
+    --dg-c: #111111; --dg-c-soft: #eeeeee;
+    --dg-ink: #111111; --dg-muted: #4a4a4a; --dg-faint: #8c8c8c;
+    --dg-card: #ffffff; --dg-field: #ffffff; --dg-fold: #fafafa;
+    --dg-rim: #111111; --dg-ring: #ffffff; --dg-glow: rgba(0,0,0,.28);
+    --dg-head: linear-gradient(#111111, #111111);
+    --dg-head-ink: #ffffff; --dg-title-shadow: none; --dg-sub: #bdbdbd;
+    --dg-hbtn: #ffffff; --dg-hbtn-edge: #ffffff; --dg-hbtn-thick: #7a7a7a;
+    --dg-tabs: #ffffff; --dg-tab-on: #111111; --dg-tab-ink: #ffffff;
+    --dg-p: linear-gradient(#111111, #111111); --dg-p-edge: #111111; --dg-p-thick: #7a7a7a; --dg-p-ink: #ffffff; --dg-p-shine: rgba(0,0,0,0);
+    --dg-sw-main: #111111; --dg-sw-main-edge: #111111;
+    --dg-foot: #111111;
+    --dg-bullet: "●";
+    --ipe-ui-ink: #111111; --ipe-ui-muted: #4a4a4a; --ipe-ui-faint: #8c8c8c;
+    --ipe-ui-line: #dcdcdc; --ipe-ui-line-strong: #111111;
+    --ipe-ui-card: #ffffff; --ipe-ui-card-strong: #ffffff; --ipe-ui-field: #ffffff;
+    --ipe-ui-blue: #111111; --ipe-ui-purple: #4a4a4a; --ipe-ui-sand: #111111; --ipe-ui-error: #111111;
+    --ipe-ui-shadow: rgba(0,0,0,.10);
+    background:
+        linear-gradient(180deg, #ffffff 0%, #ffffff 30%, rgba(255,255,255,.35) 100%),
+        radial-gradient(circle, rgba(0,0,0,.20) 1px, transparent 1.5px) 0 0 / 7px 7px,
+        #ffffff !important;
+    color-scheme: light !important;
+}
 
 /* ---- 外壳 ---- */
 html #ipe-panel#ipe-panel {
@@ -2792,7 +2821,7 @@ html #ipe-panel#ipe-panel .ipe-panel-header::after {
     pointer-events: none;
 }
 html #ipe-panel#ipe-panel .ipe-panel-title {
-    color: var(--dg-ink) !important;
+    color: var(--dg-head-ink, var(--dg-ink)) !important;
     font-size: 16px !important;
     font-weight: 800 !important;
     letter-spacing: .05em !important;
@@ -3089,6 +3118,22 @@ html #ipe-panel#ipe-panel.ipe-dango .ipe-toggle .ipe-toggle-slider,
 html #ipe-panel#ipe-panel.ipe-dango .ipe-section-body input[type="checkbox"]:not(:checked) { border-color: #E3D5DB !important; }
 html #ipe-panel#ipe-panel.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slider { border-color: #FF93B0 !important; }
 
+/* ---- 奥利奥自己的：页脚黑底上的字要浅；选中的页签下面那道厚度用灰的才看得见；输入框用细黑边 ---- */
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-footer { border-top: 0 !important; color: #cfcfcf !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-tab.ipe-tab-on { box-shadow: 0 2.5px 0 #7a7a7a !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-section-body :is(input[type="text"], input[type="password"], input[type="number"], select, textarea) { border: 1.5px solid #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-section-body :is(input, textarea, select):focus { box-shadow: 3px 3px 0 #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-btn:hover:not(:disabled) { background: #f3f3f3 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-btn-primary:hover:not(:disabled),
+html #ipe-panel#ipe-panel.ipe-oreo [id="ipe-ledger-run"]:hover:not(:disabled) { background: #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status { border: 1.5px dashed #111111 !important; background: #ffffff !important; color: #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-section-body { border-top-style: solid !important; border-top-width: 1.5px !important; border-top-color: #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-fold { border: 1.5px solid #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-fold[open] > summary { border-bottom: 1.5px solid #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-collapse-icon { background: #111111; color: #ffffff !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-ledger-age,
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-anchor-guide { border: 1.5px dashed #111111 !important; background: #ffffff !important; }
+
 /* ---- 放大编辑框、通知卡：每套皮肤一组颜色，做工同上 ---- */
 :is(.ipe-zoom-overlay, .ipe-notice) { --o-rim: rgba(134,196,220,.34); --o-ring: rgba(4,14,26,.55); --o-bg: #0f2b43; --o-field: #0a2034; --o-ink: #e3f0f8; --o-sub: #a9c2d3; --o-line: #2c5a78; --o-soft: #173a54; --o-ok: #414a80; --o-head: linear-gradient(112deg,#1c4468,#173a5c 52%,#1e4f62); --o-p: linear-gradient(180deg,#a5d6e8,#74b7d2); --o-p-edge: #8fcbe1; --o-p-thick: #3f7f9d; --o-p-ink: #0c2a3e; --o-veil: rgba(0,6,16,.60); --o-err: #b8707c; --o-accent: #86c4dc; }
 :is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-mist { --o-rim: #ffffff; --o-ring: #bfd9ea; --o-bg: #fbfdff; --o-field: #ffffff; --o-ink: #354f65; --o-sub: #607a8e; --o-line: #bfd9ea; --o-soft: #e8f2f9; --o-ok: #ecdcb4; --o-head: linear-gradient(112deg,#bcdaee,#dde9f2 52%,#f3e5c0); --o-p: linear-gradient(180deg,#cde5f3,#a8d0e8); --o-p-edge: #8dbfdc; --o-p-thick: #7db1d0; --o-p-ink: #2d5674; --o-veil: rgba(120,150,175,.38); --o-err: #e0a3a3; --o-accent: #6fa8cc; }
@@ -3098,6 +3143,7 @@ html #ipe-panel#ipe-panel.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slid
 :is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-pearl { --o-rim: #ffffff; --o-ring: #c6ced8; --o-bg: #fdfbf7; --o-field: #fffefb; --o-ink: #3f4b5a; --o-sub: #6f7f92; --o-line: #c6ced8; --o-soft: #eef1f4; --o-ok: #ece5c4; --o-head: linear-gradient(112deg,#aeb9c7,#d6dbe2 50%,#f3eee4); --o-p: linear-gradient(180deg,#dfe4ea,#b9c3cf); --o-p-edge: #a3afbd; --o-p-thick: #93a0b0; --o-p-ink: #2f3b4a; --o-veil: rgba(100,112,128,.38); --o-err: #d6a3a3; --o-accent: #6f7f92; }
 :is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-lemon { --o-rim: #ffffff; --o-ring: #c6d6f0; --o-bg: #ffffff; --o-field: #ffffff; --o-ink: #3a4a68; --o-sub: #62739a; --o-line: #c6d6f0; --o-soft: #edf2fb; --o-ok: #f8d0e1; --o-head: linear-gradient(112deg,#fbf0a0,#dfe8f7 52%,#f9d2e2); --o-p: linear-gradient(180deg,#fbf3a0,#f4e45a); --o-p-edge: #e6d43c; --o-p-thick: #d9c62e; --o-p-ink: #3a4a68; --o-veil: rgba(130,150,200,.32); --o-err: #f0a3c0; --o-accent: #7f9dd6; }
 :is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-dango { --o-rim: #ffffff; --o-ring: #FFD0DC; --o-bg: #FFFAF3; --o-field: #ffffff; --o-ink: #6A5560; --o-sub: #937D89; --o-line: #FFD0DC; --o-soft: #FFE6ED; --o-ok: #C6EDDD; --o-head: linear-gradient(112deg,#FFD0DD,#FFE8D4 50%,#CDF0E0); --o-p: linear-gradient(180deg,#FFCBD8,#FFAAC1); --o-p-edge: #FF9DB7; --o-p-thick: #F58CA9; --o-p-ink: #8A3B58; --o-veil: rgba(255,214,224,.45); --o-err: #FFB3C6; --o-accent: #6CCBA8; }
+:is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-oreo { --o-rim: #111111; --o-ring: #ffffff; --o-bg: #ffffff; --o-field: #ffffff; --o-ink: #111111; --o-sub: #4a4a4a; --o-line: #111111; --o-soft: #dcdcdc; --o-ok: #111111; --o-head: linear-gradient(#111111,#111111); --o-head-ink: #ffffff; --o-head-sub: #bdbdbd; --o-p: linear-gradient(#111111,#111111); --o-p-edge: #111111; --o-p-thick: #7a7a7a; --o-p-ink: #ffffff; --o-veil: rgba(0,0,0,.45); --o-err: #111111; --o-accent: #111111; }
 .ipe-zoom-overlay[class*="ipe-skin-"] { background: var(--o-veil) !important; }
 .ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-box {
     border: 3px solid var(--o-rim) !important;
@@ -3107,8 +3153,8 @@ html #ipe-panel#ipe-panel.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slid
     font-family: ui-rounded, "SF Pro Rounded", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif !important;
 }
 .ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-head { border-bottom: 2px dashed var(--o-soft) !important; background: var(--o-head) !important; }
-.ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-title { color: var(--o-ink) !important; }
-.ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-count { color: var(--o-sub) !important; }
+.ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-title { color: var(--o-head-ink, var(--o-ink)) !important; }
+.ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-count { color: var(--o-head-sub, var(--o-sub)) !important; }
 .ipe-zoom-overlay[class*="ipe-skin-"] .ipe-zoom-head button {
     border: 2px solid var(--o-line) !important;
     border-radius: 999px !important;
@@ -3153,6 +3199,16 @@ html #ipe-panel#ipe-panel.ipe-dango .ipe-toggle input:checked + .ipe-toggle-slid
 }
 .ipe-notice[class*="ipe-skin-"] .ipe-notice-bar { background: var(--o-accent) !important; height: 3px !important; }
 .ipe-notice[class*="ipe-skin-"].ipe-notice-error .ipe-notice-bar { background: var(--o-err) !important; }
+/* 奥利奥的弹层：标题栏是黑的，上面的按钮都用白底黑字；通知卡出错的那张反过来，黑底白字 */
+.ipe-zoom-overlay.ipe-skin-oreo .ipe-zoom-head { border-bottom: 0 !important; }
+.ipe-zoom-overlay.ipe-skin-oreo .ipe-zoom-head button,
+.ipe-zoom-overlay.ipe-skin-oreo .ipe-zoom-head .ipe-zoom-close { border-color: #ffffff !important; background: #ffffff !important; color: #111111 !important; box-shadow: 0 2.5px 0 #7a7a7a !important; }
+.ipe-zoom-overlay.ipe-skin-oreo .ipe-zoom-ta { border: 1.5px solid #111111 !important; }
+.ipe-notice.ipe-skin-oreo { box-shadow: 4px 4px 0 #111111 !important; }
+.ipe-notice.ipe-skin-oreo.ipe-notice-error { background: #111111 !important; box-shadow: 4px 4px 0 #7a7a7a !important; }
+.ipe-notice.ipe-skin-oreo.ipe-notice-error .ipe-notice-title { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
+.ipe-notice.ipe-skin-oreo.ipe-notice-error :is(.ipe-notice-body, .ipe-notice-x) { color: #d6d6d6 !important; -webkit-text-fill-color: #d6d6d6 !important; }
+.ipe-notice.ipe-skin-oreo.ipe-notice-error .ipe-notice-ok { border-color: #ffffff !important; box-shadow: 0 2.5px 0 #7a7a7a !important; }
 
 /* ============================================================
    草莓团子 🍡 的抽屉和浮标（2.35.0）。面板部分已经并进上面的共用做工层
@@ -3214,3 +3270,58 @@ html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processin
 @keyframes ipe-cap-ledger-pulse-dango { 0%, 100% { box-shadow: 0 0 0 0 rgba(108,203,168,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(108,203,168,0); } }
 html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #6CCBA8; box-shadow: 0 0 2.5px rgba(108,203,168,.95); }
 html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry.processing::after { background: #FF8FAB; box-shadow: 0 0 2.5px rgba(255,143,171,.95); }
+
+/* ============================================================
+   奥利奥 🍪 的抽屉和浮标（2.38.0）
+   ============================================================ */
+html body.ipe-skin-oreo:not(#_) #ipe-drawer {
+    --iped-ink: #111111;
+    --iped-muted: #4a4a4a;
+    --iped-faint: #8c8c8c;
+    --iped-line: #dcdcdc;
+    --iped-line-strong: #111111;
+    --iped-card: #ffffff;
+    --iped-field: #ffffff;
+    --iped-blue: #111111;
+    --iped-purple: #4a4a4a;
+    --iped-sand: #111111;
+    --ipe-desk-action: linear-gradient(#111111,#111111);
+    --ipe-desk-action-ink: #ffffff;
+    --ipe-desk-card: #ffffff;
+    --ipe-desk-glow: #f3f3f3;
+}
+html body.ipe-skin-oreo:not(#_) #ipe-drawer > .inline-drawer {
+    background:
+        linear-gradient(180deg, #ffffff 0%, #ffffff 30%, rgba(255,255,255,.35) 100%),
+        radial-gradient(circle, rgba(0,0,0,.20) 1px, transparent 1.5px) 0 0 / 7px 7px,
+        #ffffff !important;
+}
+html body.ipe-skin-oreo:not(#_) #ipe-drawer input[type="checkbox"] {
+    border-color: #111111 !important;
+    background: radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px), #e2e2e2 !important;
+}
+html body.ipe-skin-oreo:not(#_) #ipe-drawer input[type="checkbox"]:checked {
+    border-color: #111111 !important;
+    background: radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px), #111111 !important;
+}
+/* 浮标：白胶囊、黑勾线，左边一块侧着看的奥利奥（黑饼干夹白奶油），右边黑色的 IPE。海螺和涟漪收起来。
+   投影是一块偏右下的实心黑影（漫画里的投影），在 index.js 的 ipeCapsuleShadow 里给 */
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg stop:first-child,
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #ffffff !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > rect { stroke: #111111 !important; stroke-width: 3px !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > circle,
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > g:not(.ipe-cap-oreo) { display: none !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-oreo { display: inline !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg text {
+    fill: #111111 !important;
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, sans-serif !important;
+    font-weight: 900 !important;
+    transform: translateX(3px);
+}
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.processing { animation-name: ipe-cap-pulse-oreo; }
+@keyframes ipe-cap-pulse-oreo { 0%, 100% { box-shadow: 0 0 0 0 rgba(17,17,17,.80); } 50% { box-shadow: 0 0 0 4.5px rgba(17,17,17,0); } }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy,
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing { animation-name: ipe-cap-ledger-pulse-oreo; }
+@keyframes ipe-cap-ledger-pulse-oreo { 0%, 100% { box-shadow: 0 0 0 0 rgba(120,120,120,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(120,120,120,0); } }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7a7a7a; box-shadow: 0 0 2.5px rgba(0,0,0,.6); }
+html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.processing::after { background: #111111; box-shadow: 0 0 2.5px rgba(0,0,0,.6); }

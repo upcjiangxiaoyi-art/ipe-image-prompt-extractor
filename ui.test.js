@@ -156,7 +156,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const capCss = fs.readFileSync(__dirname + '/style.css', 'utf8');
         const lampSizes = [...capCss.matchAll(/#ipe-chat-quick-entry\.[\w-]+::(?:before|after)\s*\{[^}]*?width:\s*([\d.]+)px;\s*height:\s*([\d.]+)px/g)].map(m => m[1] + 'x' + m[2]);
         check(cap.style.height === '15px' && cap.style.minHeight === '15px' && cap.querySelector('svg').getAttribute('viewBox') === '0 0 120 44' && String(cap.getAttribute('style')).includes('drop-shadow(0 3px 7px'), '浮标高 15px（原来 30px），投影同比减半，SVG 画布比例原样');
-        check(lampSizes.length === 3 && lampSizes.every(s => s === '4x4') && !/0 0 0 9px/.test(capCss) && (capCss.match(/0 0 0 4\.5px/g) || []).length === 10, '三颗小灯都是整数 4px、十套忙碌脉冲外扩都减半到 4.5px（2.35.0 草莓团子加了两套）（' + lampSizes.join(' ') + '）');
+        check(lampSizes.length === 3 && lampSizes.every(s => s === '4x4') && !/0 0 0 9px/.test(capCss) && (capCss.match(/0 0 0 4\.5px/g) || []).length === 12, '三颗小灯都是整数 4px、十二套忙碌脉冲外扩都减半到 4.5px（草莓团子、奥利奥各加了两套）（' + lampSizes.join(' ') + '）');
         // 2.19.16 浮标动效开关：关 = 无 <animate>、无 drop-shadow；开 = 恢复；面板 / 抽屉两个勾同步
         w.eval('window.ui.ipeRebuildQuickButton = ipeRebuildQuickButton;');
         const motionCb = d.querySelector('#ipe-quick-motion'), motionCbD = d.querySelector('#iped-quick-motion');
@@ -228,12 +228,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         // 2.19.12 粉蓝海滩：配色按钮五档循环，海滩叠在浅色皮上
         w.eval('window.ui.ipeApplyTheme = ipeApplyTheme;');
-        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; settings.lemonTheme = false; settings.dangoTheme = false; w.ui.ipeApplyTheme();
+        settings.mistTheme = false; settings.apricotTheme = false; settings.jadeTheme = false; settings.beachTheme = false; settings.pearlTheme = false; settings.lemonTheme = false; settings.dangoTheme = false; settings.oreoTheme = false; w.ui.ipeApplyTheme();
         const tt = d.querySelector('#ipe-theme-toggle');
-        const modeOf = () => ['dango','lemon','pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
+        const modeOf = () => ['oreo','dango','lemon','pearl','beach','jade','apricot','mist'].find(k => panel.classList.contains('ipe-' + k)) || 'night';
         const seq = [modeOf() + tt.textContent];
-        for (let i = 0; i < 8; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
-        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 dango🍡 night🌙', '配色八档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 草莓团子 → 月潮（' + seq.join(' ') + '）');
+        for (let i = 0; i < 9; i++) { tt.click(); seq.push(modeOf() + tt.textContent); }
+        check(seq.join(' ') === 'night🌙 mist☀️ apricot🌅 jade🌊 beach🏝️ pearl🐚 lemon🍋 dango🍡 oreo🍪 night🌙', '配色九档循环：月潮 → 海雾 → 杏岸 → 碧岸 → 粉蓝海滩 → 珠光海螺 → 柠檬海滩 → 草莓团子 → 奥利奥 → 月潮（' + seq.join(' ') + '）');
         for (let i = 0; i < 4; i++) tt.click();
         check(settings.mistTheme === true && settings.beachTheme === true && settings.jadeTheme === false && settings.apricotTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-beach') && !panel.classList.contains('ipe-jade'), '粉蓝海滩 = 浅色皮 + ipe-beach，杏岸 / 碧岸标记都清掉');
         check(fs.readFileSync(__dirname + '/style.css', 'utf8').includes('html body.ipe-skin-beach:not(#_) #ipe-chat-quick-entry svg stop:first-child'), '浮标有海滩配色规则');
@@ -260,15 +260,20 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-skin-dango') && d.querySelector('#ipe-zoom-overlay').classList.contains('ipe-mist'), '放大编辑框带着当前皮肤的类（它挂在页面最外层，吃不到 body 上的类）');
         d.querySelector('#ipe-zoom-overlay .ipe-zoom-close').click();
         // 2.37.0 八套皮肤共用一套「贴纸」做工：形状规则只有一份，颜色走变量，每套皮肤各配一组（2.36.0 的打磨层并进来了）
-        const skinSel = ['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon', '.ipe-dango'];
+        const skinSel = ['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon', '.ipe-dango', '.ipe-oreo'];
         check(css.includes('2.37.0 八套皮肤共用一套「贴纸」做工') && !css.includes('2.36.0 七套老皮肤的细节打磨') && !css.includes('html #ipe-panel.ipe-mist.ipe-dango '), '样式表里是共用做工层，旧的打磨层和草莓团子专用的面板规则都并掉了');
-        check(skinSel.every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')) && skinSel.every(k => new RegExp('html #ipe-panel' + k.replace('.', '\\.') + ' \\{\\s+--dg-a: ').test(css)) && (css.match(/--dg-bullet: "/g) || []).length === 8, '八套皮肤各有一组自己的颜色（--dg-*）、开关颜色（--ipe-sw-*）和一个小标记');
+        check(skinSel.every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')) && skinSel.every(k => new RegExp('html #ipe-panel' + k.replace('.', '\\.') + ' \\{\\s+--dg-a: ').test(css)) && (css.match(/--dg-bullet: "/g) || []).length === 9, '九套皮肤各有一组自己的颜色（--dg-*）、开关颜色（--ipe-sw-*）和一个小标记');
         check(css.includes('html #ipe-panel#ipe-panel .ipe-toggle { width: 38px') && /html #ipe-panel#ipe-panel \.ipe-section-body input\[type="checkbox"\] \{\s+width: 38px/.test(css), '总开关和小开关同一个尺寸（38×22）');
         check(css.includes('html #ipe-panel#ipe-panel .ipe-zoom-btn') && css.includes('.ipe-zoom-wrap > textarea { padding-right: 38px') && css.includes('html #ipe-panel#ipe-panel .ipe-panel-header::after') && css.includes('-webkit-mask: radial-gradient'), '⤢ 是小圆钮、文字给它让位；标题栏花边用遮罩切，什么底色都接得上');
-        check(['mist', 'apricot', 'jade', 'beach', 'pearl', 'lemon', 'dango'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --o-rim')) && css.includes(':is(.ipe-zoom-overlay, .ipe-notice) { --o-rim'), '放大编辑框、通知卡：八套各有一组颜色（月潮是默认那组）');
+        check(['mist', 'apricot', 'jade', 'beach', 'pearl', 'lemon', 'dango', 'oreo'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --o-rim')) && css.includes(':is(.ipe-zoom-overlay, .ipe-notice) { --o-rim'), '放大编辑框、通知卡：八套各有一组颜色（月潮是默认那组）');
+        // 2.38.0 奥利奥：第九档，黑白两色的极简皮；浮标换成一块奥利奥，投影是漫画那种实心黑影
         tt.click();
-        check(settings.mistTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '草莓团子再点一下回到月潮');
-        check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango'), '月潮：body 上没有任何 ipe-skin-* 类');
+        check(settings.mistTheme === true && settings.oreoTheme === true && settings.dangoTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-oreo') && !panel.classList.contains('ipe-dango') && d.body.classList.contains('ipe-skin-oreo') && !d.body.classList.contains('ipe-skin-dango'), '奥利奥 = 浅色皮 + ipe-oreo，草莓团子标记清掉');
+        check(tt.title.indexOf('奥利奥') >= 0 && capD.querySelectorAll('svg > g.ipe-cap-oreo rect').length === 3 && capD.querySelector('svg > g.ipe-cap-oreo').style.display === 'none' && String(capD.style.getPropertyValue('filter')).indexOf('1.5px 1.5px 0') >= 0, '浮标里有一块奥利奥（两片黑饼干夹白奶油，平时藏着），投影换成偏右下的实心黑影');
+        check(css.includes('html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-oreo') && css.includes('ipe-cap-pulse-oreo') && css.includes('ipe-cap-ledger-pulse-oreo') && /html #ipe-panel\.ipe-oreo \{\s+--dg-a: #111111/.test(css) && css.includes('--dg-head-ink: #ffffff'), '样式里有奥利奥的黑白配色、黑底白字的标题栏、浮标和忙碌脉冲');
+        tt.click();
+        check(settings.mistTheme === false && settings.oreoTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-oreo') && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '奥利奥再点一下回到月潮');
+        check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango') && !d.body.classList.contains('ipe-skin-oreo'), '月潮：body 上没有任何 ipe-skin-* 类');
         check(String(capD.style.getPropertyValue('filter')).indexOf('rgba(0,0,0') >= 0, '回到月潮：浮标投影换回原来的');
 
         // 2.19.15 预设下拉按拼音排序（显示顺序），存储顺序与选中项不动
