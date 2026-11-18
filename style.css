@@ -3325,3 +3325,24 @@ html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy.processing
 @keyframes ipe-cap-ledger-pulse-oreo { 0%, 100% { box-shadow: 0 0 0 0 rgba(120,120,120,.85); } 50% { box-shadow: 0 0 0 4.5px rgba(120,120,120,0); } }
 html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.ipe-ledger-busy::before { background: #7a7a7a; box-shadow: 0 0 2.5px rgba(0,0,0,.6); }
 html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.processing::after { background: #111111; box-shadow: 0 0 2.5px rgba(0,0,0,.6); }
+
+/* ============================================================
+   2.38.1 抽屉按钮不吃酒馆主题的特效
+   ripple（iPhone Safari）：酒馆「扩展」页里小海螺那个抽屉，每次点开，几颗按钮就不显示，位置空着，
+   碰一下屏幕才出来；功能没影响，点浮标出来的小面板也没事。
+   代码里没有任何地方藏这些按钮，位置还留着说明元素都在，是 WebKit 没把它们画出来：
+   抽屉是酒馆用「高度从 0 拉开」的动画展开的，里面带模糊（backdrop-filter）、滤镜、动画、位移的元素
+   各占一个合成层，展开那一下 iOS 偶尔漏画，要等下一次重绘。酒馆自己和不少主题都给 .menu_button 加这些。
+   小面板 2.19 起就不用这些特效了（#ipe-panel 上写了 backdrop-filter: none），抽屉按钮一直没管，这里补上。
+   选择器把 #ipe-drawer 写两遍，压过主题的规则。过渡只留底色和边框，不留 all / opacity / filter。
+   ============================================================ */
+#ipe-drawer#ipe-drawer .menu_button,
+#ipe-drawer#ipe-drawer input[type="button"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    filter: none !important;
+    animation: none !important;
+    will-change: auto !important;
+    transform: none !important;
+    transition: background-color .15s ease, border-color .15s ease !important;
+}

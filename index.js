@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.38.0";
+var IPE_VERSION = "2.38.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -7146,6 +7146,23 @@ function ipeDiagReport() {
             + "｜思考强度 " + (c.ledgerReasoningEffort || "自动") + "｜输出上限 " + (Number(c.ledgerMaxTokens) > 0 ? c.ledgerMaxTokens : "不发");
     });
     line("挂账规则", function(){ return "「" + (ipePresetItem.apply(null, LP).name || "") + "」" + ipeCardLockNote("lrule"); });
+    /* 2.38.1 酒馆主题给普通按钮加了什么效果：放一颗不归小海螺管的探针按钮量一下就拿掉。
+       抽屉展开时按钮在 iPhone 上不显示，多半就是这些（模糊 / 滤镜 / 动画各占一个合成层，WebKit 偶尔漏画） */
+    line("酒馆主题给按钮加的效果", function(){
+        var d = ipeRootDocument(), dr = q("#ipe-drawer"), host = (dr && dr.parentNode) || d.body;
+        if (!host) return "";
+        var b = d.createElement("input"); b.type = "button"; b.className = "menu_button ipe-probe-btn"; b.value = "x";
+        b.style.cssText = "position:absolute;left:-9999px;top:0;pointer-events:none";
+        host.appendChild(b);
+        try {
+            var cs = (d.defaultView || window).getComputedStyle(b), pick = function(v){ v = String(v == null ? "" : v).trim(); return v || "无"; };
+            var blur = pick(cs.backdropFilter || cs.webkitBackdropFilter || cs.getPropertyValue("-webkit-backdrop-filter")).replace(/^none$/, "无");
+            var flt = pick(cs.filter).replace(/^none$/, "无"), ani = pick(cs.animationName).replace(/^none$/, "无");
+            var tr = pick(cs.transitionProperty) + " " + pick(cs.transitionDuration);
+            if (blur !== "无" || flt !== "无" || ani !== "无") warn.push("酒馆主题给按钮加了" + [blur !== "无" ? "模糊" : "", flt !== "无" ? "滤镜" : "", ani !== "无" ? "动画" : ""].filter(Boolean).join("、") + "：iPhone 上抽屉刚展开时这类按钮可能不显示、碰一下才出来。小海螺自己的抽屉按钮 2.38.1 起不吃这些效果");
+            return "模糊 " + blur + "｜滤镜 " + flt + "｜过渡 " + tr + "｜动画 " + ani + "｜透明度 " + pick(cs.opacity);
+        } finally { try { host.removeChild(b); } catch(eR) {} }
+    });
     if (c.enabled === false) warn.push("自动提取关着：收到新楼不会自动出图（要的话在生图页最上面打开）");
     if (!ipeLogStore()) warn.push("这个浏览器不让存本地数据：下面的记录页面一刷新就没了");
     out.push("");

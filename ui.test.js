@@ -478,6 +478,11 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(settings.anthropicNative === true && nv[0].checked && d.querySelector('#ipe-status').textContent.indexOf('原生接口') >= 0, '打开抽屉那个：存下来，浮窗那个跟着开，状态行说一声');
         nv[0].checked = false; nv[0].dispatchEvent(new w.Event('change'));
         check(settings.anthropicNative === false && !nv[1].checked && d.querySelector('#ipe-status').textContent.indexOf('兼容层') >= 0, '关掉浮窗那个：抽屉那个跟着关，状态行说改回兼容层');
+        // 2.38.1 抽屉一展开，几颗按钮在 iPhone 上不画出来、碰一下才出来：抽屉按钮不吃酒馆主题的模糊 / 滤镜 / 动画；体检里记下主题给按钮加了什么
+        const btnRule = (css.match(/#ipe-drawer#ipe-drawer \.menu_button,\s*#ipe-drawer#ipe-drawer input\[type="button"\] \{[^}]*\}/) || [''])[0];
+        check(['-webkit-backdrop-filter: none !important', 'backdrop-filter: none !important', 'filter: none !important', 'animation: none !important', 'will-change: auto !important', 'transform: none !important'].every(k => btnRule.includes(k)) && /transition: [^;]*background-color[^;]*!important/.test(btnRule) && !/transition:[^;]*(all|opacity|filter)/.test(btnRule), '抽屉按钮关掉了主题可能加的模糊、滤镜、动画、位移，过渡只留底色和边框');
+        const rep2 = String(w.eval('ipeDiagReport')());
+        check(/酒馆主题给按钮加的效果：[^\n]*模糊[^\n]*滤镜[^\n]*过渡[^\n]*动画/.test(rep2) && !d.querySelector('input.ipe-probe-btn'), '🩺 体检里多一行：酒馆主题给普通按钮加了什么（量完那颗探针按钮就拿掉）');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
