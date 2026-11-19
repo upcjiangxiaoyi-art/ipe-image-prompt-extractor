@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.40.0";
+var IPE_VERSION = "2.41.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -8204,9 +8204,11 @@ function createPanel() {
             '<button id="ipe-pack-export" class="ipe-btn" type="button">\u2B07 导出全部预设包</button>'+
             '<button id="ipe-pack-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
             '<button id="ipe-pack-import" class="ipe-btn" type="button">\u2B06 导入预设包</button>'+
+            '<button id="ipe-pack-copy" class="ipe-btn" type="button">\uD83D\uDCCB 复制当前这套</button>'+
+            '<button id="ipe-pack-paste" class="ipe-btn" type="button">\uD83D\uDCE5 粘贴导入</button>'+
         '</div>'+
         '<input type="file" id="ipe-pack-file" accept=".json,application/json" style="display:none">'+
-        '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 通用锚点规则，不含角色锚点（那是各人自己卡的）、不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示各一份，发给别人用这个。角色锚点要备份的话，去锚点区点「备份锚点」。</div>');
+        '<div class="ipe-hint">包里装：模板 / 提取规则 / 系统提示 / 通用锚点规则，不含角色锚点（那是各人自己卡的）、不含 API 与密钥。导入按名字合并：新名字追加，同名覆盖前会问一句。「只导出当前这套」= 当前选中的模板、规则、系统提示各一份，发给别人用这个。角色锚点要备份的话，去锚点区点「备份锚点」。<br>不想传文件：「📋 复制当前这套」把这一套拷成一段文字，直接贴给对方；对方点「📥 粘贴导入」贴上，会先列出每一样是新增还是同名，勾了才导。</div>');
 
     h += secHTML("common-blocks","公共块", true,
         '<label>公共块<select id="ipe-common-slot"></select></label>'+
@@ -8447,9 +8449,11 @@ function createPanel() {
             '<button id="ipe-lrule-export" class="ipe-btn" type="button">\u2B07 导出全部规则</button>'+
             '<button id="ipe-lrule-export-cur" class="ipe-btn" type="button">\u2B07 只导出当前这套</button>'+
             '<button id="ipe-lrule-import" class="ipe-btn" type="button">\u2B06 导入规则包</button>'+
+            '<button id="ipe-lrule-copy" class="ipe-btn" type="button">\uD83D\uDCCB 复制当前这套</button>'+
+            '<button id="ipe-lrule-paste" class="ipe-btn" type="button">\uD83D\uDCE5 粘贴导入</button>'+
         '</div>'+
         '<input type="file" id="ipe-lrule-file" accept=".json,application/json" style="display:none">'+
-        '<div class="ipe-hint">包里装：挂账规则、NSFW 挂账规则、本卡要点，「全部」再带上改过的压缩指令；不含账本、API 与密钥。「只导出当前这套」= 当前选中的规则和要点，发给别人用这个，对方导入后直接选中。导入按名字合并，同名覆盖前会问。</div>'+
+        '<div class="ipe-hint">包里装：挂账规则、NSFW 挂账规则、本卡要点，「全部」再带上改过的压缩指令；不含账本、API 与密钥。「只导出当前这套」= 当前选中的规则和要点，发给别人用这个，对方导入后直接选中。导入按名字合并，同名覆盖前会问。<br>不想传文件：「📋 复制当前这套」拷成一段文字发过去，对方「📥 粘贴导入」贴上，先看清单、勾了才导。</div>'+
         '<details class="ipe-fold"><summary>\uD83D\uDD27 插件到底在背后干了什么</summary><div class="ipe-fold-body">'+
             '<pre id="ipe-ledger-protocol" class="ipe-ledger-age" style="max-height:none"></pre>'+
             '<div id="ipe-ledger-tagwarn" class="ipe-hint" style="line-height:1.6"></div>'+
@@ -8894,9 +8898,9 @@ function createDrawer() {
     h += '<small id="iped-template-lock-info" style="color:#888"></small>';
     h += '<textarea id="iped-base-template" class="text_pole" rows="5" placeholder="&lt;draw&gt;{Description}&lt;/draw&gt;"></textarea>';
     h += '<small style="color:#888">可无限新增模板。留空即用内置 &lt;draw&gt;{Description}&lt;/draw&gt;。用 {Description} 标记插入位置；分层可用 {Camera} {Env} {Mood} {Chars} {Pose}，整段用 &lt;draw&gt;…&lt;/draw&gt; 包住。两种都写也行：占位符全空的行整行不输出。挂了公共块时写 {Common} 就放那里，不写就插到 &lt;/draw&gt; 前一行</small>';
-    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"></div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-pack-export" class="menu_button" value="\u2B07 导出全部预设包"><input type="button" id="iped-pack-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-pack-import" class="menu_button" value="\u2B06 导入预设包"><input type="button" id="iped-pack-copy" class="menu_button" value="\uD83D\uDCCB 复制当前这套"><input type="button" id="iped-pack-paste" class="menu_button" value="\uD83D\uDCE5 粘贴导入"></div>';
     h += '<input type="file" id="iped-pack-file" accept=".json,application/json" style="display:none">';
-    h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。</small>';
+    h += '<small style="color:#888">包里装模板 / 规则 / 系统提示 / 通用锚点规则，不含角色锚点、API 与密钥；导入按名字合并，同名覆盖前会问。锚点备份在锚点区。不想传文件就「复制当前这套」发文字，对方「粘贴导入」。</small>';
     h += '<hr><small><b>公共块</b></small>';
     h += '<label>公共块</label><select id="iped-common-slot" class="text_pole"></select>';
     h += '<label>公共块名称</label><input type="text" id="iped-common-name" class="text_pole" value="" placeholder="例如：通用 / 古风">';
@@ -9040,9 +9044,9 @@ function createDrawer() {
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-ledger-prompt-lock" class="menu_button" value="🔒 锁到这张卡"><input type="button" id="iped-ledger-prompt-unlock" class="menu_button" value="🔓 解锁" style="display:none"></div>';
     h += '<small id="iped-ledger-prompt-lock-info" style="color:#888"></small>';
     h += '<textarea id="iped-ledger-prompt" class="text_pole" rows="6" placeholder="告诉副 AI：这张卡该挂什么"></textarea>';
-    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-lrule-export" class="menu_button" value="\u2B07 导出全部规则"><input type="button" id="iped-lrule-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-lrule-import" class="menu_button" value="\u2B06 导入规则包"></div>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input type="button" id="iped-lrule-export" class="menu_button" value="\u2B07 导出全部规则"><input type="button" id="iped-lrule-export-cur" class="menu_button" value="\u2B07 只导出当前这套"><input type="button" id="iped-lrule-import" class="menu_button" value="\u2B06 导入规则包"><input type="button" id="iped-lrule-copy" class="menu_button" value="\uD83D\uDCCB 复制当前这套"><input type="button" id="iped-lrule-paste" class="menu_button" value="\uD83D\uDCE5 粘贴导入"></div>';
     h += '<input type="file" id="iped-lrule-file" accept=".json,application/json" style="display:none">';
-    h += '<small style="color:#888">包里装挂账规则 / NSFW 规则 / 本卡要点 / 改过的压缩指令，不含账本、API 与密钥；「只导出当前这套」发给别人，对方导入后直接选中。同名覆盖前会问。</small>';
+    h += '<small style="color:#888">包里装挂账规则 / NSFW 规则 / 本卡要点 / 改过的压缩指令，不含账本、API 与密钥；「只导出当前这套」发给别人，对方导入后直接选中。同名覆盖前会问。不想传文件就「复制当前这套」发文字，对方「粘贴导入」。</small>';
     h += '<details class="ipe-fold"><summary>\uD83D\uDD27 插件到底在背后干了什么</summary><div class="ipe-fold-body">';
     h += '<pre id="iped-ledger-protocol" class="ipe-ledger-age" style="max-height:none"></pre>';
     h += '<div id="iped-ledger-tagwarn" style="color:#888;font-size:12px;line-height:1.6"></div>';
@@ -9282,18 +9286,27 @@ function ipeImgPackTplCommonOpts(pack, dry, legacyCommon) {
 }
 
 /* 先干跑数一数要覆盖多少，再决定问不问 */
+/* 2.41.0 包里的每一样对着本地分个类：add 新名字 / rep 同名但内容不一样 / same 一模一样 / skip 对不上号进不来（系统提示只有两槽）。
+   文件导入数个数、粘贴导入列清单，用的是同一份判断。 */
+function ipePackClassify(cur, incoming, opts) {
+    var byName = {}, byId = {}, out = [];
+    (cur || []).forEach(function(c){ if (!c) return; byName[String(c.name || "").trim()] = c; byId[c.id] = c; });
+    (Array.isArray(incoming) ? incoming : []).forEach(function(it, i){
+        if (!it || typeof it !== "object") return;
+        var name = String(it.name || "").trim(); var value = String(it.value == null ? "" : it.value);
+        if (!name && !value) return;
+        var hit = (opts && opts.matchIdFirst && it.id && byId[it.id]) || (name && byName[name]) || null;
+        var state = hit
+            ? ((String(hit.value || "") !== value || (opts && opts.differs && opts.differs(hit, it))) ? "rep" : "same")
+            : ((opts && opts.fixedSlots) ? "skip" : "add");
+        out.push({ idx: i, name: name, state: state, localName: hit ? String(hit.name || "") : "" });
+    });
+    return out;
+}
 function ipeImgPackPreview(pack) {
     function count(cur, incoming, opts) {
-        var byName = {}, byId = {}, add = 0, rep = 0;
-        cur.forEach(function(c){ byName[String(c.name || "").trim()] = c; byId[c.id] = c; });
-        (incoming || []).forEach(function(it){
-            if (!it || typeof it !== "object") return;
-            var name = String(it.name || "").trim(); var value = String(it.value == null ? "" : it.value);
-            if (!name && !value) return;
-            var hit = (opts && opts.matchIdFirst && it.id && byId[it.id]) || (name && byName[name]) || null;
-            if (hit) { if (String(hit.value || "") !== value || (opts && opts.differs && opts.differs(hit, it))) rep++; }
-            else if (!(opts && opts.fixedSlots)) add++;
-        });
+        var add = 0, rep = 0;
+        ipePackClassify(cur, incoming, opts).forEach(function(x){ if (x.state === "add") add++; else if (x.state === "rep") rep++; });
         return { added: add, replaced: rep };
     }
     return {
@@ -9506,6 +9519,228 @@ function ipeLedgerPackImportText(txt, opts) {
     var parts = [fmt("挂账规则", m1.r), fmt("NSFW 规则", m2.r), fmt("本卡要点", m3.r), cpChange ? "压缩指令已替换" : ""].filter(Boolean);
     ipeToast(parts.length ? "已导入 ✓ " + parts.join("，") + (picked ? "；已选中「" + picked + "」" : "") : "包是空的或与现有内容完全一致，什么都没变", true);
     return { prompts: m1.r, nsfwPrompts: m2.r, notes: m3.r, compress: cpChange, picked: picked };
+}
+
+/* ============================================================
+   📋 包的复制粘贴分享（2.41.0）
+   原来分享只有「导出文件 → 把文件发过去 → 对方选文件导入」，手机上要在「文件」App 里绕一圈。
+   现在多一条路：「复制当前这套」把包拷成一段文字，直接贴进聊天软件发出去；对方「粘贴导入」贴上。
+   贴上以后不直接导：先列清单，每一样写明是新增、同名（会盖掉你现在那套）、一模一样、还是进不来，
+   新增的默认勾着，同名的默认不勾，勾了哪样导哪样。真正落库走的还是文件导入那两个函数，合并规则完全一样。
+   画风包、挂账规则包共用一个粘贴框：贴哪边的入口都认得出是哪种包。
+   文字前后各有一个记号：少了结尾那个 = 被聊天软件截断了，直说，不硬导半截。
+   ============================================================ */
+var IPE_PACK_OPEN = "【🐚小海螺包·开始】", IPE_PACK_CLOSE = "【🐚小海螺包·结束】";
+function ipePackCountText(kind, pack) {
+    var parts = kind === "ledger"
+        ? [["挂账规则", (pack.prompts || []).length], ["NSFW 规则", (pack.nsfwPrompts || []).length], ["本卡要点", (pack.notes || []).length]]
+        : [["模板", (pack.templates || []).length], ["公共块", (pack.commons || []).length], ["提取规则", (pack.rules || []).length], ["系统提示", (pack.systemPrompts || []).length]];
+    return parts.filter(function(x){ return x[1] > 0; }).map(function(x){ return x[0] + " " + x[1]; }).join(" · ");
+}
+function ipePackShareText(kind) {
+    var pack = kind === "ledger" ? ipeLedgerPackBuild("current") : ipeImgPackBuild("current");
+    var first = kind === "ledger" ? (pack.prompts[0] || {}) : (pack.templates[0] || {});
+    return "🐚 小海螺" + (kind === "ledger" ? "挂账规则包" : "画风包") + "「" + String(first.name || "") + "」｜" + ipePackCountText(kind, pack) + "\n"
+        + "用法：这一整段全部复制 → 小海螺面板里点「📥 粘贴导入」→ 贴上。\n"
+        + IPE_PACK_OPEN + JSON.stringify(pack) + IPE_PACK_CLOSE;
+}
+/* 贴进来的文字 → { kind: "img" | "ledger", pack } 或 { err }。整段带说明的、只有中间那截 JSON 的、导出文件里的内容，都认。 */
+function ipePackTextParse(txt) {
+    var s = String(txt || "").trim();
+    if (!s) return { err: "empty" };
+    var mo = /【[^【】]*小海螺包[^【】]*开始[^【】]*】/.exec(s), body = s, marked = false;
+    if (mo) {
+        marked = true;
+        var rest = s.slice(mo.index + mo[0].length), mc = /【[^【】]*小海螺包[^【】]*结束[^【】]*】/.exec(rest);
+        if (!mc) return { err: "cut" };
+        body = rest.slice(0, mc.index).trim();
+    }
+    var parsed = null, okp = false;
+    try { parsed = JSON.parse(body); okp = true; } catch(e) {}
+    if (!okp) {
+        var a = body.search(/[{\[]/), b = Math.max(body.lastIndexOf("}"), body.lastIndexOf("]"));
+        if (a >= 0 && b > a) { try { parsed = JSON.parse(body.slice(a, b + 1)); okp = true; } catch(e2) {} }
+    }
+    if (!okp) return { err: marked ? "broken" : "notpack" };
+    var img = ipeImgPackNormalize(parsed);
+    if (img) return { kind: "img", pack: img };
+    var led = ipeLedgerPackNormalize(parsed);
+    if (led) return { kind: "ledger", pack: led };
+    return { err: "notpack" };
+}
+var IPE_PACK_ERR = {
+    cut: "这段文字不完整：有开头的记号，没有结尾的。多半是聊天软件把太长的消息截断了。请对方改用「⬇ 只导出当前这套」发文件，或者分开发。",
+    broken: "这段文字中间坏了（可能被聊天软件改了标点或截掉一块），读不出来。请对方重新复制一次，或者改用「⬇ 只导出当前这套」发文件。",
+    notpack: "这不是小海螺的包。要贴的是对方点「📋 复制当前这套」拷出来的那一整段（或者导出文件里的全部内容）。"
+};
+function ipePackGroups(kind, pack) {
+    if (kind === "ledger") return [
+        ["prompts", "挂账规则", ipePresetList.apply(null, LP), null],
+        ["nsfwPrompts", "NSFW 挂账规则", ipePresetList.apply(null, LPN), null],
+        ["notes", "本卡要点", ipePresetList.apply(null, LN), null]
+    ];
+    return [
+        ["commons", "公共块", ipeGetCommonBlocks(), null],
+        ["templates", "模板", ipeGetBaseTemplates(), ipeImgPackTplOpts(pack, true)],
+        ["rules", "提取规则", ipeGetRulePresets(), null],
+        ["systemPrompts", "系统提示", ipeGetSystemPromptPresets(), { matchIdFirst: true, fixedSlots: true }],
+        ["anchors", "角色锚点", ipeGetAnchorPresets(), null]
+    ];
+}
+/* 清单：一行一样。on = 默认勾不勾（新增勾；同名不勾；别人包里的角色锚点不勾，自己备份的锚点包才勾）。 */
+function ipePackPlan(kind, pack) {
+    var rows = [];
+    ipePackGroups(kind, pack).forEach(function(g){
+        ipePackClassify(g[2], pack[g[0]], g[3]).forEach(function(x){
+            var shared = g[0] === "anchors" && pack.scope !== "anchors";
+            rows.push({ key: g[0] + ":" + x.idx, group: g[0], label: g[1], name: x.name || "（没起名）", state: x.state, localName: x.localName,
+                        note: shared ? "别人卡的角色，一般不要" : "",
+                        on: x.state === "add" && !shared });
+        });
+    });
+    if (kind === "ledger") {
+        var cp = String(pack.compressPrompt || "").trim();
+        if (cp) rows.push({ key: "compressPrompt", group: "", label: "压缩指令", name: "", state: cp === String(cfg().ledgerCompressPrompt || "").trim() ? "same" : "rep", localName: "", note: "", on: false });
+    } else {
+        var g2 = String(pack.anchorGuide || "").trim();
+        if (g2) rows.push({ key: "anchorGuide", group: "", label: "通用锚点规则", name: "", state: g2 === String(cfg().anchorUsageGuide || "").trim() ? "same" : "rep", localName: "", note: "", on: false });
+    }
+    return { kind: kind, rows: rows };
+}
+/* 只留勾了的那几样，交给原来的导入函数。清单上已经一样样看过，这里不再弹确认框。 */
+function ipePackApply(kind, pack, chosen) {
+    chosen = chosen || {};
+    var out = {}; Object.keys(pack).forEach(function(k){ out[k] = pack[k]; });
+    ipePackGroups(kind, pack).forEach(function(g){
+        if (Array.isArray(pack[g[0]])) out[g[0]] = pack[g[0]].filter(function(it, i){ return !!chosen[g[0] + ":" + i]; });
+    });
+    if (kind === "ledger") {
+        if (!chosen.compressPrompt) out.compressPrompt = "";
+        return ipeLedgerPackImportText(JSON.stringify(out), { force: true });
+    }
+    if (!chosen.anchorGuide) out.anchorGuide = "";
+    return ipeImgPackImportText(JSON.stringify(out), { force: true, anchors: true, legacyCommon: "" });
+}
+function ipeCopyText(text, cb) {
+    var d = ipeRootDocument();
+    var fallback = function(){
+        var ok = false;
+        try {
+            var t = d.createElement("textarea");
+            t.value = text; t.readOnly = true; t.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+            (d.body || d.documentElement).appendChild(t);
+            t.focus(); t.select(); try { t.setSelectionRange(0, text.length); } catch(e0) {}
+            ok = !!d.execCommand("copy");
+            t.parentNode.removeChild(t);
+        } catch(e) {}
+        cb(ok);
+    };
+    try {
+        var nav = (ipeRootWindow() || window).navigator;
+        if (nav && nav.clipboard && nav.clipboard.writeText) nav.clipboard.writeText(text).then(function(){ cb(true); }, fallback);
+        else fallback();
+    } catch(e) { fallback(); }
+}
+function ipePackCopy(kind, btn) {
+    var text = ipePackShareText(kind), say = kind === "ledger" ? ipeLedgerStatus : setStatus;
+    var isInput = btn && btn.tagName === "INPUT", old = btn ? (isInput ? btn.value : btn.textContent) : "";
+    function flash(t) { if (!btn) return; if (isInput) btn.value = t; else btn.textContent = t; setTimeout(function(){ if (isInput) btn.value = old; else btn.textContent = old; }, 1800); }
+    ipeCopyText(text, function(ok){
+        if (ok) {
+            flash("已复制 ✓");
+            say("已复制 ✓ " + text.split("\n")[0].replace(/^🐚\s*/, "") + "，共 " + text.length + " 字。贴给对方，对方点「📥 粘贴导入」贴上就行"
+                + (text.length > 8000 ? "；这段比较长，聊天软件发不出去或被截断的话，改用「⬇ 只导出当前这套」发文件" : ""), "#6ec577");
+        } else {
+            /* 浏览器不让写剪贴板：把这段文字摆出来，自己长按全选复制 */
+            var ta = ipeRootDocument().createElement("textarea");
+            ta.id = "ipe-pack-share-text"; ta.readOnly = true; ta.value = text;
+            ipeZoomOpen(ta);
+            var ov = ipeRootDocument().getElementById("ipe-zoom-overlay");
+            if (ov) { var tt = ov.querySelector(".ipe-zoom-title"); if (tt) tt.textContent = "复制这一整段发给对方"; var cl = ov.querySelector(".ipe-zoom-close"); if (cl) cl.textContent = "关闭"; }
+            say("浏览器没让直接复制：点弹出来那页右上角的「复制」，或者长按全选", "#c9a227");
+        }
+    });
+    return text;
+}
+/* 粘贴导入那一页：借「⤢ 放大编辑」的弹层（手机上的层级坑它都踩过了），上面清单，下面贴字的框 */
+var IPE_PACK_STATE_TEXT = { add: "新增", rep: "同名", same: "一样", skip: "进不来" };
+function ipePackPasteOpen(prefill) {
+    var d = ipeRootDocument();
+    var ta = d.createElement("textarea");
+    ta.id = "ipe-pack-paste-text"; ta.value = String(prefill || "");
+    ipeZoomOpen(ta);
+    var ov = d.getElementById("ipe-zoom-overlay"); if (!ov) return false;
+    var head = ov.querySelector(".ipe-zoom-head"), close = ov.querySelector(".ipe-zoom-close"), big = ov.querySelector(".ipe-zoom-ta");
+    var count = ov.querySelector(".ipe-zoom-count"), cp = ov.querySelector(".ipe-zoom-copy"), title = ov.querySelector(".ipe-zoom-title");
+    if (count) count.style.display = "none";
+    if (cp) cp.style.display = "none";
+    if (title) title.textContent = "📥 粘贴导入";
+    head.style.flexWrap = "wrap";
+    close.textContent = "取消";
+    var go = d.createElement("button"); go.type = "button"; go.className = "ipe-pack-go"; go.textContent = "导入";
+    go.style.cssText = close.style.cssText + ";font-weight:600";
+    head.insertBefore(go, close);
+    var plan = d.createElement("div"); plan.className = "ipe-pack-plan";
+    plan.style.cssText = "flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;margin:10px 12px 0;font-size:14px;line-height:1.6";
+    big.parentNode.insertBefore(plan, big);
+    big.style.flex = "0 0 104px"; big.style.fontSize = "16px";   // 16px：iPhone 上点进去不会把页面放大
+    big.placeholder = "把对方发来的那一整段贴在这里（长按 → 粘贴）";
+    var cur = null;   // { kind, pack }
+    function line(text, css) { var p = d.createElement("div"); p.textContent = text; if (css) p.style.cssText = css; plan.appendChild(p); return p; }
+    function picked() { var m = {}, n = 0; plan.querySelectorAll("input[type=checkbox]").forEach(function(c){ if (c.checked) { m[c.getAttribute("data-key")] = true; n++; } }); return { map: m, n: n }; }
+    function updGo() {
+        var n = cur ? picked().n : 0;
+        go.disabled = !n; go.style.opacity = n ? "1" : ".45";
+        go.textContent = n ? "导入 " + n + " 样" : "导入";
+    }
+    function render() {
+        plan.textContent = ""; cur = null;
+        var r = ipePackTextParse(big.value);
+        if (r.err === "empty") {
+            line("怎么用", "font-weight:600;margin-bottom:4px");
+            line("① 对方在小海螺里点「📋 复制当前这套」，把拷出来的那一整段发给你。");
+            line("② 你把那一整段复制下来，贴进下面的框。");
+            line("③ 这里会列出包里每一样是新增还是同名，勾好再点右上角「导入」。没勾的不动。");
+            line("画风包、挂账规则包都贴这里，会自己认。", "opacity:.7;margin-top:6px");
+            updGo(); return;
+        }
+        if (r.err) { line("⚠ " + IPE_PACK_ERR[r.err], "color:#c9772e;font-weight:600").className = "ipe-pack-err"; updGo(); return; }
+        cur = r;
+        var p = ipePackPlan(r.kind, r.pack), nSame = 0;
+        line("这是一个" + (r.kind === "ledger" ? "挂账规则包" : "画风包") + (ipePackCountText(r.kind, r.pack) ? "：" + ipePackCountText(r.kind, r.pack) : "") + "。勾了的才导：", "font-weight:600;margin-bottom:6px").className = "ipe-pack-what";
+        p.rows.forEach(function(row){
+            if (row.state === "same") nSame++;
+            var lab = d.createElement("label"); lab.className = "ipe-pack-row"; lab.setAttribute("data-state", row.state);
+            lab.style.cssText = "display:flex;align-items:flex-start;gap:8px;padding:7px 2px;border-bottom:1px solid rgba(128,128,128,.22);cursor:pointer" + (row.state === "same" || row.state === "skip" ? ";opacity:.55" : "");
+            var c = d.createElement("input"); c.type = "checkbox"; c.setAttribute("data-key", row.key);
+            c.style.cssText = "flex:0 0 auto;width:20px;height:20px;margin:2px 0 0";
+            if (row.state === "same" || row.state === "skip") { c.disabled = true; c.style.visibility = "hidden"; } else c.checked = !!row.on;
+            c.addEventListener("change", updGo);
+            var tag = d.createElement("span"); tag.className = "ipe-pack-tag"; tag.textContent = IPE_PACK_STATE_TEXT[row.state];
+            tag.style.cssText = "flex:0 0 auto;font-size:12px;line-height:1.5;padding:0 8px;border-radius:999px;border:1px solid currentColor;margin-top:2px;white-space:nowrap" + (row.state === "rep" ? ";color:#c9772e" : "");
+            var tx = d.createElement("span"); tx.className = "ipe-pack-name"; tx.style.cssText = "flex:1 1 auto;min-width:0;overflow-wrap:anywhere";
+            tx.textContent = row.label + (row.name ? "「" + row.name + "」" : "")
+                + (row.state === "rep" ? (row.localName && row.localName !== row.name ? "　勾上 = 换掉你的「" + row.localName + "」" : "　你也有同名的，内容不一样；勾上 = 用包里的换掉你的") : "")
+                + (row.state === "same" ? "　和你的一模一样，不用导" : "")
+                + (row.state === "skip" ? "　你这边没有对得上的槽，导不了" : "")
+                + (row.note ? "　（" + row.note + "）" : "");
+            lab.appendChild(c); lab.appendChild(tag); lab.appendChild(tx); plan.appendChild(lab);
+        });
+        if (!p.rows.length) line("包是空的，没有可导的东西。", "opacity:.7");
+        else if (nSame === p.rows.length) line("包里的东西你都有了，而且一模一样，不用导。", "opacity:.7;margin-top:6px");
+        updGo();
+    }
+    ta.addEventListener("input", render);   // 弹层里每次改字都会回填到 ta 并触发它的 input
+    go.addEventListener("click", function(){
+        if (!cur) return;
+        var pk = picked(); if (!pk.n) return;
+        var kind = cur.kind, res = ipePackApply(kind, cur.pack, pk.map);
+        ipeZoomClose();
+        return res;
+    });
+    render();
+    setTimeout(function(){ try { big.setSelectionRange(0, 0); big.scrollTop = 0; } catch(e) {} }, 80);
+    return true;
 }
 
 /* ============================================================
@@ -10295,6 +10530,14 @@ function bindAll() {
                 r.readAsText(f);
             });
         }
+    });
+    // 2.41.0 包的复制粘贴分享：面板、抽屉各两处
+    [["pack", "img"], ["lrule", "ledger"]].forEach(function(pr){
+        ["ipe", "iped"].forEach(function(pre){
+            var bCp = q("#" + pre + "-" + pr[0] + "-copy"), bPs = q("#" + pre + "-" + pr[0] + "-paste");
+            if (bCp && !bCp.dataset.ipeBound) { bCp.dataset.ipeBound = "1"; bCp.addEventListener("click", function(){ ipePackCopy(pr[1], bCp); }); }
+            if (bPs && !bPs.dataset.ipeBound) { bPs.dataset.ipeBound = "1"; bPs.addEventListener("click", function(){ ipePackPasteOpen(); }); }
+        });
     });
     // 2.28.1 挂账规则包
     [["ipe-lrule-export","ipe-lrule-export-cur","ipe-lrule-import","ipe-lrule-file"],

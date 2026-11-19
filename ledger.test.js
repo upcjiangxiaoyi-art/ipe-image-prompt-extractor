@@ -3604,6 +3604,104 @@ await (async () => {
     ok(title().indexOf("还没打开") >= 0 && all.disabled, "没打开角色卡：标题说还没打开，全锁按钮灰着", title());
 })();
 
+console.log("\n【81】 包的复制粘贴分享（2.41.0）：原来只能导出文件再传文件，手机上要绕一圈。「复制当前这套」拷成一段文字，对方「粘贴导入」贴上；先列清单（新增 / 同名 / 一样），新增默认勾、同名默认不勾，勾了才导");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const ov = d => d.querySelector("#ipe-zoom-overlay");
+    const type = (w, v) => { const big = ov(w.document).querySelector(".ipe-zoom-ta"); big.value = v; big.dispatchEvent(new w.Event("input", { bubbles: true })); };
+    const rows = d => Array.from(ov(d).querySelectorAll(".ipe-pack-row")).map(r => ({ state: r.getAttribute("data-state"), text: r.querySelector(".ipe-pack-name").textContent, tag: r.querySelector(".ipe-pack-tag").textContent, cb: r.querySelector("input") }));
+
+    // 发的人
+    const a = boot(10); const da = a.w.document;
+    const sa = a.tavern.extensionSettings[a.F("EXT_NAME")];
+    sa.apiKey = "sk-SECRET-123"; sa.apiEndpoint = "https://secret.example/v1";
+    sa.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }, { id: "tpl_2", name: "水墨", value: "<draw>INK: {Description}</draw>" }]); sa.activeBaseTemplate = "tpl_2";
+    sa.rulePresetsJson = JSON.stringify([{ id: "rule_1", name: "写实", value: "规则甲" }]); sa.activeRulePreset = "rule_1";
+    sa.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp_1", name: "修仙", value: "修仙规则。" + "够长".repeat(20) }]); sa.activeLedgerPrompt = "lp_1";
+    a.w.eval("ipeRefreshTemplateEditors")(); a.w.eval("ipeRefreshRuleEditors")(); a.w.eval("ipeLedgerRefreshBotEditors")();
+    const g = (d, id) => d.querySelector("#" + id);
+    ok(["ipe-pack-copy", "ipe-pack-paste", "ipe-lrule-copy", "ipe-lrule-paste"].every(id => !!g(da, id)), "面板上有四颗按钮：画风包、挂账规则包各一对「复制当前这套 / 粘贴导入」");
+    await until(() => g(da, "ipe-pack-copy").dataset.ipeBound === "1" && g(da, "ipe-lrule-copy").dataset.ipeBound === "1");
+    let copied = null;
+    Object.defineProperty(a.w.navigator, "clipboard", { value: { writeText: async t => { copied = t; } }, configurable: true });
+    g(da, "ipe-pack-copy").click();
+    await until(() => copied !== null && g(da, "ipe-pack-copy").textContent.indexOf("已复制") >= 0);
+    const imgText = copied || "";
+    ok(imgText.indexOf("【🐚小海螺包·开始】") > 0 && /【🐚小海螺包·结束】$/.test(imgText) && imgText.split("\n")[0].indexOf("画风包「水墨」") >= 0, "拷出来的是一段文字：第一行写明是什么包、叫什么，正文夹在开始 / 结束两个记号中间", imgText.slice(0, 80));
+    ok(imgText.indexOf("sk-SECRET") < 0 && imgText.indexOf("secret.example") < 0 && imgText.indexOf("默认") < 0, "不带密钥和接口地址，也不带没选中的模板");
+    ok(a.w.document.querySelector("#ipe-status").textContent.indexOf("已复制") >= 0 && a.w.document.querySelector("#ipe-status").getAttribute("data-ipe-tone") === "ok", "状态行说已复制，告诉下一步怎么办", a.w.document.querySelector("#ipe-status").textContent);
+    copied = null; g(da, "ipe-lrule-copy").click();
+    await until(() => copied !== null);
+    const ledText = copied || "";
+    ok(ledText.split("\n")[0].indexOf("挂账规则包「修仙」") >= 0 && ledText.indexOf("修仙规则") > 0, "挂账规则那边同理", ledText.slice(0, 60));
+
+    // 收的人：没有「水墨」，有一套同名但内容不一样的「写实」
+    const b = boot(10); const db = b.w.document;
+    const sb = b.tavern.extensionSettings[b.F("EXT_NAME")];
+    sb.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }]); sb.activeBaseTemplate = "tpl_1";
+    sb.rulePresetsJson = JSON.stringify([{ id: "rule_9", name: "写实", value: "我自己的规则" }]); sb.activeRulePreset = "rule_9";
+    b.w.eval("ipeRefreshTemplateEditors")(); b.w.eval("ipeRefreshRuleEditors")();
+    const parse = t => b.w.eval("ipePackTextParse")(t);
+    eq(parse(imgText).kind, "img", "认得出是画风包");
+    eq(parse(ledText).kind, "ledger", "认得出是挂账规则包");
+    eq(parse(imgText.slice(0, imgText.length - 40)).err, "cut", "尾巴被截掉：认出来是不完整，不硬导");
+    eq(parse("今天天气不错").err, "notpack", "随便一段话：不是包");
+    eq(parse(JSON.stringify(a.F("ipeImgPackBuild")("current"), null, 2)).kind, "img", "把导出文件里的内容整个贴进来也认");
+    eq(parse("对方说：\n" + imgText + "\n（收到回我）").kind, "img", "前后多带了几句别的话也认");
+
+    await until(() => g(db, "ipe-pack-paste").dataset.ipeBound === "1");
+    g(db, "ipe-pack-paste").click();
+    ok(!!ov(db) && !!ov(db).querySelector(".ipe-pack-plan") && ov(db).querySelector(".ipe-pack-plan").textContent.indexOf("怎么用") >= 0 && ov(db).querySelector(".ipe-pack-go").disabled, "点「粘贴导入」：弹出一页，空着的时候写着怎么用，「导入」灰着");
+    type(b.w, imgText);
+    let rs = rows(db);
+    const tplRow = rs.find(r => r.text.indexOf("模板「水墨」") >= 0), ruleRow = rs.find(r => r.text.indexOf("提取规则「写实」") >= 0);
+    ok(tplRow && tplRow.state === "add" && tplRow.cb.checked && tplRow.tag === "新增", "贴上：没有的那套标「新增」，默认勾着", JSON.stringify(rs.map(r => r.state + r.text)));
+    ok(ruleRow && ruleRow.state === "rep" && !ruleRow.cb.checked && ruleRow.text.indexOf("换掉你的") >= 0, "同名但内容不一样的标「同名」，默认不勾，写明勾上会换掉自己的");
+    ok(rs.filter(r => r.state === "same").every(r => r.cb.disabled) && rs.some(r => r.state === "same"), "一模一样的（系统提示）灰着，不用导");
+    eq(ov(db).querySelector(".ipe-pack-go").textContent, "导入 1 样", "「导入」上写着勾了几样");
+    ov(db).querySelector(".ipe-pack-go").click();
+    ok(!ov(db) && b.F("ipeGetBaseTemplates")().some(t => t.name === "水墨" && t.value.indexOf("INK") >= 0), "点导入：新增的那套进来了，弹层关掉");
+    eq(b.F("ipeGetRulePresets")().find(r => r.name === "写实").value, "我自己的规则", "没勾的同名规则原样没动");
+    eq(sb.activeBaseTemplate, "tpl_1", "导入不替你换当前用的模板");
+
+    // 再贴一次：水墨已经一样了；这回勾上同名的规则
+    g(db, "ipe-pack-paste").click(); type(b.w, imgText);
+    rs = rows(db);
+    ok(rs.find(r => r.text.indexOf("模板「水墨」") >= 0).state === "same" && ov(db).querySelector(".ipe-pack-go").disabled, "再贴同一段：那套已经一样了，什么都没勾时「导入」灰着");
+    const rr = rs.find(r => r.text.indexOf("提取规则「写实」") >= 0); rr.cb.checked = true; rr.cb.dispatchEvent(new b.w.Event("change", { bubbles: true }));
+    ok(!ov(db).querySelector(".ipe-pack-go").disabled, "勾上同名的那行：「导入」亮了");
+    ov(db).querySelector(".ipe-pack-go").click();
+    eq(b.F("ipeGetRulePresets")().find(r => r.name === "写实").value, "规则甲", "勾了才盖：同名规则换成包里的");
+    eq(b.F("ipeGetRulePresets")().length, 1, "是覆盖，不是再多出一套");
+
+    // 截断的、带脚本的、带别人锚点的
+    g(db, "ipe-pack-paste").click(); type(b.w, imgText.slice(0, imgText.length - 40));
+    ok(!!ov(db).querySelector(".ipe-pack-err") && ov(db).querySelector(".ipe-pack-err").textContent.indexOf("不完整") >= 0 && ov(db).querySelector(".ipe-pack-go").disabled && rows(db).length === 0, "贴了半截：直说不完整、多半被截断了，「导入」灰着", ov(db).querySelector(".ipe-pack-plan").textContent);
+    type(b.w, JSON.stringify({ _fmt: "ipe-image-pack", templates: [{ name: "<img src=x onerror=1>", value: "T" }], anchors: [{ name: "别人的角色", value: "npc" }] }));
+    rs = rows(db);
+    ok(!ov(db).querySelector(".ipe-pack-plan img") && rs.some(r => r.text.indexOf("<img src=x onerror=1>") >= 0), "名字里带标签：当字显示，不当网页内容执行");
+    const an = rs.find(r => r.text.indexOf("角色锚点「别人的角色」") >= 0);
+    ok(an && an.state === "add" && !an.cb.checked && an.text.indexOf("一般不要") >= 0, "别人包里带的角色锚点：列出来，默认不勾");
+    ov(db).querySelector(".ipe-zoom-close").click();
+    ok(!ov(db) && !b.F("ipeGetBaseTemplates")().some(t => t.name.indexOf("<img") >= 0), "点取消：什么都没导");
+
+    // 挂账规则包从同一个框贴进去
+    g(db, "ipe-pack-paste").click(); type(b.w, ledText);
+    rs = rows(db);
+    ok(ov(db).querySelector(".ipe-pack-what").textContent.indexOf("挂账规则包") >= 0 && rs.some(r => r.text.indexOf("挂账规则「修仙」") >= 0 && r.state === "add" && r.cb.checked), "同一个框里贴挂账规则包：自己认出来", JSON.stringify(rs.map(r => r.state + r.text)));
+    ov(db).querySelector(".ipe-pack-go").click();
+    const lps = JSON.parse(sb.ledgerPromptPresetsJson || "[]"), hitLp = lps.find(x => x.name === "修仙");
+    ok(hitLp && hitLp.value.indexOf("修仙规则") === 0 && sb.activeLedgerPrompt === hitLp.id, "导进来并且直接选中（只带一套规则的包就是让你用它）");
+
+    // 浏览器不让写剪贴板：把那段字摆出来自己拷
+    Object.defineProperty(a.w.navigator, "clipboard", { value: undefined, configurable: true });
+    g(da, "ipe-pack-copy").click();
+    await until(() => !!ov(da));
+    const shown = ov(da) ? ov(da).querySelector(".ipe-zoom-ta") : null;   // 包里带导出时间，两次拷的不会逐字相同：比第一行、比认不认得出
+    ok(!!shown && shown.readOnly && shown.value.split("\n")[0] === imgText.split("\n")[0] && parse(shown.value).kind === "img", "复制不了的浏览器：弹出那段文字，自己长按全选", shown ? shown.value.slice(0, 60) : "没弹");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

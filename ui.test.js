@@ -489,6 +489,15 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.eval('setStatus')('失败: x', '#d4726a');
         check(d.querySelector('#iped-status').getAttribute('data-ipe-tone') === 'err' && d.querySelector('#ipe-status').getAttribute('data-ipe-tone') === 'err', '抽屉和浮窗的状态行一起标上');
         check(css.includes('#ipe-supp-presets { flex: 1 1 100%') && css.includes('#iped-supp-presets { flex: 1 1 100%') && d.querySelector('#ipe-supp-presets').parentElement === d.querySelector('#ipe-supp-save').parentElement, '「常用短语」下拉自己占一整行，「存为常用」「删」排在下面（还在同一组里）');
+        // 2.41.0 包的复制粘贴分享：面板、抽屉都有；跟着导出导入那一排一起收在原来的地方
+        for (const prefix of ['ipe', 'iped']) {
+            const g = id => d.querySelector('#' + prefix + '-' + id);
+            check(['pack-copy', 'pack-paste'].every(k => !!g(k) && g(k).parentElement === g('pack-export').parentElement) && ['lrule-copy', 'lrule-paste'].every(k => !!g(k) && g(k).parentElement === g('lrule-export').parentElement), prefix + ' 「复制当前这套 / 粘贴导入」跟导出导入排在同一排（画风包、挂账规则包各一对）');
+        }
+        d.querySelector('#iped-lrule-paste').click();
+        const pov = d.querySelector('#ipe-zoom-overlay');
+        check(!!pov && !!pov.querySelector('.ipe-pack-plan') && !!pov.querySelector('.ipe-pack-go') && pov.querySelector('.ipe-zoom-title').textContent.indexOf('粘贴导入') >= 0, '抽屉里点「粘贴导入」也弹出同一页');
+        w.eval('ipeZoomClose')();
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
