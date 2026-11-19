@@ -3649,3 +3649,45 @@ html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-
 /* ---- 草莓团子自己的：没开的开关用灰粉的边，选中页签的厚度用浅一号的粉 ---- */
 html body.ipe-skin-dango:not(#_) #ipe-drawer#ipe-drawer input[type="checkbox"]:not(:checked) { border-color: #E3D5DB !important; }
 html body.ipe-skin-dango:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on { box-shadow: 0 2.5px 0 #FFB3C6 !important; }
+
+/* ============================================================
+   2.44.0 新手三步引导卡（小面板、抽屉同一套；颜色走各皮肤那组 --dg-*）
+   主按钮色的边和厚度，跟别的卡区分开：它是「先看我」的那张。
+   ============================================================ */
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide {
+    margin: 11px 0 14px !important;
+    padding: 12px 12px 10px !important;
+    border: 2px solid var(--dg-p-edge) !important;
+    border-radius: 20px !important;
+    background: var(--dg-card) !important;
+    box-shadow: 0 4px 0 var(--dg-p-thick) !important;
+    color: var(--dg-ink) !important;
+}
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-head { margin-bottom: 8px; }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-title { color: var(--dg-ink) !important; font-size: 13.5px !important; font-weight: 800 !important; letter-spacing: .04em; }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-close {
+    flex: 0 0 26px; width: 26px; height: 26px; min-height: 0; padding: 0; margin: 0;
+    border: 2px solid var(--dg-a-line); border-radius: 50%;
+    background: var(--dg-card); color: var(--dg-muted); -webkit-text-fill-color: var(--dg-muted);
+    font-size: 15px; line-height: 20px; cursor: pointer; box-shadow: none;
+}
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-step { padding: 8px 0; border-top: 2px dashed var(--dg-a-soft); }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-num {
+    flex: 0 0 24px; width: 24px; height: 24px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--dg-a-soft); color: var(--dg-a);
+    font-size: 12px; font-weight: 800;
+}
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-text { color: var(--dg-ink) !important; font-size: 12px !important; line-height: 1.5; }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-done .ipe-guide-num { background: var(--dg-ok-soft); color: var(--dg-ok); }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-done .ipe-guide-text { color: var(--dg-faint) !important; }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide .ipe-guide-go { min-height: 32px !important; min-width: 62px; padding: 4px 13px !important; margin: 0 !important; }
+:is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-foot { margin: 0 !important; padding-top: 8px; border-top: 2px dashed var(--dg-a-soft); color: var(--dg-faint) !important; font-size: 11px !important; line-height: 1.55; }
+/* 小面板右边那一条是留给拇指滑动的：按钮别伸进去 */
+html #ipe-panel#ipe-panel .ipe-guide-step { padding-right: var(--ipe-thumb); }
+/* 抽屉里「下一步」那颗用主按钮色（小面板是加 ipe-btn-primary 类） */
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-guide-next .ipe-guide-go { border-color: var(--dg-p-edge) !important; background: var(--dg-p) !important; color: var(--dg-p-ink) !important; -webkit-text-fill-color: var(--dg-p-ink) !important; box-shadow: 0 3px 0 var(--dg-p-thick) !important; }
+/* 奥利奥：细黑线，打勾的圆点黑底白勾 */
+:is(html #ipe-panel#ipe-panel.ipe-oreo, html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-done .ipe-guide-num { background: #111111; color: #ffffff; }
+:is(html #ipe-panel#ipe-panel.ipe-oreo, html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-num { background: #ffffff; color: #111111; border: 1.5px solid #111111; }
+:is(html #ipe-panel#ipe-panel.ipe-oreo, html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer) :is(.ipe-guide-step, .ipe-guide-foot) { border-top: 1.5px solid #111111; }

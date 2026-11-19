@@ -28,7 +28,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
             const order = d.querySelector('#' + prefix + '-card-order'), sup = d.querySelector('#' + prefix + '-supplement');
             check(!!order && !!(order.compareDocumentPosition(sup) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !order.closest('details:not([open])'), prefix + ' 本卡长期指令框在补充指令之前、直接可见');
         }
-        check(drawer.querySelector('[data-ipe-tab="image"]').firstElementChild.dataset.ipeFold === 'drawer-image-preview', '抽屉预览在生图配置之前');
+        check(drawer.querySelector('[data-ipe-tab="image"] > details').dataset.ipeFold === 'drawer-image-preview', '抽屉预览在生图配置之前');   // 2.44.0 起它前面可能摆着新手引导卡
         // 2.26.0：以前只看名字，名字错一格也照样过——现在看内容：置顶展开的那张卡里真有状态行和预览框，每张卡名字和标题对得上
         const drawerCards = [...drawer.querySelectorAll('[data-ipe-tab="image"] > details')];
         const firstCard = drawerCards[0];
@@ -516,6 +516,16 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(!/(^|[\s;{])(transform|filter|backdrop-filter|-webkit-backdrop-filter|animation|will-change|transition)\s*:/m.test(blk43), '抽屉这一层不用位移 / 滤镜 / 模糊 / 动画 / 过渡（iPhone 上抽屉展开时这些会漏画，2.38.1）');
         const ai43 = d.querySelector('#iped-auto-inject'), bi43 = d.querySelector('#iped-btn-inject');
         check(blk43.includes('input[type="button"]:is([id$="-inject"]') && !blk43.includes(':is(input[id$="-inject"]') && !!ai43 && ai43.type === 'checkbox' && !ai43.matches('input[type="button"]:is([id$="-inject"])') && !!bi43 && bi43.matches('input[type="button"]:is([id$="-inject"])'), '主按钮的颜色只给真正的按钮：「自动注入」开关不再被当成主按钮涂色');
+        // 2.44.0 新手三步引导卡：抽屉里也有，在生图页最上面
+        w.eval('(function(){ var c = cfg(); c.guideState = "show"; c.guideTested = false; c.apiEndpoint = ""; c.model = ""; c.autoInject = false; ipeGuideRefresh(); })()');
+        const g44 = d.querySelector('#iped-guide'), p44 = d.querySelector('#ipe-guide');
+        check(!!g44 && g44.style.display !== 'none' && g44.tagName === 'SECTION' && g44.parentElement === d.querySelector('#ipe-drawer [data-ipe-tab="image"]') && g44.parentElement.firstElementChild === g44 && !!p44 && p44.style.display !== 'none', '引导卡小面板、抽屉各一张；抽屉那张在生图页最上面');
+        check(g44.querySelectorAll('.ipe-guide-step').length === 3 && g44.querySelector('[data-step="api"]').classList.contains('ipe-guide-next') && g44.querySelector('.ipe-guide-go').classList.contains('menu_button'), '抽屉那张也是三步，按钮用酒馆的按钮样子');
+        g44.querySelector('[data-step="auto"] .ipe-guide-go').click();
+        check(d.querySelector('#iped-auto-inject').checked && d.querySelector('#ipe-auto-inject').checked && w.eval('cfg().autoInject') === true && g44.querySelector('[data-step="auto"]').classList.contains('ipe-guide-done') && p44.querySelector('[data-step="auto"]').classList.contains('ipe-guide-done'), '在抽屉里点第 ③ 步「打开」：两边的自动注入开关都打开，两张卡一起打勾');
+        g44.querySelector('.ipe-guide-close').click();
+        check(g44.style.display === 'none' && p44.style.display === 'none' && w.eval('cfg().guideState') === 'done', '点 ×：两张一起关掉');
+        check(css.includes('.ipe-guide-step { padding-right: var(--ipe-thumb); }') && css.includes(':is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide {'), '引导卡的样式小面板、抽屉共用一份；小面板里按钮不伸进拇指滑动道');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

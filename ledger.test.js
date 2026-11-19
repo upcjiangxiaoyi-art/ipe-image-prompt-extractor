@@ -3556,7 +3556,7 @@ await (async () => {
     const val = k => row(k).querySelector(".ipe-card-v").textContent;
     const chip = k => row(k).querySelector(".ipe-card-lock");
     const locks = key => { try { return JSON.parse(st[key] || "{}"); } catch (e) { return {}; } };
-    ok(!!sec && sec === d.querySelector("#ipe-panel .ipe-sections").firstElementChild && sec.classList.contains("collapsed") && !sec.hasAttribute("data-ipe-tab"), "面板里第一张卡就是它，默认收着（只占一行），不属于哪一页");
+    ok(!!sec && sec === d.querySelector("#ipe-panel .ipe-sections > .ipe-section") && sec.classList.contains("collapsed") && !sec.hasAttribute("data-ipe-tab"), "面板里第一张卡就是它，默认收着（只占一行），不属于哪一页");
     w.eval("ipeSetActiveTab")("ledger");
     ok(sec.style.display !== "none", "切到挂账页它还在");
     w.eval("ipeSetActiveTab")("image");
@@ -3786,6 +3786,70 @@ await (async () => {
     ok(li.length === 2 && li.every(x => x.l && x.d === undefined) && li[0].l.pose === "running", "分层的只存五层，不再另存一份整段", JSON.stringify(li).slice(0, 160));
     l.w.document.querySelector("#ipe-undo-row .ipe-undo-item").click();
     ok(box(l.w, "ipe-layer-pose") === "standing" && box(l.w, "ipe-layer-camera") === "wide shot" && String(l.tavern.chat[9].mes).indexOf("standing") >= 0 && String(l.tavern.chat[9].mes).indexOf("running") < 0, "分层的换回：五层框和楼里那段一起换回去", String(l.tavern.chat[9].mes).slice(-100));
+})();
+
+console.log("\n【83】 新手三步引导卡（2.44.0）：头一回装上不知道从哪下手。还没连过副 AI 的人，生图页最上面摆一张卡：① 连上副 AI ② 测试连接 ③ 打开自动；点按钮直接带过去 / 替你做，做完打勾，三步都好了自己消失；老用户看不到，随时能关");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    const card = () => d.querySelector("#ipe-guide"), shown = () => !!card() && card().style.display !== "none";
+    const step = k => card().querySelector('[data-step="' + k + '"]'), done = k => step(k).classList.contains("ipe-guide-done"), btn = k => step(k).querySelector(".ipe-guide-go");
+    ok(shown() && st.guideState === "show", "新装的（没填过接口）：生图页最上面摆着引导卡");
+    ok(card().tagName === "SECTION" && card().parentElement === d.querySelector("#ipe-panel .ipe-sections") && card().parentElement.firstElementChild === card(), "摆在最上面；用的不是 div，不会把下面各张卡隔一张换一色的顺序错开");
+    ok(!done("api") && !done("test") && !done("auto") && step("api").classList.contains("ipe-guide-next") && btn("api").classList.contains("ipe-btn-primary") && !btn("test").classList.contains("ipe-btn-primary"), "三步都没做：第 ① 步是「下一步」，按钮用主按钮色");
+    // ② 在 ① 之前点：带去填接口，不去测
+    let calls = 0;
+    w.fetch = async () => { calls++; return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "Hi" } }] }) }; };
+    btn("test").click();
+    ok(calls === 0 && imgStatus(w).indexOf("先把第 ① 步做了") >= 0 && !d.querySelector("#ipe-section-api-config").classList.contains("collapsed"), "接口还没填就点「测一下」：不发请求，带到 API 配置那张卡，说先做第 ① 步", imgStatus(w));
+    d.querySelector("#ipe-section-api-config").classList.add("collapsed");
+    btn("api").click();
+    ok(!d.querySelector("#ipe-section-api-config").classList.contains("collapsed") && d.querySelector("#ipe-api-endpoint").classList.contains("ipe-card-flash"), "点「去填」：展开 API 配置，地址那格闪一下");
+    // 填好接口
+    F("EXT_NAME"); w.eval('save("apiEndpoint", "http://x.test/v1"); save("apiKey", "k"); save("model", "gpt-4.1")');
+    await until(() => done("api"));
+    ok(done("api") && step("api").querySelector(".ipe-guide-num").textContent === "✓" && btn("api").style.display === "none" && step("test").classList.contains("ipe-guide-next"), "填好地址、选了模型：第 ① 步自己打勾，「下一步」挪到 ②");
+    // ② 测试：失败不打勾，成功才打
+    w.fetch = async () => { calls++; return { ok: false, status: 401, text: async () => "bad key" }; };
+    await w.eval("ipeGuideGo")("test", "ipe");
+    ok(calls === 1 && !done("test") && st.guideTested !== true && imgStatus(w).indexOf("连接失败") >= 0, "测试连接失败：第 ② 步不打勾", imgStatus(w));
+    w.fetch = async () => { calls++; return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: "Hi" } }] }) }; };
+    btn("test").click();
+    await until(() => done("test"));
+    ok(done("test") && st.guideTested === true && step("auto").classList.contains("ipe-guide-next"), "测试连接成功：第 ② 步打勾");
+    // ③ 打开自动
+    ok(st.enabled === true && st.autoInject === false && !done("auto"), "自动提取默认开着、自动注入默认关：第 ③ 步还没好");
+    btn("auto").click();
+    await until(() => !shown());
+    ok(st.autoInject === true && st.enabled === true && d.querySelector("#ipe-auto-inject").checked, "点「打开」：自动注入的开关真的打开了");
+    ok(!shown() && st.guideState === "done" && imgStatus(w).indexOf("三步都好了") >= 0, "三步都好了：卡自己消失，状态行说一声", imgStatus(w));
+    w.eval('save("autoInject", false)'); await wait(30);
+    ok(!shown(), "以后再把自动注入关掉：卡不会回来");
+
+    // 页面重载：做完了就不再出现
+    const r = boot(10, tavern);
+    ok(!r.w.document.querySelector("#ipe-guide") || r.w.document.querySelector("#ipe-guide").style.display === "none", "重新载入页面：不再出现");
+
+    // 老用户：这一版头一回载入时已经填过接口
+    const v = boot(10); const sv = v.tavern.extensionSettings[v.F("EXT_NAME")];
+    sv.guideState = ""; sv.apiEndpoint = "http://old.test/v1"; sv.apiKey = "k"; sv.model = "m"; sv.autoInject = false;
+    v.w.eval("ipeGuideInit")();
+    ok(sv.guideState === "done" && (!v.w.document.querySelector("#ipe-guide") || v.w.document.querySelector("#ipe-guide").style.display === "none"), "老用户（已经填过接口）：直接记成不用了，卡不出现");
+
+    // 手动关
+    const c = boot(10); const sc = c.tavern.extensionSettings[c.F("EXT_NAME")];
+    const cc = c.w.document.querySelector("#ipe-guide");
+    cc.querySelector(".ipe-guide-close").click();
+    ok(cc.style.display === "none" && sc.guideState === "done" && imgStatus(c.w).indexOf("引导卡关掉了") >= 0, "点 ×：关掉，不再出现", imgStatus(c.w));
+
+    // 没点测试、直接提取成功了：接口当然是通的
+    const e = boot(10); const se = imgApi(e.w, e.tavern, e.F, "a girl.");
+    await e.F("runExtract")(e.tavern.chat[9].mes, "", false, 9);
+    const eStep = () => e.w.document.querySelector('#ipe-guide [data-step="test"]');
+    await until(() => !!eStep() && eStep().classList.contains("ipe-guide-done"));   // 卡片是记完设置后下一个瞬间才重画的
+    ok(se.guideTested === true && !!eStep() && eStep().classList.contains("ipe-guide-done"), "没点测试、直接提取成功了：第 ② 步也算过");
 })();
 
 console.log("\n" + "\u2500".repeat(46));

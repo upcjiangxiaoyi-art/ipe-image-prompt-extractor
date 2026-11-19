@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.43.0";
+var IPE_VERSION = "2.44.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -70,6 +70,8 @@ const DEFAULTS = {
     apricotTheme: false, // 杏岸：独立保存，兼容旧开灯设置
     mistTheme: false,   // v1.8.7 开灯：莫兰迪雾蓝浅色皮，默认关（暗色）
     autoInject: false,
+    guideState: "",        // 2.44.0 新手三步引导卡："" 还没定（头一回载入时定）/ "show" 摆着 / "done" 做完或关掉了，不再出现
+    guideTested: false,    // 2.44.0 测试连接成功过（或者真提取成功过）
     autoInjectDelay: 1800,
     supplementPresetsJson: "[]",   // 2.16.0 补充指令常用短语
     requestTimeout: 0,
@@ -461,6 +463,7 @@ function save(key, val) {
         if (typeof c.saveSettingsDebounced === "function") c.saveSettingsDebounced();
         else ipeSaveNow();
     } catch(e) {}
+    try { if (IPE_GUIDE_WATCH[key]) ipeGuideLater(); } catch(eG) {}   // 2.44.0 引导卡盯着的那几项变了：重画一下
 }
 
 function saveCritical(key, val) {
@@ -4696,11 +4699,13 @@ function ipeCardOverviewRefresh() {
     }
 }
 /* 跳到某个控件：切到它那一页，把外面收着的卡和折叠一层层打开，滚到眼前闪一下 */
-function ipeCardOvJump(kind) {
-    var el = q("#" + IPE_CARD_OV_JUMP[kind]); if (!el) return false;
+function ipeCardOvJump(kind) { return ipeJumpToEl(q("#" + IPE_CARD_OV_JUMP[kind])); }
+/* 2.44.0 抽成通用的：小面板、抽屉里的控件都能跳（引导卡也用） */
+function ipeJumpToEl(el) {
+    if (!el) return false;
     var tabHost = el.closest("[data-ipe-tab]");
     if (tabHost) ipeSetActiveTab(tabHost.getAttribute("data-ipe-tab"));
-    for (var n = el.parentElement; n && n.id !== "ipe-panel"; n = n.parentElement) {
+    for (var n = el.parentElement; n && n.id !== "ipe-panel" && n.id !== "ipe-drawer"; n = n.parentElement) {
         if (n.tagName === "DETAILS") n.open = true;
         if (n.classList && n.classList.contains("ipe-section") && n.classList.contains("collapsed")) {
             n.classList.remove("collapsed");
@@ -5816,6 +5821,7 @@ async function testConnection() {
         }
 
         setStatus("连接成功 ✓" + (ipeNativeOn(c.apiEndpoint) ? "（官方原生接口）" : ""), "#6ec577");
+        if (cfg().guideTested !== true) save("guideTested", true);   // 2.44.0 引导卡第 ② 步
     } catch(e) {
         console.error("[IPE] testConnection:", e);
         setStatus("连接失败：" + e.message + (ipeIsNetworkError(e) ? IPE_NET_ERR_SHORT : ""), "#d4726a");
@@ -11849,6 +11855,124 @@ async function onExtract() {
 }
 
 /* ============================================================
+   🐣 新手三步引导卡（2.44.0）
+   头一回装上，面板里几十个格子，不知道从哪下手；README 的上手指南在仓库里，手机上没人去翻。
+   还没连过副 AI 的人，生图页最上面（小面板、抽屉都有）摆一张小卡，三步：
+     ① 连上副 AI（填地址、选了模型）  ② 测试连接成功  ③ 打开自动提取 + 自动注入
+   每步一颗按钮，点了直接带过去 / 替你做；做完的打勾。三步都好了，卡自己消失，以后不再出现；不想要随时点 × 关掉。
+   老用户看不到：这一版头一回载入时，已经填过接口的直接记成「不用了」。
+   记在设置里（guideState、guideTested），不占聊天数据。
+   ============================================================ */
+var IPE_GUIDE_WATCH = { apiEndpoint: 1, apiKey: 1, model: 1, enabled: 1, autoInject: 1, guideTested: 1, guideState: 1 };
+var ipeGuideTimer = null;
+function ipeGuideLater() {
+    if (ipeGuideTimer) return;
+    ipeGuideTimer = setTimeout(function(){ ipeGuideTimer = null; try { ipeGuideRefresh(); } catch(e) {} }, 0);
+}
+function ipeGuideSteps() {
+    var c = cfg();
+    return [
+        { key: "api",  done: !!(String(c.apiEndpoint || "").trim() && String(c.model || "").trim()),
+          text: "连上副 AI：填 API 地址和密钥，点「加载模型」选一个", doneText: "副 AI 连上了", go: "去填" },
+        { key: "test", done: c.guideTested === true,
+          text: "测试连接：看这套接口通不通", doneText: "测试连接通过", go: "测一下" },
+        { key: "auto", done: c.enabled === true && c.autoInject === true,
+          text: "打开自动：以后每来一楼自己提取、自己贴回楼里", doneText: "自动提取、自动注入都开着", go: "打开" }
+    ];
+}
+/* 头一回载入时定：已经填过接口的是老用户，不摆 */
+function ipeGuideInit() {
+    var c = cfg();
+    if (!c.guideState) {
+        var veteran = !!(String(c.apiEndpoint || "").trim() || String(c.apiKey || "").trim() || String(c.model || "").trim());
+        save("guideState", veteran ? "done" : "show");
+    }
+    ipeGuideRefresh();
+}
+function ipeGuideEnsure(p) {
+    var el = q("#" + p + "-guide"); if (el) return el;
+    var d = ipeRootDocument(), host, before;
+    if (p === "ipe") { host = q("#ipe-panel .ipe-sections"); before = host ? host.firstChild : null; }
+    else { host = q('#ipe-drawer [data-ipe-tab="image"]'); before = host ? host.firstChild : null; }
+    if (!host) return null;
+    /* 用 section 不用 div：面板的卡片是按「第几个 div」隔一张换一种颜色的，多塞一个 div 会把所有卡的颜色错开一位 */
+    el = d.createElement("section"); el.id = p + "-guide"; el.className = "ipe-guide"; el.style.display = "none";
+    var head = d.createElement("div"); head.className = "ipe-guide-head"; head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+    var tt = d.createElement("span"); tt.className = "ipe-guide-title"; tt.textContent = "🐣 第一次用？三步就能出提示词";
+    var x = d.createElement("button"); x.type = "button"; x.className = "ipe-guide-close"; x.textContent = "×"; x.title = "不用了，关掉这张卡"; x.setAttribute("aria-label", x.title);
+    head.appendChild(tt); head.appendChild(x); el.appendChild(head);
+    ["api", "test", "auto"].forEach(function(k, i){
+        var row = d.createElement("div"); row.className = "ipe-guide-step"; row.setAttribute("data-step", k); row.style.cssText = "display:flex;align-items:center;gap:9px";
+        var num = d.createElement("span"); num.className = "ipe-guide-num"; num.textContent = String(i + 1);
+        var tx = d.createElement("span"); tx.className = "ipe-guide-text"; tx.style.cssText = "flex:1 1 auto;min-width:0";
+        var b = d.createElement("button"); b.type = "button"; b.className = (p === "ipe" ? "ipe-btn" : "menu_button") + " ipe-guide-go"; b.style.cssText = "flex:0 0 auto";
+        row.appendChild(num); row.appendChild(tx); row.appendChild(b); el.appendChild(row);
+    });
+    var foot = d.createElement("div"); foot.className = "ipe-guide-foot" + (p === "ipe" ? " ipe-hint" : "");
+    foot.textContent = "三步都好了，这张卡自己消失。想每次自己看过再贴？第 ③ 步可以不做，点右上角 × 关掉就行。真正出图的是你另装的生图插件，小海螺只管把正文变成提示词贴回楼里。";
+    el.appendChild(foot);
+    host.insertBefore(el, before);
+    el.addEventListener("click", function(ev){
+        var t = ev.target; if (!t || !t.closest) return;
+        if (t.closest(".ipe-guide-close")) { ipeGuideClose(); return; }
+        var b = t.closest(".ipe-guide-go");
+        if (b) ipeGuideGo(b.parentElement.getAttribute("data-step"), p);
+    });
+    return el;
+}
+function ipeGuideRefresh() {
+    var c = cfg(), steps = ipeGuideSteps();
+    if (c.guideState === "show" && steps.every(function(x){ return x.done; })) {
+        save("guideState", "done");
+        setStatus("三步都好了 🎉 以后每来一楼自动提取、自动贴回楼里；想自己把关就把「自动注入」关掉", "#6ec577");
+    }
+    var show = cfg().guideState === "show", next = "";
+    steps.forEach(function(x){ if (!next && !x.done) next = x.key; });
+    ["ipe", "iped"].forEach(function(p){
+        var el = show ? ipeGuideEnsure(p) : q("#" + p + "-guide");
+        if (!el) return;
+        el.style.display = show ? "" : "none";
+        if (!show) return;
+        steps.forEach(function(x, i){
+            var row = el.querySelector('[data-step="' + x.key + '"]'); if (!row) return;
+            row.classList.toggle("ipe-guide-done", x.done); row.classList.toggle("ipe-guide-next", x.key === next);
+            row.querySelector(".ipe-guide-num").textContent = x.done ? "✓" : String(i + 1);
+            row.querySelector(".ipe-guide-text").textContent = x.done ? x.doneText : x.text;
+            var b = row.querySelector(".ipe-guide-go");
+            b.textContent = x.go; b.style.display = x.done ? "none" : "";
+            if (p === "ipe") b.classList.toggle("ipe-btn-primary", x.key === next);
+        });
+    });
+}
+function ipeGuideClose() {
+    save("guideState", "done");
+    try { ipeGuideRefresh(); } catch(e) {}
+    setStatus("引导卡关掉了，不会再出现。想看每个按钮是干什么的：仓库说明里有上手指南", "#6ec577");
+}
+function ipeGuideGo(step, p) {
+    p = p === "iped" ? "iped" : "ipe";
+    var steps = ipeGuideSteps(), apiDone = steps[0].done;
+    if (step === "api" || (step === "test" && !apiDone)) {
+        ipeJumpToEl(q("#" + p + "-api-endpoint"));
+        setStatus(step === "test" ? "先把第 ① 步做了：填好 API 地址和密钥，点「加载模型」选一个，再来测" : "在这儿填 API 地址和密钥，然后点「加载模型」选一个", "#c9a227");
+        return;
+    }
+    if (step === "test") {
+        ipeJumpToEl(q("#" + p + "-btn-test"));
+        return testConnection();
+    }
+    if (step === "auto") {
+        ["enabled", "auto-inject"].forEach(function(k){
+            var cb = q("#" + p + "-" + k) || q("#ipe-" + k) || q("#iped-" + k);
+            if (cb && !cb.checked) { cb.checked = true; try { cb.dispatchEvent(new Event("change", { bubbles: true })); } catch(e) {} }
+        });
+        if (cfg().enabled !== true) save("enabled", true);         // 页面上没找到那两个开关也照样打开
+        if (cfg().autoInject !== true) save("autoInject", true);
+        try { ipeGuideRefresh(); } catch(e2) {}
+    }
+}
+
+/* ============================================================
    ↩ 生图的后悔药（2.42.0）
    「重新生成」一点，这楼原来那段就被新的换掉了；新的不如旧的，旧的已经找不回来。
    现在每次提取成功都记一笔，同一楼留最近三次（现在这次 + 之前两次）。主按钮下面多一小排「这楼之前的结果」，
@@ -12029,6 +12153,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         if (cast) { layerNote += "（" + cast.note + "）"; try { ipeCastRefreshUI(); } catch(eC) {} }
         currentDesc = desc; setPreview(desc);
         try { ipeImgUndoPush(typeof targetIdx === "number" ? targetIdx : currentIdx, desc, undoLayers); } catch(eU) {}   // 2.42.0 后悔药：先记一笔，再去换楼里那段
+        try { if (cfg().guideState === "show" && cfg().guideTested !== true) save("guideTested", true); } catch(eG) {}   // 2.44.0 真提取成功了，接口当然是通的
 
         if (autoInjectNow) {
             var injIdx = typeof targetIdx === "number" ? targetIdx : currentIdx;
@@ -12121,7 +12246,7 @@ function onInject() {
 
 function init() {
     if (initialized) return;
-    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; try { ipeImgChatSeen = ipeChatKey(); } catch(eK) {} try { ipeCardLockSync(true); } catch(eCL) {} ipeLog("系统", "小海螺 v" + IPE_VERSION + " 载入（页面打开或重新载入）"); console.log("[IPE] ✓ 已加载"); }
+    try { loadSettings(); createUI(); ipeRemoveOldFloatingBits(); ipeEnsureQuickButtonLater(); initialized=true; try { ipeImgChatSeen = ipeChatKey(); } catch(eK) {} try { ipeCardLockSync(true); } catch(eCL) {} try { ipeGuideInit(); } catch(eGd) {} ipeLog("系统", "小海螺 v" + IPE_VERSION + " 载入（页面打开或重新载入）"); console.log("[IPE] ✓ 已加载"); }
     catch(e) { console.error("[IPE] 初始化失败:",e); }
 }
 
