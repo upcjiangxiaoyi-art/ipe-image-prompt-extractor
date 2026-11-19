@@ -3417,3 +3417,9 @@ html #ipe-panel#ipe-panel.ipe-oreo .ipe-card-lock.ipe-card-locked { background: 
 /* 从总览跳过去的那个控件闪一下，好找 */
 @keyframes ipe-card-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30%, 70% { box-shadow: 0 0 0 4px var(--dg-a); } }
 html #ipe-panel#ipe-panel .ipe-card-flash { animation: ipe-card-flash 1.5s ease 1 !important; }
+
+/* ===== 2.42.0 后悔药：主按钮下面「这楼之前的提取结果」那一小排 ===== */
+.ipe-undo-row { margin-top: 8px; }
+#ipe-panel .ipe-undo-row { padding-right: var(--ipe-thumb); }
+html #ipe-panel#ipe-panel .ipe-undo-row .ipe-undo-title { margin: 0 0 6px; }
+html #ipe-panel#ipe-panel .ipe-undo-row .ipe-btn.ipe-undo-item { font-weight: 500; font-size: 12.5px; min-height: 36px; padding: 7px 14px; }

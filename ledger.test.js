@@ -3702,6 +3702,92 @@ await (async () => {
     ok(!!shown && shown.readOnly && shown.value.split("\n")[0] === imgText.split("\n")[0] && parse(shown.value).kind === "img", "复制不了的浏览器：弹出那段文字，自己长按全选", shown ? shown.value.slice(0, 60) : "没弹");
 })();
 
+console.log("\n【82】 生图的后悔药（2.42.0）：「重新生成」把这楼原来那段换掉以后，旧的找不回来。每楼留最近三次，主按钮下面点一下换回去，楼里贴着的那段也跟着换；只留最近三楼，存聊天数据");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const { w, tavern, F } = boot(10);
+    let desc = "A girl under the plum tree, first take.";
+    imgApi(w, tavern, F, () => desc);
+    const d = w.document, mes = i => String(tavern.chat[i == null ? 9 : i].mes || ""), draws = () => (mes().match(/<draw>/g) || []).length;
+    const row = () => d.querySelector("#ipe-undo-row"), items = () => row() ? Array.from(row().querySelectorAll(".ipe-undo-item")) : [];
+    const shown = () => !!row() && row().style.display !== "none";
+    const meta = () => tavern.chatMetadata.ipe_img_undo_v1;
+    w.eval("currentIdx = -1");
+    await w.eval("onReroll")();
+    ok(draws() === 1 && !shown(), "这楼只提过一次：没有更早的，那一排不露出来");
+    desc = "A girl under the plum tree, second take.";
+    await w.eval("onReroll")();
+    ok(shown() && items().length === 1 && items()[0].textContent.indexOf("first take") >= 0 && /^\d\d:\d\d/.test(items()[0].textContent), "重新生成一次：主按钮下面多一排，列着上一次（带时间和开头几个字）", row() ? row().textContent : "没有那一排");
+    ok(row().previousElementSibling === d.querySelector("#ipe-btn-extract").closest(".ipe-btn-grid"), "那一排就在四颗主按钮下面");
+    desc = "A girl under the plum tree, third take.";
+    await w.eval("onReroll")();
+    desc = "A girl under the plum tree, fourth take.";
+    await w.eval("onReroll")();
+    ok(items().length === 2 && items()[0].textContent.indexOf("third take") >= 0 && items()[1].textContent.indexOf("second take") >= 0, "摇了四次：只留最近三次（现在这次 + 之前两次），最早那次挤掉了", items().map(b => b.textContent).join(" | "));
+    eq(meta().floors["10"].items.length, 3, "聊天数据里这楼存三条");
+
+    // 换回上一次
+    items()[0].click();
+    ok(draws() === 1 && mes().indexOf("third take") >= 0 && mes().indexOf("fourth take") < 0, "点上一次：楼里贴着的那段直接换回去，还是只有一段", mes().slice(-90));
+    ok(box(w, "ipe-preview-text").indexOf("third take") >= 0 && imgStatus(w).indexOf("已换回") >= 0 && imgStatus(w).indexOf("也换回去了") >= 0 && d.querySelector("#ipe-status").getAttribute("data-ipe-tone") === "ok", "预览框一起换回去，状态行说清楚", imgStatus(w));
+    ok(items().length === 2 && items()[0].textContent.indexOf("fourth take") >= 0, "被换下的那次还留着，排到「之前」里，能再换回来", items().map(b => b.textContent).join(" | "));
+    items()[0].click();
+    ok(mes().indexOf("fourth take") >= 0 && draws() === 1, "再点：又换回第四次");
+
+    // 页面重载（Safari 切后台）：内存清空，聊天数据还在
+    const r = boot(10, tavern); imgApi(r.w, tavern, r.F, () => desc);
+    await until(() => !!r.w.document.querySelector("#ipe-btn-extract"));
+    r.w.eval("ipeImgUndoRefreshUI")();
+    const rrow = r.w.document.querySelector("#ipe-undo-row");
+    ok(!!rrow && rrow.style.display !== "none" && rrow.querySelectorAll(".ipe-undo-item").length === 2, "页面重新载入以后那一排还在（记在聊天数据里）", rrow ? rrow.textContent : "没有");
+    rrow.querySelector(".ipe-undo-item").click();
+    ok(String(tavern.chat[9].mes).indexOf("third take") >= 0 && (String(tavern.chat[9].mes).match(/<draw>/g) || []).length === 1, "重载以后照样能换回去");
+
+    // 没贴进楼里的（关着自动注入、只在预览框里）：换回只进预览框
+    const m = boot(10); let md = "manual one."; imgApi(m.w, m.tavern, m.F, () => md);
+    await m.F("runExtract")(m.tavern.chat[9].mes, "", false, 9);
+    md = "manual two."; await m.F("runExtract")(m.tavern.chat[9].mes, "", false, 9);
+    const mrow = m.w.document.querySelector("#ipe-undo-row");
+    mrow.querySelector(".ipe-undo-item").click();
+    ok(box(m.w, "ipe-preview-text") === "manual one." && String(m.tavern.chat[9].mes).indexOf("<draw>") < 0 && imgStatus(m.w).indexOf("确认注入") >= 0 && !m.w.document.querySelector("#ipe-btn-inject").disabled, "这楼还没贴过：换回只放进预览框，楼里不动，提示点「确认注入」", imgStatus(m.w));
+
+    // 楼里本来就贴着一段（以前提的，没有记录）：第一次重新生成前先把它记下
+    const o = boot(10); let od = "old one from last week."; imgApi(o.w, o.tavern, o.F, () => od);
+    o.w.eval("currentIdx = -1"); await o.w.eval("onReroll")();
+    delete o.tavern.chatMetadata.ipe_img_undo_v1;   // 装作那次是旧版本提的
+    od = "brand new."; await o.w.eval("onReroll")();
+    const orow = o.w.document.querySelector("#ipe-undo-row"), ob = orow && orow.querySelector(".ipe-undo-item");
+    ok(!!ob && ob.textContent.indexOf("old one from last week") >= 0 && ob.textContent.indexOf("之前贴在楼里的") === 0, "楼里原来贴着的那段（没记录过）：重新生成前先记成「之前贴在楼里的」", orow ? orow.textContent : "没有");
+    ob.click();
+    ok(String(o.tavern.chat[9].mes).indexOf("old one from last week") >= 0 && String(o.tavern.chat[9].mes).indexOf("brand new") < 0, "点它：换回原来那段");
+
+    // 认楼不认楼号：正文换了（重 roll / 删过楼后这个楼号是别的楼）就不算这楼的
+    tavern.chat[9].mes = "这一楼被主 AI 重 roll 了，是全新的正文。够长够长够长。";
+    eq(w.eval("ipeImgUndoList")(9).length, 0, "这楼正文换了：旧结果不再算这楼的");
+    w.eval("ipeImgUndoRefreshUI")();
+    ok(!shown(), "那一排收起来");
+    ok(w.eval("ipeImgUndoUse")(1, 9) === false && imgStatus(w).indexOf("没有留着") >= 0, "硬点也换不了，直说没有", imgStatus(w));
+
+    // 只留最近三楼
+    const k = boot(12); imgApi(k.w, k.tavern, k.F, () => "desc of a floor");
+    for (const i of [3, 5, 7, 9]) k.w.eval("ipeImgUndoPush")(i, "floor " + (i + 1) + " take", null);
+    eq(Object.keys(k.tavern.chatMetadata.ipe_img_undo_v1.floors).sort().join(","), "10,6,8", "动过四楼：只留最近三楼的，最早那楼的清掉");
+    k.w.eval("ipeImgUndoPush")(9, "floor 10 take", null);
+    eq(k.tavern.chatMetadata.ipe_img_undo_v1.floors["10"].items.length, 1, "一字不差的不重复存");
+
+    // 分层：只存五层，不另存一份整段；换回时五层框一起换
+    const l = boot(10); const ls = imgApi(l.w, l.tavern, l.F, () => lay); ls.imgLayered = true;
+    let lay = L4("wide shot", "old courtyard", "girl A", "standing", "calm");
+    await l.F("runExtract")(l.tavern.chat[9].mes, "", true, 9);
+    lay = L4("close up", "old courtyard", "girl A", "running", "tense");
+    await l.F("runExtract")(l.tavern.chat[9].mes, "", "replace", 9);
+    const li = l.tavern.chatMetadata.ipe_img_undo_v1.floors["10"].items;
+    ok(li.length === 2 && li.every(x => x.l && x.d === undefined) && li[0].l.pose === "running", "分层的只存五层，不再另存一份整段", JSON.stringify(li).slice(0, 160));
+    l.w.document.querySelector("#ipe-undo-row .ipe-undo-item").click();
+    ok(box(l.w, "ipe-layer-pose") === "standing" && box(l.w, "ipe-layer-camera") === "wide shot" && String(l.tavern.chat[9].mes).indexOf("standing") >= 0 && String(l.tavern.chat[9].mes).indexOf("running") < 0, "分层的换回：五层框和楼里那段一起换回去", String(l.tavern.chat[9].mes).slice(-100));
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

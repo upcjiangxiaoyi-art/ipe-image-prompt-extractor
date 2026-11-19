@@ -498,6 +498,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const pov = d.querySelector('#ipe-zoom-overlay');
         check(!!pov && !!pov.querySelector('.ipe-pack-plan') && !!pov.querySelector('.ipe-pack-go') && pov.querySelector('.ipe-zoom-title').textContent.indexOf('粘贴导入') >= 0, '抽屉里点「粘贴导入」也弹出同一页');
         w.eval('ipeZoomClose')();
+        // 2.42.0 生图的后悔药：面板、抽屉的主按钮下面都有那一排
+        const ui42 = w.eval('(function(){ var i = ipeImgUndoIdx(); if (i < 0) return -1; ipeImgUndoPush(i, "undo take one", null); ipeImgUndoPush(i, "undo take two", null); ipeImgUndoRefreshUI(); return i; })()');
+        check(ui42 >= 0 && ['ipe', 'iped'].every(p => { const r = d.querySelector('#' + p + '-undo-row'); return !!r && r.style.display !== 'none' && r.querySelectorAll('.ipe-undo-item').length === 1 && r.querySelector('.ipe-undo-item').textContent.indexOf('undo take one') >= 0 && r.previousElementSibling === d.querySelector('#' + p + '-btn-extract').closest('.ipe-btn-grid'); }), '面板和抽屉的四颗主按钮下面都有「这楼之前的提取结果」那一排');
+        d.querySelector('#iped-undo-row .ipe-undo-item').click();
+        check(d.querySelector('#iped-preview-text').value === 'undo take one' && d.querySelector('#ipe-preview-text').value === 'undo take one' && d.querySelector('#ipe-undo-row .ipe-undo-item').textContent.indexOf('undo take two') >= 0, '在抽屉里点一下：两边预览框都换回去，被换下的那次排到下面');
+        check(css.includes('#ipe-panel .ipe-undo-row { padding-right: var(--ipe-thumb); }'), '面板里那一排给拇指留了右边的滑动道');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

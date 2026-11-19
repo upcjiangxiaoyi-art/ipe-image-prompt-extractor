@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.41.0";
+var IPE_VERSION = "2.42.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -11057,7 +11057,8 @@ function bindAll() {
                         if (ab) setStatus("🔒 这张卡锁定的锚点：「" + ab + "」", "#6ec577");
                     } catch(eA) {}
                     try { ipeCardLockSync(true, ab ? "锚点：「" + ab + "」" : ""); } catch(eK) {}
-                    try { ipeCardOverviewRefresh(); } catch(eOv) {}   // 2.40.0 总览换成这张卡的    // 2.31.0 锁了画风 / 提取规则 / 挂账规则的卡：切到锁的那套
+                    try { ipeCardOverviewRefresh(); } catch(eOv) {}   // 2.40.0 总览换成这张卡的
+                    try { ipeImgUndoRefreshUI(); } catch(eUd) {}      // 2.42.0 后悔药那一排换成这个聊天的    // 2.31.0 锁了画风 / 提取规则 / 挂账规则的卡：切到锁的那套
                     try { ipeInstallMesButtonsObserver(); ipeInstallMesButtons(); } catch(eM) {}   // 楼层 🎨 按钮换成本聊天的
                 }, 200);
             });
@@ -11073,6 +11074,7 @@ function bindAll() {
                 cd.eventSource.on(cd.event_types.MESSAGE_DELETED, function(){
                     // 400ms 等 chat 数组换完再数楼——时序缓冲照抄小红霞踩过的坑
                     setTimeout(function(){ ipeLedgerAfterFloorsGone("event"); }, 400);
+                    setTimeout(function(){ try { ipeImgUndoRefreshUI(); } catch(eU) {} }, 450);   // 2.42.0 楼没了 / 换了：后悔药那一排跟着认
                 });
             }
             if (cd.event_types.MESSAGE_EDITED) {
@@ -11080,7 +11082,7 @@ function bindAll() {
                     var i = Number(mesId);
                     if (!Number.isFinite(i) || i < 0) return;
                     try { ipeLedgerMarkEdited(i); } catch(eM) {}   // 2.27.4 路上那份挂账回来时据此认「改过」
-                    setTimeout(function(){ try { ipeLedgerOnEdited(i); } catch(eE) {} }, 300);
+                    setTimeout(function(){ try { ipeLedgerOnEdited(i); } catch(eE) {} try { ipeImgUndoRefreshUI(); } catch(eU) {} }, 300);
                 });
             }
             if (cd.event_types.MESSAGE_SWIPED) {
@@ -11093,6 +11095,7 @@ function bindAll() {
                         // 2.27.1 滑到已有的那条（没重新生成）：撕掉的是刚才那条的账，这条的账得补上，不然这楼的事账本里一直缺着。
                         // 重新生成的新 swipe 不在这里挂，等收到新楼照常挂
                         try { if (Number.isFinite(i) && i >= 0) ipeLedgerRerunLatest(i); } catch(eR) {}
+                        try { ipeImgUndoRefreshUI(); } catch(eU) {}
                     }, 400);
                 });
             }
@@ -11753,6 +11756,7 @@ function ipeImgIdxAlive(i) {
 function ipeImgDropIdx() {
     currentIdx = -1; currentDesc = ""; ipeImgLayersFresh = false;
     try { setPreview(""); } catch(e) {}
+    try { ipeImgUndoRefreshUI(); } catch(eU) {}
 }
 /* 现在该弄哪一楼：记着的那楼还在、还是 AI 楼就用它；不在了就改盯最后一条 AI 楼。-1 = 没有可读的正文 */
 function ipeImgTargetIdx() {
@@ -11844,6 +11848,142 @@ async function onExtract() {
     } catch(e){setStatus("错误: "+e.message,"#d4726a");}
 }
 
+/* ============================================================
+   ↩ 生图的后悔药（2.42.0）
+   「重新生成」一点，这楼原来那段就被新的换掉了；新的不如旧的，旧的已经找不回来。
+   现在每次提取成功都记一笔，同一楼留最近三次（现在这次 + 之前两次）。主按钮下面多一小排「这楼之前的结果」，
+   点哪次换回哪次：预览框、五层框一起换回去；楼里已经贴着一段的，那一段也直接换回去。换回去以后，被换下的那次还留着，能再换回来。
+   体积：只留最近动过的三楼（最多九段描述，几 KB），存聊天数据（chat_metadata），Safari 切后台重载也在；分层的只存五层，不再另存一份整段。
+   认楼不认楼号：记的时候带上这楼正文的指纹（不算楼尾生图段）和第几条回复；删过楼、重 roll 过、正文改过，旧记录就不算这楼的了。
+   ============================================================ */
+var IPE_IMG_UNDO_META_KEY = "ipe_img_undo_v1";
+var IPE_IMG_UNDO_KEEP = 3, IPE_IMG_UNDO_FLOORS = 3;
+function ipeImgUndoSig(idx) {
+    try { var m = (ctx().chat || [])[idx]; return m ? ipeLedgerTextSig(m.mes) + "|" + (m.swipe_id == null ? "" : m.swipe_id) : ""; } catch(e) { return ""; }
+}
+function ipeImgUndoDesc(it) { return it ? String(it.l ? ipeImgJoinLayers(it.l) : (it.d || "")).trim() : ""; }
+function ipeImgUndoItem(desc, layers, at) {
+    var it = { at: at };
+    if (layers && ipeImgJoinLayers(layers)) {
+        it.l = {}; IPE_IMG_LAYERS.forEach(function(l){ var v = String(layers[l] || "").trim(); if (v) it.l[l] = v; });
+        if (Number(layers.envFloor)) it.ef = Number(layers.envFloor);
+        if (Number(layers.moodFloor)) it.mf = Number(layers.moodFloor);
+    } else it.d = String(desc || "").trim();
+    return it;
+}
+/* 这一楼留着的几次，最新的在前；指纹对不上（不是这楼了）就当没有 */
+function ipeImgUndoList(idx) {
+    try {
+        var root = ipeMetaRoot(), v = root && root[IPE_IMG_UNDO_META_KEY], f = v && v.floors && v.floors[String(idx + 1)];
+        if (!f || !Array.isArray(f.items) || f.sig !== ipeImgUndoSig(idx)) return [];
+        return f.items;
+    } catch(e) { return []; }
+}
+function ipeImgUndoPush(idx, desc, layers) {
+    try {
+        idx = Number(idx); desc = String(desc || "").trim();
+        var root = ipeMetaRoot(), msg = (ctx().chat || [])[idx];
+        if (!root || !msg || !desc) return false;
+        var v = root[IPE_IMG_UNDO_META_KEY];
+        if (!v || typeof v !== "object" || !v.floors || typeof v.floors !== "object") v = root[IPE_IMG_UNDO_META_KEY] = { floors: {} };
+        var k = String(idx + 1), sig = ipeImgUndoSig(idx), f = v.floors[k];
+        if (!f || f.sig !== sig || !Array.isArray(f.items)) f = v.floors[k] = { sig: sig, items: [] };
+        if (!f.items.length) {
+            /* 头一回记这楼：楼里要是已经贴着一段（以前提的、别的版本提的），先把它记成「之前那次」，不然一重新生成它就没了 */
+            var rec = null; try { rec = ipeInjectRecord(msg); } catch(eR) {}
+            if (rec && String(rec.desc || "").trim() && String(rec.desc).trim() !== desc) f.items.push(ipeImgUndoItem(rec.desc, rec.layers, 0));
+        }
+        var hit = -1;
+        f.items.forEach(function(it, i){ if (ipeImgUndoDesc(it) === desc) hit = i; });
+        var item = hit >= 0 ? f.items.splice(hit, 1)[0] : ipeImgUndoItem(desc, layers, Date.now());   // 一字不差的不重复存，提到最前
+        f.items.unshift(item);
+        if (f.items.length > IPE_IMG_UNDO_KEEP) f.items.length = IPE_IMG_UNDO_KEEP;
+        v.seq = (Number(v.seq) || 0) + 1; f.seq = v.seq;   // 哪楼最近动过：按先后编号，不按钟点（同一毫秒里连记几楼也分得清）
+        var keys = Object.keys(v.floors).sort(function(a, b){ return (Number(v.floors[b].seq) || 0) - (Number(v.floors[a].seq) || 0); });
+        keys.slice(IPE_IMG_UNDO_FLOORS).forEach(function(k2){ delete v.floors[k2]; });
+        var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+        return true;
+    } catch(e) { return false; }
+}
+function ipeImgUndoTime(it) {
+    if (!it || !it.at) return "之前贴在楼里的";
+    var t = new Date(it.at), p2 = function(n){ return (n < 10 ? "0" : "") + n; };
+    return p2(t.getHours()) + ":" + p2(t.getMinutes());
+}
+/* 现在面板上说的是哪一楼：记着的那楼；页面刚重载、还没定位过，就看最后一条 AI 楼。只看不改。 */
+function ipeImgUndoIdx() {
+    try {
+        if (currentIdx >= 0 && ipeImgIdxAlive(currentIdx)) return currentIdx;
+        var ch = ctx().chat || [];
+        for (var i = ch.length - 1; i >= 0; i--) if (ipeImgIdxAlive(i)) return i;
+    } catch(e) {}
+    return -1;
+}
+/* 换回第 n 次（0 是现在这次）。楼里贴着一段就连那段一起换；没贴过就只放进预览框，等人点「确认注入」。 */
+function ipeImgUndoUse(n, idx) {
+    if (processing) { setStatus("正在提取，等这次完了再换", "#c9a227"); return false; }
+    ipeImgChatGuard();
+    idx = typeof idx === "number" ? idx : ipeImgUndoIdx();
+    var it = ipeImgUndoList(idx)[Number(n)];
+    if (!it || !Number(n)) { setStatus("这楼没有留着更早的提取结果", "#c9a227"); try { ipeImgUndoRefreshUI(); } catch(e0) {} return false; }
+    var layers = (it.l && ipeImgLayeredOn()) ? Object.assign({ envFloor: it.ef || idx + 1, moodFloor: it.mf || idx + 1 }, it.l) : null;
+    var desc = ipeImgUndoDesc(it), when = ipeImgUndoTime(it);
+    currentIdx = idx; currentDesc = desc; setPreview(desc);
+    if (layers) { ipeImgSetLayerBoxes(layers); ipeImgLayersSave(layers, idx + 1); ipeImgLayersFresh = true; }
+    else ipeImgLayersFresh = false;
+    ipeImgUndoPush(idx, desc, layers);   // 提到最前；被换下的那次顺位往后，还留着
+    var msg = (ctx().chat || [])[idx], ball = q("#ipe-chat-quick-entry"), had = false;
+    try {   // 楼里现在是不是贴着一段：这楼记过注入，而且楼尾确实还有生图段（人手删掉了就不算）
+        var ex = msg && msg.extra;
+        had = !!(ex && (ex.ipe_inject_env || ex.ipe_inject_tag)) && ipeLedgerStripImageTag(String(msg.mes || "")).trim() !== String(msg.mes || "").trim();
+    } catch(eH) {}
+    if (had) {
+        try {
+            var r = reinjectDescToMessage(idx, { payload: { desc: desc, layers: layers } });
+            setStatus("已换回" + (it.at ? " " + when + " 那次" : "之前贴在楼里的那段") + (r && r.injected ? "，第 " + (idx + 1) + " 楼里那段也换回去了 ✓" : "（楼里那段本来就是它）"), "#6ec577");
+            setBtns(true, false); if (ball) ball.classList.remove("has-result");
+        } catch(e) { setStatus("换回到预览框了，但没能换掉楼里那段：" + ((e && e.message) || e), "#d4726a"); setBtns(true, true); }
+    } else {
+        setStatus("已换回" + (it.at ? " " + when + " 那次" : "之前那段") + "，放进预览框了；要贴进楼里点「确认注入」", "#6ec577");
+        setBtns(true, true); if (ball) ball.classList.add("has-result");
+    }
+    try { ipeImgUndoRefreshUI(); } catch(e1) {}
+    return true;
+}
+/* 主按钮下面那一小排：有更早的结果才露出来 */
+function ipeImgUndoRefreshUI() {
+    var idx = ipeImgUndoIdx(), items = idx >= 0 ? ipeImgUndoList(idx) : [];
+    ["ipe", "iped"].forEach(function(p){
+        var anchor = q("#" + p + "-btn-extract"); if (!anchor) return;
+        var d = anchor.ownerDocument, row = q("#" + p + "-undo-row");
+        if (!row) {
+            var grid = anchor.closest(".ipe-btn-grid") || anchor.parentElement;
+            row = d.createElement("div"); row.id = p + "-undo-row"; row.className = "ipe-undo-row";
+            var tt = d.createElement("div"); tt.className = "ipe-undo-title" + (p === "ipe" ? " ipe-hint" : ""); if (p !== "ipe") tt.style.cssText = "color:#888;font-size:12px;margin:6px 0 2px";
+            var ls = d.createElement("div"); ls.className = "ipe-undo-list"; ls.style.cssText = "display:flex;flex-direction:column;gap:6px";
+            row.appendChild(tt); row.appendChild(ls);
+            grid.parentNode.insertBefore(row, grid.nextSibling);
+            ls.addEventListener("click", function(ev){
+                var b = ev.target && ev.target.closest ? ev.target.closest("[data-undo]") : null;
+                if (b) ipeImgUndoUse(Number(b.getAttribute("data-undo")), Number(row.getAttribute("data-idx")));
+            });
+        }
+        var list = row.querySelector(".ipe-undo-list"), title = row.querySelector(".ipe-undo-title");
+        list.textContent = "";
+        if (items.length < 2) { row.style.display = "none"; return; }
+        row.style.display = ""; row.setAttribute("data-idx", String(idx));
+        title.textContent = "↩ 第 " + (idx + 1) + " 楼之前的提取结果，点一下换回去（现在这次还留着，能再换回来）：";
+        items.slice(1).forEach(function(it, i){
+            var b = d.createElement("button"); b.type = "button"; b.className = (p === "ipe" ? "ipe-btn" : "menu_button") + " ipe-undo-item"; b.setAttribute("data-undo", String(i + 1));
+            b.style.cssText = "display:block;width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0";
+            var ds = ipeImgUndoDesc(it);
+            b.textContent = ipeImgUndoTime(it) + "　" + (ds.length > 40 ? ds.slice(0, 40) + "…" : ds);
+            b.title = ds;
+            list.appendChild(b);
+        });
+    });
+}
+
 async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttempt, lockOverride) {
     retryAttempt = Number(retryAttempt || 0);
     ipeImgChatGuard();   // 2.29.10 从哪个入口进来都先认一遍聊天
@@ -11859,7 +11999,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         var desc = await callAPI(text, supplement||"", lockOverride, startText);   // 2.26.0 状态行接着这句往后报进度
         if (ipeChatKey() !== chatAtStart) throw new Error("chat switched");
         var cast = ipeCastProcess(desc);
-        var castPending = !!(cast && cast.block);
+        var castPending = !!(cast && cast.block), undoLayers = null;
         if (cast) desc = cast.text;
         if (ipeImgLayeredOn()) {
             var parsed = ipeImgParseLayers(desc);
@@ -11878,7 +12018,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
                 ipeImgSetLayerBoxes(merged);
                 ipeImgLayersSave(merged, floorNo);
                 desc = ipeImgJoinLayers(merged);
-                ipeImgLayersFresh = true;
+                ipeImgLayersFresh = true; undoLayers = merged;
                 layerNote = merged.notes.length ? "（" + merged.notes.join("，") + "）" : "（五层齐全）";
             } else {
                 ipeImgLayersFresh = false;
@@ -11888,6 +12028,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         if (castPending) desc = cast.block + " " + desc;
         if (cast) { layerNote += "（" + cast.note + "）"; try { ipeCastRefreshUI(); } catch(eC) {} }
         currentDesc = desc; setPreview(desc);
+        try { ipeImgUndoPush(typeof targetIdx === "number" ? targetIdx : currentIdx, desc, undoLayers); } catch(eU) {}   // 2.42.0 后悔药：先记一笔，再去换楼里那段
 
         if (autoInjectNow) {
             var injIdx = typeof targetIdx === "number" ? targetIdx : currentIdx;
@@ -11912,6 +12053,7 @@ async function runExtract(text, supplement, autoInjectNow, targetIdx, retryAttem
         }
 
         if(ball){ball.classList.remove("processing");}
+        try { ipeImgUndoRefreshUI(); } catch(eUR) {}
         var s=q("#ipe-section-preview"); if(s){ s.classList.remove("collapsed"); var header=s.querySelector(".ipe-section-header"); if(header)header.setAttribute("aria-expanded", "true"); }
     } catch(e) {
         if (ipeChatKey() !== chatAtStart) {
