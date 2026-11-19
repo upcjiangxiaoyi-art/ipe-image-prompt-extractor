@@ -775,19 +775,7 @@
 }
 
 /* ---------- 壳体头部 ---------- */
-#ipe-panel .ipe-panel-header {
-    min-height: 58px !important;
-    padding: 11px 13px 10px 15px !important;
-    border-bottom: 1px solid var(--ipe-ui-line) !important;
-    background: linear-gradient(90deg, rgba(20, 40, 64, .72), rgba(8, 22, 38, .38)) !important;
-    box-shadow: 0 1px 0 rgba(210, 231, 245, .035) inset !important;
-}
 
-#ipe-panel.ipe-mist .ipe-panel-header {
-    border-bottom-color: rgba(255, 255, 255, .44) !important;
-    background: linear-gradient(90deg, rgba(255, 255, 255, .36), rgba(255, 255, 255, .13)) !important;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, .72) inset !important;
-}
 
 #ipe-panel .ipe-panel-title {
     display: flex !important;
@@ -815,36 +803,9 @@
     gap: 7px !important;
 }
 
-#ipe-panel #ipe-theme-toggle,
-#ipe-panel #ipe-panel-close {
-    width: 36px !important;
-    min-width: 36px !important;
-    max-width: 36px !important;
-    height: 36px !important;
-    min-height: 36px !important;
-    flex: 0 0 36px !important;
-    padding: 0 !important;
-    border: 1px solid var(--ipe-ui-line-strong) !important;
-    border-radius: 12px !important;
-    background: rgba(25, 48, 74, .62) !important;
-    color: var(--ipe-ui-ink) !important;
-    -webkit-text-fill-color: var(--ipe-ui-ink) !important;
-    box-shadow: 0 5px 16px rgba(0, 7, 18, .18) !important;
-}
-
-#ipe-panel.ipe-mist #ipe-theme-toggle,
-#ipe-panel.ipe-mist #ipe-panel-close {
-    border-color: rgba(255, 255, 255, .62) !important;
-    background: rgba(255, 255, 255, .52) !important;
-    box-shadow: 0 5px 16px rgba(66, 79, 108, .10) !important;
-}
 
 /* ---------- 总开关 ---------- */
-#ipe-panel .ipe-toggle {
-    width: 39px !important;
-    height: 22px !important;
-    flex: 0 0 39px !important;
-}
+
 
 #ipe-panel .ipe-toggle-slider {
     border: 1px solid var(--ipe-ui-line-strong) !important;
@@ -853,57 +814,9 @@
     box-shadow: inset 0 1px 3px rgba(0, 7, 18, .18) !important;
 }
 
-#ipe-panel .ipe-toggle-slider::before {
-    top: 2px !important;
-    left: 2px !important;
-    width: 16px !important;
-    height: 16px !important;
-    background: #dce8ef !important;
-    box-shadow: 0 2px 5px rgba(0, 7, 18, .32) !important;
-}
-
-#ipe-panel .ipe-toggle input:checked + .ipe-toggle-slider {
-    border-color: rgba(132, 156, 207, .48) !important;
-    background: linear-gradient(90deg, #6478aa, #778fc0 52%, #72a7bc) !important;
-}
-
-#ipe-panel .ipe-toggle input:checked + .ipe-toggle-slider::before {
-    transform: translateX(17px) !important;
-    background: var(--ipe-ui-sand) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-toggle-slider {
-    background: rgba(92, 121, 150, .17) !important;
-    box-shadow: inset 0 1px 3px rgba(69, 86, 112, .10) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider {
-    border-color: rgba(126, 137, 193, .42) !important;
-    background: linear-gradient(90deg, #7d9fc9, #9589c5) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-toggle input:checked + .ipe-toggle-slider::before {
-    background: #fff8e8 !important;
-    box-shadow: 0 2px 5px rgba(73, 82, 108, .22) !important;
-}
 
 /* ---------- 分段页签 ---------- */
-#ipe-panel .ipe-tabs {
-    gap: 4px !important;
-    margin: 10px 11px 4px !important;
-    padding: 4px !important;
-    padding-right: calc(var(--ipe-thumb) * .7) !important;
-    border: 1px solid var(--ipe-ui-line) !important;
-    border-radius: 15px !important;
-    background: rgba(2, 10, 18, .28) !important;
-    box-shadow: inset 0 1px 0 rgba(207, 229, 244, .035) !important;
-}
 
-#ipe-panel.ipe-mist .ipe-tabs {
-    border-color: rgba(255, 255, 255, .47) !important;
-    background: rgba(255, 255, 255, .25) !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62) !important;
-}
 
 #ipe-panel .ipe-tab {
     min-height: 35px !important;
@@ -931,27 +844,9 @@
     font-size: 13px;
 }
 
-#ipe-panel .ipe-tab.ipe-tab-on {
-    border-color: rgba(126, 166, 202, .29) !important;
-    background: linear-gradient(135deg, rgba(91, 111, 175, .36), rgba(50, 124, 153, .25)) !important;
-    color: #edf6fc !important;
-    -webkit-text-fill-color: #edf6fc !important;
-    box-shadow: 0 4px 13px rgba(0, 7, 18, .23) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-tab.ipe-tab-on {
-    border-color: rgba(255, 255, 255, .78) !important;
-    background: rgba(255, 255, 255, .78) !important;
-    color: #536e91 !important;
-    -webkit-text-fill-color: #536e91 !important;
-    box-shadow: 0 4px 14px rgba(73, 84, 118, .13) !important;
-}
 
 /* ---------- 内容卡与滚动 ---------- */
-#ipe-panel .ipe-sections {
-    padding: 5px 10px 12px !important;
-    scrollbar-color: rgba(119, 160, 191, .28) transparent !important;
-}
+
 
 #ipe-panel .ipe-sections::-webkit-scrollbar {
     width: 4px !important;
@@ -971,16 +866,6 @@
     box-shadow: 0 5px 18px var(--ipe-ui-shadow) !important;
 }
 
-#ipe-panel .ipe-section:not(.collapsed) {
-    border-color: var(--ipe-ui-line-strong) !important;
-    background: var(--ipe-ui-card-strong) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-section {
-    box-shadow:
-        0 6px 18px var(--ipe-ui-shadow),
-        0 1px 0 rgba(255, 255, 255, .58) inset !important;
-}
 
 #ipe-panel .ipe-section-header {
     min-height: 42px !important;
@@ -993,20 +878,6 @@
     text-transform: none !important;
 }
 
-#ipe-panel .ipe-section:not(.collapsed) .ipe-section-header {
-    color: var(--ipe-ui-ink) !important;
-}
-
-#ipe-panel .ipe-collapse-icon {
-    color: var(--ipe-ui-faint) !important;
-    font-size: 10px !important;
-}
-
-#ipe-panel .ipe-section-body {
-    gap: 9px !important;
-    padding: 0 12px 13px !important;
-    border-top: 1px solid var(--ipe-ui-line) !important;
-}
 
 #ipe-panel .ipe-section-body > :first-child {
     margin-top: 10px !important;
@@ -1046,12 +917,6 @@
     -webkit-backdrop-filter: none !important;
 }
 
-#ipe-panel.ipe-mist .ipe-section-body input[type="text"],
-#ipe-panel.ipe-mist .ipe-section-body input[type="password"],
-#ipe-panel.ipe-mist .ipe-section-body select,
-#ipe-panel.ipe-mist .ipe-section-body textarea {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .84) !important;
-}
 
 #ipe-panel .ipe-section-body textarea {
     line-height: 1.58 !important;
@@ -1123,24 +988,6 @@
     box-shadow: none !important;
 }
 
-#ipe-panel .ipe-section-body input[type="checkbox"]:checked {
-    border-color: rgba(132, 153, 204, .48) !important;
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #f4ead0 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #687bad, #7c90bf 54%, #71a6bc) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-section-body input[type="checkbox"] {
-    background:
-        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
-        rgba(87, 111, 140, .16) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-section-body input[type="checkbox"]:checked {
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #fff9e9 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #779bc8, #9589c5) !important;
-}
 
 #ipe-panel .ipe-section-body > div:has(input[type="checkbox"]) {
     min-height: 38px !important;
@@ -1202,21 +1049,6 @@
     -webkit-text-fill-color: var(--ipe-ui-ink) !important;
 }
 
-#ipe-panel .ipe-btn-primary {
-    border-color: rgba(130, 154, 202, .45) !important;
-    background: linear-gradient(135deg, rgba(100, 119, 173, .92), rgba(56, 119, 148, .82)) !important;
-    color: #f5f8fb !important;
-    -webkit-text-fill-color: #f5f8fb !important;
-    font-weight: 700 !important;
-    box-shadow: 0 6px 17px rgba(0, 7, 18, .22) !important;
-}
-
-#ipe-panel.ipe-mist .ipe-btn {
-    border-color: var(--ipe-ui-line-strong) !important;
-    background: rgba(255, 255, 255, .58) !important;
-    color: var(--ipe-ui-muted) !important;
-    -webkit-text-fill-color: var(--ipe-ui-muted) !important;
-}
 
 #ipe-panel.ipe-mist .ipe-btn:hover:not(:disabled) {
     border-color: rgba(133, 147, 194, .36) !important;
@@ -1225,17 +1057,6 @@
     -webkit-text-fill-color: var(--ipe-ui-ink) !important;
 }
 
-#ipe-panel.ipe-mist .ipe-btn-primary {
-    border-color: rgba(126, 139, 194, .40) !important;
-    background: linear-gradient(135deg, #7d9fc8, #9288c2) !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
-    box-shadow: 0 6px 17px rgba(76, 85, 121, .17) !important;
-}
-
-#ipe-panel .ipe-btn:disabled {
-    opacity: .36 !important;
-}
 
 #ipe-panel .ipe-preview-actions {
     gap: 7px !important;
@@ -1282,9 +1103,6 @@
     box-shadow: none !important;
 }
 
-#ipe-panel.ipe-mist .ipe-fold {
-    background: rgba(255, 255, 255, .40) !important;
-}
 
 #ipe-panel .ipe-fold > summary {
     min-height: 38px !important;
@@ -1295,14 +1113,6 @@
     line-height: 1.5 !important;
 }
 
-#ipe-panel .ipe-fold[open] > summary {
-    border-bottom: 1px solid var(--ipe-ui-line) !important;
-    color: var(--ipe-ui-ink) !important;
-}
-
-#ipe-panel .ipe-fold-body {
-    padding: 1px 11px 11px !important;
-}
 
 #ipe-panel .ipe-ledger-age,
 #ipe-panel .ipe-anchor-guide {
@@ -1313,28 +1123,6 @@
     box-shadow: none !important;
 }
 
-#ipe-panel.ipe-mist .ipe-ledger-age,
-#ipe-panel.ipe-mist .ipe-anchor-guide {
-    background: rgba(255, 255, 255, .52) !important;
-}
-
-#ipe-panel .ipe-anchor-guide-title {
-    color: var(--ipe-ui-ink) !important;
-}
-
-#ipe-panel .ipe-footer {
-    padding: 9px 15px 11px !important;
-    border-top: 1px solid var(--ipe-ui-line) !important;
-    background: rgba(2, 9, 17, .18) !important;
-    color: var(--ipe-ui-faint) !important;
-    font-size: 10.5px !important;
-    letter-spacing: .04em !important;
-}
-
-#ipe-panel.ipe-mist .ipe-footer {
-    background: rgba(255, 248, 231, .24) !important;
-    color: #8b806e !important;
-}
 
 /* ---------- 快捷入口：随面板状态换潮色 ---------- */
 #ipe-chat-quick-entry svg stop:first-of-type {
@@ -1434,15 +1222,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer {
     -webkit-backdrop-filter: none !important;
 }
 
-body.ipe-skin-mist:not(#_) #ipe-drawer > .inline-drawer {
-    border-color: rgba(255, 255, 255, .72) !important;
-    background:
-        radial-gradient(118% 68% at 3% -9%, rgba(101, 170, 220, .43) 0%, transparent 52%),
-        radial-gradient(95% 60% at 105% 3%, rgba(164, 145, 216, .38) 0%, transparent 56%),
-        radial-gradient(98% 66% at 100% 106%, rgba(231, 205, 151, .45) 0%, transparent 58%),
-        linear-gradient(165deg, #deedf7 0%, #e8e6f3 36%, #f8f6f1 67%, #f1e4c7 100%) !important;
-    box-shadow: 0 14px 38px rgba(71, 82, 111, .16) !important;
-}
 
 #ipe-drawer .inline-drawer-toggle.inline-drawer-header {
     min-height: 54px !important;
@@ -1453,10 +1232,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer > .inline-drawer {
     box-shadow: none !important;
 }
 
-body.ipe-skin-mist:not(#_) #ipe-drawer .inline-drawer-toggle.inline-drawer-header {
-    border-bottom-color: rgba(255, 255, 255, .42) !important;
-    background: rgba(255, 255, 255, .30) !important;
-}
 
 #ipe-drawer .inline-drawer-toggle b {
     display: flex !important;
@@ -1549,19 +1324,7 @@ body.ipe-skin-mist:not(#_) #ipe-drawer .inline-drawer-content > div:nth-child(-n
 }
 
 /* 抽屉页签 */
-#ipe-drawer .ipe-tabs {
-    gap: 4px !important;
-    margin: 11px 0 12px !important;
-    padding: 4px !important;
-    border: 1px solid var(--iped-line) !important;
-    border-radius: 15px !important;
-    background: rgba(2, 10, 18, .24) !important;
-}
 
-body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-tabs {
-    border-color: rgba(255, 255, 255, .45) !important;
-    background: rgba(255, 255, 255, .25) !important;
-}
 
 #ipe-drawer .ipe-tab {
     min-height: 36px !important;
@@ -1576,20 +1339,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-tabs {
     box-shadow: none !important;
 }
 
-#ipe-drawer .ipe-tab.ipe-tab-on {
-    border-color: rgba(126, 166, 202, .29) !important;
-    background: linear-gradient(135deg, rgba(91, 111, 175, .36), rgba(50, 124, 153, .25)) !important;
-    color: #edf6fc !important;
-    -webkit-text-fill-color: #edf6fc !important;
-    box-shadow: 0 4px 13px var(--iped-shadow) !important;
-}
-
-body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-tab.ipe-tab-on {
-    border-color: rgba(255, 255, 255, .76) !important;
-    background: rgba(255, 255, 255, .76) !important;
-    color: #536e91 !important;
-    -webkit-text-fill-color: #536e91 !important;
-}
 
 /* 抽屉字段 */
 #ipe-drawer .text_pole,
@@ -1688,24 +1437,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer select option {
     box-shadow: none !important;
 }
 
-#ipe-drawer input[type="checkbox"]:checked {
-    border-color: rgba(132, 153, 204, .48) !important;
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #f4ead0 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #687bad, #7c90bf 54%, #71a6bc) !important;
-}
-
-body.ipe-skin-mist:not(#_) #ipe-drawer input[type="checkbox"] {
-    background:
-        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
-        rgba(87, 111, 140, .16) !important;
-}
-
-body.ipe-skin-mist:not(#_) #ipe-drawer input[type="checkbox"]:checked {
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #fff9e9 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #779bc8, #9589c5) !important;
-}
 
 /* 抽屉按钮 */
 #ipe-drawer .menu_button,
@@ -1733,10 +1464,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer input[type="checkbox"]:checked {
     -webkit-text-fill-color: var(--iped-ink) !important;
 }
 
-body.ipe-skin-mist:not(#_) #ipe-drawer .menu_button,
-body.ipe-skin-mist:not(#_) #ipe-drawer input[type="button"] {
-    background: rgba(255, 255, 255, .58) !important;
-}
 
 body.ipe-skin-mist:not(#_) #ipe-drawer .menu_button:hover,
 body.ipe-skin-mist:not(#_) #ipe-drawer input[type="button"]:hover {
@@ -1767,9 +1494,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer input[id$="-adopt"] {
     -webkit-text-fill-color: #ffffff !important;
 }
 
-#ipe-drawer input[type="button"]:disabled {
-    opacity: .36 !important;
-}
 
 #ipe-drawer [data-ipe-tab] > div[style*="display:flex"] {
     flex-wrap: wrap !important;
@@ -1793,15 +1517,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer input[id$="-adopt"] {
     box-shadow: none !important;
 }
 
-body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-anchor-guide,
-body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-fold,
-body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-ledger-age {
-    background: rgba(255, 255, 255, .46) !important;
-}
-
-#ipe-drawer .ipe-anchor-guide-title {
-    color: var(--iped-ink) !important;
-}
 
 #ipe-drawer .ipe-fold > summary {
     min-height: 40px !important;
@@ -1812,10 +1527,6 @@ body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-ledger-age {
     line-height: 1.55 !important;
 }
 
-#ipe-drawer .ipe-fold[open] > summary {
-    border-bottom: 1px solid var(--iped-line) !important;
-    color: var(--iped-ink) !important;
-}
 
 #ipe-drawer .ipe-fold-body {
     padding: 2px 11px 11px !important;
@@ -1894,7 +1605,7 @@ body.ipe-skin-mist:not(#_) #ipe-drawer .ipe-ledger-age {
 .ipe-zoom-btn { position: absolute; top: 4px; right: 6px; z-index: 2; width: 22px; height: 22px; line-height: 20px; padding: 0; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); background: rgba(28,28,32,0.55); color: #bbb; font-size: 12px; font-family: inherit; cursor: pointer; opacity: 0.7; transition: opacity 0.15s; }
 .ipe-zoom-btn:hover { opacity: 1; }
 .ipe-mist .ipe-zoom-btn { background: rgba(255,255,255,0.75); border-color: rgba(0,0,0,0.12); color: #5a6b7a; }
-#ipe-drawer .ipe-zoom-btn { background: rgba(0,0,0,0.25); color: inherit; border-color: rgba(128,128,128,0.35); }
+
 .ipe-zoom-overlay { position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box; }
 .ipe-zoom-box { width: min(920px, 100%); height: min(86vh, 100%); background: rgba(28,28,32,0.98); color: #d4d4d4; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 16px 50px rgba(0,0,0,0.5); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; overflow: hidden; }
 .ipe-zoom-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
@@ -1946,7 +1657,7 @@ html #ipe-panel .ipe-fold > summary:focus-visible {
     outline: 2px solid #93a9cb;
     outline-offset: -3px;
 }
-html #ipe-panel .ipe-section-body { gap: 7px !important; padding: 0 11px 11px !important; }
+
 html #ipe-panel .ipe-section-body label,
 html #ipe-drawer .inline-drawer-content label {
     font-size: 11px !important;
@@ -1965,16 +1676,8 @@ html #ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="pass
     line-height: 1.55 !important;
     box-sizing: border-box;
 }
-html #ipe-panel .ipe-section-body select,
-html #ipe-drawer .inline-drawer-content select { padding-right: 28px !important; }
-html #ipe-panel .ipe-btn,
-html #ipe-drawer .menu_button {
-    min-height: 34px !important;
-    padding: 6px 10px !important;
-    font-size: 11.5px !important;
-    font-weight: 500 !important;
-    border-radius: 10px !important;
-}
+
+
 html #ipe-panel .ipe-preview-actions,
 html #ipe-drawer .ipe-fold-body > div[style*="display:flex"] {
     flex-wrap: wrap;
@@ -1992,13 +1695,7 @@ html #ipe-drawer .ipe-fold > summary {
     letter-spacing: .025em;
     cursor: pointer;
 }
-html #ipe-drawer .ipe-organized-card { margin: 9px 0 !important; border-radius: 15px !important; }
-html #ipe-drawer .ipe-organized-card > summary { padding: 10px 12px !important; }
-html #ipe-panel .ipe-organized-card { margin: 9px 0 !important; }
-html #ipe-panel .ipe-tab::before,
-html #ipe-drawer .ipe-tab::before { font-size: 12px !important; font-weight: 550 !important; }
-html #ipe-panel .ipe-footer { font-size: 9px !important; padding: 7px 12px !important; }
-html #ipe-panel .ipe-panel-title { font-size: 14px !important; }
+
 
 html #ipe-drawer .inline-drawer-content > div:has(> label) > label { display: flex !important; align-items: center !important; justify-content: space-between !important; width: 100% !important; }
 
@@ -2071,8 +1768,8 @@ html body.ipe-skin-mist:not(#_) #ipe-drawer {
 html #ipe-drawer > .inline-drawer { background: radial-gradient(ellipse at 100% 15%,rgba(65,160,184,.16),transparent 52%),linear-gradient(155deg,#102d46,#081d30 65%,#051321) !important; }
 html body.ipe-skin-mist:not(#_) #ipe-drawer > .inline-drawer { background: radial-gradient(ellipse at 0 0,rgba(125,193,229,.35),transparent 52%),linear-gradient(155deg,#d9ecf7,#f0f6f5 48%,#fcf8ed 74%,#f5e7c3) !important; }
 html #ipe-panel #ipe-section-ledger { border: 0 !important; background: transparent !important; box-shadow: none !important; overflow: visible !important; }
-html #ipe-panel #ipe-section-ledger > .ipe-section-body { padding: 0 !important; border: 0 !important; }
-html #ipe-panel #ipe-section-ledger > .ipe-section-header { padding: 4px 3px 11px !important; min-height: 30px !important; }
+
+
 html #ipe-panel .ipe-ledger-desk,
 html #ipe-drawer .ipe-ledger-desk { min-width: 0; }
 html #ipe-panel .ipe-desk-card,
@@ -2105,47 +1802,23 @@ html #ipe-panel .ipe-desk-overview,
 html #ipe-drawer .ipe-desk-overview { padding: 10px 12px; border-radius: 15px; background: var(--ipe-desk-glow); }
 html #ipe-panel .ipe-desk-overview [id$="-ledger-chatkey"],
 html #ipe-drawer .ipe-desk-overview [id$="-ledger-chatkey"] { font-size: 9.5px !important; line-height: 1.6; overflow-wrap: anywhere; }
-html #ipe-panel .ipe-desk-settings > h3,
-html #ipe-drawer .ipe-desk-settings > h3 { margin: 19px 4px 9px; color: var(--ipe-desk-muted); font-size: 10px; font-weight: 500; letter-spacing: .14em; }
-html #ipe-panel .ipe-desk-settings > .ipe-fold,
-html #ipe-drawer .ipe-desk-settings > .ipe-fold { margin: 8px 0 !important; border-radius: 14px !important; background: var(--ipe-desk-glow) !important; }
+
+
 html #ipe-panel .ipe-desk-content > div[style*="display:flex"],
 html #ipe-drawer .ipe-desk-content > div[style*="display:flex"] { flex-wrap: wrap; gap: 6px !important; }
 html #ipe-panel .ipe-desk-content .ipe-preview-actions,
 html #ipe-drawer .ipe-desk-content > div[style*="display:flex"] { padding-right: 0 !important; }
 html #ipe-panel .ipe-desk-content .ipe-btn,
 html #ipe-drawer .ipe-desk-content .menu_button { flex: 1 1 110px; white-space: normal; }
-html #ipe-panel [id="ipe-ledger-run"],
-html #ipe-drawer [id="iped-ledger-run"],
-html #ipe-panel.ipe-mist [id="ipe-ledger-run"],
-html body.ipe-skin-mist:not(#_) #ipe-drawer [id="iped-ledger-run"] {
-    background: var(--ipe-desk-action) !important;
-    color: var(--ipe-desk-action-ink) !important; -webkit-text-fill-color: var(--ipe-desk-action-ink) !important;
-    border-color: var(--ipe-desk-line) !important;
-    min-height: 38px !important;
-}
+
 html #ipe-panel .ipe-desk-request [id$="-ledger-preview-box"],
 html #ipe-drawer .ipe-desk-request [id$="-ledger-preview-box"] { border-top: 1px solid var(--ipe-desk-line); padding-top: 12px; }
 html #ipe-panel .ipe-desk-content [id$="-ledger-status"],
 html #ipe-drawer .ipe-desk-content [id$="-ledger-status"] { overflow-wrap: anywhere; font-size: 10.5px !important; }
-html #ipe-panel .ipe-panel-header,
-html #ipe-panel.ipe-mist .ipe-panel-header { background: transparent !important; }
-html #ipe-panel .ipe-footer,
-html #ipe-panel.ipe-mist .ipe-footer { background: transparent !important; color: var(--ipe-ui-faint) !important; border-top: 1px solid var(--ipe-ui-line) !important; }
-html #ipe-panel .ipe-tabs,
-html #ipe-panel.ipe-mist .ipe-tabs { background: var(--ipe-desk-glow) !important; border-color: var(--ipe-ui-line) !important; }
-html #ipe-panel .ipe-tab.ipe-tab-on,
-html #ipe-panel.ipe-mist .ipe-tab.ipe-tab-on { background: var(--ipe-ui-card-strong) !important; color: var(--ipe-ui-ink) !important; -webkit-text-fill-color: var(--ipe-ui-ink) !important; border-color: var(--ipe-ui-line-strong) !important; box-shadow: 0 2px 8px var(--ipe-ui-shadow) !important; }
+
+
 /* 主动作也随海色切换，白天蓝沙柔光，夜间深海青光。 */
-html #ipe-panel .ipe-btn-primary,
-html #ipe-panel.ipe-mist .ipe-btn-primary,
-html #ipe-drawer #iped-ledger-save,
-html body.ipe-skin-mist:not(#_) #ipe-drawer #iped-ledger-save {
-    background: var(--ipe-desk-action) !important;
-    color: var(--ipe-desk-action-ink) !important;
-    -webkit-text-fill-color: var(--ipe-desk-action-ink) !important;
-    border-color: var(--ipe-desk-line) !important;
-}
+
 
 /* ============================================================
    2.19.5 iOS 减负：触屏设备上面板不再做毛玻璃。
@@ -2197,8 +1870,8 @@ html body.ipe-skin-apricot:not(#_) #ipe-drawer {
 html body.ipe-skin-apricot:not(#_) #ipe-drawer > .inline-drawer {
     background: radial-gradient(ellipse at 100% 100%,rgba(149,158,150,.38),transparent 55%),linear-gradient(160deg,#fde4d0,#faf0e5 45%,#e4dcd1) !important;
 }
-html #ipe-panel.ipe-apricot .ipe-toggle input:checked + .ipe-toggle-slider { background: #959e96 !important; }
-html #ipe-panel.ipe-apricot input:checked { accent-color: #7b8c80 !important; }
+
+
 html body.ipe-skin-apricot:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #959e96 !important; }
 html body.ipe-skin-apricot:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #fde4d0 !important; }
 html body.ipe-skin-apricot:not(#_) #ipe-chat-quick-entry svg text { fill: #66574e !important; }
@@ -2242,8 +1915,8 @@ html body.ipe-skin-jade:not(#_) #ipe-drawer {
 html body.ipe-skin-jade:not(#_) #ipe-drawer > .inline-drawer {
     background: radial-gradient(ellipse at 100% 100%,rgba(144,186,171,.38),transparent 55%),linear-gradient(160deg,#e4d2c5,#edf6ef 38%,#d4e8df 70%,#90baab) !important;
 }
-html #ipe-panel.ipe-jade .ipe-toggle input:checked + .ipe-toggle-slider { background: #488883 !important; }
-html #ipe-panel.ipe-jade input:checked { accent-color: #488883 !important; }
+
+
 html body.ipe-skin-jade:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #488883 !important; }
 html body.ipe-skin-jade:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #e4d2c5 !important; }
 html body.ipe-skin-jade:not(#_) #ipe-chat-quick-entry svg text { fill: #245053 !important; }
@@ -2277,41 +1950,19 @@ html #ipe-panel.ipe-beach {
         linear-gradient(160deg,#cfe5f2,#e6eef6 42%,#f4e4ee 70%,#f2d5df) !important;
     box-shadow: 0 12px 44px rgba(0,145,189,.20), 0 0 0 1px rgba(255,255,255,.55) inset !important;
 }
-html #ipe-panel.ipe-beach .ipe-panel-title { color: #1f5f80 !important; text-shadow: none !important; }
-html #ipe-panel.ipe-beach .ipe-panel-header { border-bottom: 1px solid rgba(255,255,255,.55) !important; }
-html #ipe-panel.ipe-beach .ipe-panel-header .ipe-btn,
-html #ipe-panel.ipe-beach .ipe-panel-header button { background: rgba(255,255,255,.62) !important; border-color: rgba(114,177,207,.55) !important; color: #1f5f80 !important; -webkit-text-fill-color: #1f5f80 !important; }
-html #ipe-panel.ipe-beach .ipe-toggle-slider { background: rgba(232,178,198,.55) !important; }
-html #ipe-panel.ipe-beach .ipe-toggle-slider::before { background: #fff !important; box-shadow: 0 1px 3px rgba(0,145,189,.30) !important; }
-html #ipe-panel.ipe-beach .ipe-toggle input:checked + .ipe-toggle-slider { background: rgba(114,177,207,.65) !important; }
-html #ipe-panel.ipe-beach .ipe-toggle input:checked + .ipe-toggle-slider::before { background: #0091bd !important; box-shadow: 0 1px 4px rgba(0,145,189,.45) !important; }
-html #ipe-panel.ipe-beach input:checked { accent-color: #0091bd !important; }
-html #ipe-panel.ipe-beach .ipe-tab { background: rgba(255,255,255,.66) !important; border-color: rgba(255,255,255,.8) !important; color: #3b6a85 !important; -webkit-text-fill-color: #3b6a85 !important; }
-html #ipe-panel.ipe-beach .ipe-tab.ipe-tab-on { background: #ffffff !important; border-color: #72b1cf !important; color: #0b5c7e !important; -webkit-text-fill-color: #0b5c7e !important; box-shadow: 0 2px 12px rgba(0,145,189,.18) !important; }
-html #ipe-panel.ipe-beach .ipe-section { border-bottom-color: rgba(114,177,207,.18) !important; }
-html #ipe-panel.ipe-beach .ipe-section-header { color: #4b7a94 !important; }
+
+
 html #ipe-panel.ipe-beach .ipe-section-header:hover { color: #1f5f80 !important; }
-html #ipe-panel.ipe-beach .ipe-section-body label { color: #5f7f95 !important; }
-html #ipe-panel.ipe-beach .ipe-hint { color: #7f96a8 !important; }
-html #ipe-panel.ipe-beach .ipe-section-body input[type="text"],
-html #ipe-panel.ipe-beach .ipe-section-body input[type="password"],
-html #ipe-panel.ipe-beach .ipe-section-body input[type="number"],
-html #ipe-panel.ipe-beach .ipe-section-body textarea,
-html #ipe-panel.ipe-beach .ipe-section-body select { background: rgba(255,255,255,.90) !important; border-color: rgba(114,177,207,.42) !important; color: #2f5670 !important; }
+
+
 html #ipe-panel.ipe-beach .ipe-section-body input:focus,
 html #ipe-panel.ipe-beach .ipe-section-body textarea:focus { border-color: #0091bd !important; background: #fff !important; }
-html #ipe-panel.ipe-beach .ipe-btn { background: rgba(255,255,255,.80) !important; border-color: rgba(114,177,207,.42) !important; color: #2f5670 !important; -webkit-text-fill-color: #2f5670 !important; }
+
 html #ipe-panel.ipe-beach .ipe-btn:hover:not(:disabled) { background: #fff !important; color: #0b5c7e !important; -webkit-text-fill-color: #0b5c7e !important; }
-html #ipe-panel.ipe-beach .ipe-btn-primary,
-html #ipe-panel.ipe-beach [id="ipe-ledger-run"] { background: linear-gradient(110deg,#72b1cf,#a9c4dd 50%,#e8b2c6) !important; border-color: rgba(0,145,189,.35) !important; color: #1f4f68 !important; -webkit-text-fill-color: #1f4f68 !important; }
+
 html #ipe-panel.ipe-beach .ipe-btn-primary:hover:not(:disabled) { background: linear-gradient(110deg,#0091bd,#72b1cf 50%,#d79bce) !important; color: #fff !important; -webkit-text-fill-color: #fff !important; }
-html #ipe-panel.ipe-beach .ipe-fold { border-color: rgba(114,177,207,.30) !important; background: rgba(255,255,255,.55) !important; }
-html #ipe-panel.ipe-beach .ipe-fold[open] { background: rgba(255,255,255,.78) !important; }
-html #ipe-panel.ipe-beach .ipe-fold > summary { color: #5f7f95 !important; }
-html #ipe-panel.ipe-beach .ipe-fold[open] > summary { color: #2f5670 !important; }
-html #ipe-panel.ipe-beach .ipe-ledger-age,
-html #ipe-panel.ipe-beach .ipe-anchor-guide { border-color: rgba(114,177,207,.30) !important; background: rgba(255,255,255,.78) !important; color: #2f5670 !important; }
-html #ipe-panel.ipe-beach .ipe-footer { color: #7f96a8 !important; border-top-color: rgba(114,177,207,.24) !important; }
+
+
 html body.ipe-skin-beach:not(#_) #ipe-drawer {
     --iped-ink: #2f5670;
     --iped-muted: #5f7f95;
@@ -2372,41 +2023,19 @@ html #ipe-panel.ipe-pearl {
         linear-gradient(160deg,#9ba8b7,#c9d0d8 40%,#e7e7e4 68%,#f3eee7) !important;
     box-shadow: 0 12px 44px rgba(111,127,146,.22), 0 0 0 1px rgba(255,255,255,.60) inset !important;
 }
-html #ipe-panel.ipe-pearl .ipe-panel-title { color: #ffffff !important; text-shadow: 0 1px 6px rgba(63,75,90,.45) !important; }
-html #ipe-panel.ipe-pearl .ipe-panel-header { border-bottom: 1px solid rgba(255,255,255,.50) !important; }
-html #ipe-panel.ipe-pearl .ipe-panel-header .ipe-btn,
-html #ipe-panel.ipe-pearl .ipe-panel-header button { background: rgba(243,238,231,.70) !important; border-color: rgba(201,208,216,.90) !important; color: #3f4b5a !important; -webkit-text-fill-color: #3f4b5a !important; }
-html #ipe-panel.ipe-pearl .ipe-toggle-slider { background: rgba(201,208,216,.80) !important; }
-html #ipe-panel.ipe-pearl .ipe-toggle-slider::before { background: #fffdfa !important; box-shadow: 0 1px 3px rgba(63,75,90,.30) !important; }
-html #ipe-panel.ipe-pearl .ipe-toggle input:checked + .ipe-toggle-slider { background: rgba(111,127,146,.70) !important; }
-html #ipe-panel.ipe-pearl .ipe-toggle input:checked + .ipe-toggle-slider::before { background: #f6f2d8 !important; box-shadow: 0 1px 4px rgba(63,75,90,.45) !important; }
-html #ipe-panel.ipe-pearl input:checked { accent-color: #6f7f92 !important; }
-html #ipe-panel.ipe-pearl .ipe-tab { background: rgba(243,238,231,.66) !important; border-color: rgba(255,255,255,.8) !important; color: #56677c !important; -webkit-text-fill-color: #56677c !important; }
-html #ipe-panel.ipe-pearl .ipe-tab.ipe-tab-on { background: #fffdfa !important; border-color: #6f7f92 !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; box-shadow: 0 2px 12px rgba(111,127,146,.22) !important; }
-html #ipe-panel.ipe-pearl .ipe-section { border-bottom-color: rgba(111,127,146,.18) !important; }
-html #ipe-panel.ipe-pearl .ipe-section-header { color: #56677c !important; }
+
+
 html #ipe-panel.ipe-pearl .ipe-section-header:hover { color: #2f3b4a !important; }
-html #ipe-panel.ipe-pearl .ipe-section-body label { color: #6f7f92 !important; }
-html #ipe-panel.ipe-pearl .ipe-hint { color: #8e9aa8 !important; }
-html #ipe-panel.ipe-pearl .ipe-section-body input[type="text"],
-html #ipe-panel.ipe-pearl .ipe-section-body input[type="password"],
-html #ipe-panel.ipe-pearl .ipe-section-body input[type="number"],
-html #ipe-panel.ipe-pearl .ipe-section-body textarea,
-html #ipe-panel.ipe-pearl .ipe-section-body select { background: rgba(255,253,250,.92) !important; border-color: rgba(111,127,146,.40) !important; color: #3f4b5a !important; }
+
+
 html #ipe-panel.ipe-pearl .ipe-section-body input:focus,
 html #ipe-panel.ipe-pearl .ipe-section-body textarea:focus { border-color: #6f7f92 !important; background: #fffdfa !important; }
-html #ipe-panel.ipe-pearl .ipe-btn { background: rgba(243,238,231,.84) !important; border-color: rgba(111,127,146,.40) !important; color: #3f4b5a !important; -webkit-text-fill-color: #3f4b5a !important; }
+
 html #ipe-panel.ipe-pearl .ipe-btn:hover:not(:disabled) { background: #fffdfa !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; }
-html #ipe-panel.ipe-pearl .ipe-btn-primary,
-html #ipe-panel.ipe-pearl [id="ipe-ledger-run"] { background: linear-gradient(110deg,#6f7f92,#aab4c0 50%,#f3eee7) !important; border-color: rgba(111,127,146,.45) !important; color: #2f3b4a !important; -webkit-text-fill-color: #2f3b4a !important; }
+
 html #ipe-panel.ipe-pearl .ipe-btn-primary:hover:not(:disabled) { background: linear-gradient(110deg,#56677c,#6f7f92 50%,#c9d0d8) !important; color: #fffdfa !important; -webkit-text-fill-color: #fffdfa !important; }
-html #ipe-panel.ipe-pearl .ipe-fold { border-color: rgba(111,127,146,.30) !important; background: rgba(243,238,231,.58) !important; }
-html #ipe-panel.ipe-pearl .ipe-fold[open] { background: rgba(243,238,231,.80) !important; }
-html #ipe-panel.ipe-pearl .ipe-fold > summary { color: #6f7f92 !important; }
-html #ipe-panel.ipe-pearl .ipe-fold[open] > summary { color: #3f4b5a !important; }
-html #ipe-panel.ipe-pearl .ipe-ledger-age,
-html #ipe-panel.ipe-pearl .ipe-anchor-guide { border-color: rgba(111,127,146,.30) !important; background: rgba(243,238,231,.82) !important; color: #3f4b5a !important; }
-html #ipe-panel.ipe-pearl .ipe-footer { color: #8e9aa8 !important; border-top-color: rgba(111,127,146,.24) !important; }
+
+
 html body.ipe-skin-pearl:not(#_) #ipe-drawer {
     --iped-ink: #3f4b5a;
     --iped-muted: #6f7f92;
@@ -2427,18 +2056,8 @@ html body.ipe-skin-pearl:not(#_) #ipe-drawer > .inline-drawer {
     background: radial-gradient(ellipse at 0 0,rgba(111,127,146,.45),transparent 50%), radial-gradient(ellipse at 100% 100%,rgba(246,242,216,.80),transparent 55%), linear-gradient(160deg,#b4bfcb,#c9d0d8 40%,#e7e7e4 70%,#f3eee7) !important;
 }
 /* 抽屉开关：浅色皮通用的紫蓝换成风暴蓝，圆点用珍珠白 / 月漾奶黄。 */
-html body.ipe-skin-pearl:not(#_) #ipe-drawer input[type="checkbox"] {
-    border-color: rgba(111,127,146,.40) !important;
-    background:
-        radial-gradient(circle at 9px 50%, #fffdfa 0 6px, transparent 6.6px),
-        rgba(201,208,216,.70) !important;
-}
-html body.ipe-skin-pearl:not(#_) #ipe-drawer input[type="checkbox"]:checked {
-    border-color: rgba(111,127,146,.55) !important;
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #f6f2d8 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #56677c, #6f7f92 55%, #8f9dae) !important;
-}
+
+
 /* 浮标：胶囊从风暴蓝渐到珍珠白，字用深灰蓝，海螺与波纹描白；忙碌脉冲银雾 / 风暴蓝，两粒小灯同样换色。 */
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #6f7f92 !important; }
 html body.ipe-skin-pearl:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #f3eee7 !important; }
@@ -2481,41 +2100,19 @@ html #ipe-panel.ipe-lemon {
         linear-gradient(160deg,#fbf3a0,#fffbe3 38%,#ffffff 58%,#fbe3ec) !important;
     box-shadow: 0 12px 44px rgba(127,157,214,.22), 0 0 0 1px rgba(255,255,255,.70) inset !important;
 }
-html #ipe-panel.ipe-lemon .ipe-panel-title { color: #2f3f5c !important; text-shadow: 0 1px 0 rgba(255,255,255,.7) !important; }
-html #ipe-panel.ipe-lemon .ipe-panel-header { border-bottom: 1px solid rgba(255,255,255,.70) !important; }
-html #ipe-panel.ipe-lemon .ipe-panel-header .ipe-btn,
-html #ipe-panel.ipe-lemon .ipe-panel-header button { background: rgba(255,255,255,.72) !important; border-color: rgba(175,197,230,.95) !important; color: #3a4a68 !important; -webkit-text-fill-color: #3a4a68 !important; }
-html #ipe-panel.ipe-lemon .ipe-toggle-slider { background: rgba(175,197,230,.55) !important; }
-html #ipe-panel.ipe-lemon .ipe-toggle-slider::before { background: #ffffff !important; box-shadow: 0 1px 3px rgba(58,74,104,.30) !important; }
-html #ipe-panel.ipe-lemon .ipe-toggle input:checked + .ipe-toggle-slider { background: #8fabdc !important; }
-html #ipe-panel.ipe-lemon .ipe-toggle input:checked + .ipe-toggle-slider::before { background: #f7ea5e !important; box-shadow: 0 1px 4px rgba(58,74,104,.40) !important; }
-html #ipe-panel.ipe-lemon input:checked { accent-color: #7f9dd6 !important; }
-html #ipe-panel.ipe-lemon .ipe-tab { background: rgba(255,255,255,.66) !important; border-color: rgba(255,255,255,.9) !important; color: #62739a !important; -webkit-text-fill-color: #62739a !important; }
-html #ipe-panel.ipe-lemon .ipe-tab.ipe-tab-on { background: #ffffff !important; border-color: #afc5e6 !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; box-shadow: 0 2px 12px rgba(127,157,214,.26) !important; }
-html #ipe-panel.ipe-lemon .ipe-section { border-bottom-color: rgba(175,197,230,.40) !important; }
-html #ipe-panel.ipe-lemon .ipe-section-header { color: #62739a !important; }
+
+
 html #ipe-panel.ipe-lemon .ipe-section-header:hover { color: #2f3f5c !important; }
-html #ipe-panel.ipe-lemon .ipe-section-body label { color: #62739a !important; }
-html #ipe-panel.ipe-lemon .ipe-hint { color: #8a98b8 !important; }
-html #ipe-panel.ipe-lemon .ipe-section-body input[type="text"],
-html #ipe-panel.ipe-lemon .ipe-section-body input[type="password"],
-html #ipe-panel.ipe-lemon .ipe-section-body input[type="number"],
-html #ipe-panel.ipe-lemon .ipe-section-body textarea,
-html #ipe-panel.ipe-lemon .ipe-section-body select { background: rgba(255,255,255,.92) !important; border-color: rgba(175,197,230,.85) !important; color: #3a4a68 !important; }
+
+
 html #ipe-panel.ipe-lemon .ipe-section-body input:focus,
 html #ipe-panel.ipe-lemon .ipe-section-body textarea:focus { border-color: #7f9dd6 !important; background: #ffffff !important; }
-html #ipe-panel.ipe-lemon .ipe-btn { background: rgba(255,255,255,.84) !important; border-color: rgba(175,197,230,.85) !important; color: #3a4a68 !important; -webkit-text-fill-color: #3a4a68 !important; }
+
 html #ipe-panel.ipe-lemon .ipe-btn:hover:not(:disabled) { background: #ffffff !important; border-color: #7f9dd6 !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; }
-html #ipe-panel.ipe-lemon .ipe-btn-primary,
-html #ipe-panel.ipe-lemon [id="ipe-ledger-run"] { background: linear-gradient(110deg,#f7ea5e,#afc5e6 55%,#f4b4d0) !important; border-color: rgba(127,157,214,.55) !important; color: #2f3f5c !important; -webkit-text-fill-color: #2f3f5c !important; }
+
 html #ipe-panel.ipe-lemon .ipe-btn-primary:hover:not(:disabled) { background: linear-gradient(110deg,#eedb3c,#8fabdc 55%,#ee9dbf) !important; color: #1f2d48 !important; -webkit-text-fill-color: #1f2d48 !important; }
-html #ipe-panel.ipe-lemon .ipe-fold { border-color: rgba(175,197,230,.70) !important; background: rgba(255,255,255,.58) !important; }
-html #ipe-panel.ipe-lemon .ipe-fold[open] { background: rgba(255,255,255,.80) !important; }
-html #ipe-panel.ipe-lemon .ipe-fold > summary { color: #62739a !important; }
-html #ipe-panel.ipe-lemon .ipe-fold[open] > summary { color: #3a4a68 !important; }
-html #ipe-panel.ipe-lemon .ipe-ledger-age,
-html #ipe-panel.ipe-lemon .ipe-anchor-guide { border-color: rgba(175,197,230,.70) !important; background: rgba(255,255,255,.82) !important; color: #3a4a68 !important; }
-html #ipe-panel.ipe-lemon .ipe-footer { color: #8a98b8 !important; border-top-color: rgba(175,197,230,.55) !important; }
+
+
 html body.ipe-skin-lemon:not(#_) #ipe-drawer {
     --iped-ink: #3a4a68;
     --iped-muted: #62739a;
@@ -2536,18 +2133,8 @@ html body.ipe-skin-lemon:not(#_) #ipe-drawer > .inline-drawer {
     background: radial-gradient(ellipse at 0 0,rgba(247,234,94,.85),transparent 50%), radial-gradient(ellipse at 100% 100%,rgba(244,180,208,.85),transparent 55%), radial-gradient(ellipse at 90% 45%,rgba(175,197,230,.55),transparent 45%), linear-gradient(160deg,#fbf3a0,#fffbe3 40%,#ffffff 60%,#fbe3ec) !important;
 }
 /* 抽屉开关：长春花蓝底、白圆点，开着是柠檬→长春花蓝→樱花粉渐变。 */
-html body.ipe-skin-lemon:not(#_) #ipe-drawer input[type="checkbox"] {
-    border-color: rgba(127,157,214,.55) !important;
-    background:
-        radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px),
-        rgba(175,197,230,.55) !important;
-}
-html body.ipe-skin-lemon:not(#_) #ipe-drawer input[type="checkbox"]:checked {
-    border-color: rgba(127,157,214,.75) !important;
-    background:
-        radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px),
-        linear-gradient(90deg, #f7ea5e, #afc5e6 55%, #f4b4d0) !important;
-}
+
+
 /* 浮标：胶囊从柠檬黄渐到樱花粉，字深蓝灰、海螺与波纹描白；生图脉冲柠檬黄、挂账脉冲长春花蓝，两粒小灯同色。 */
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #f7ea5e !important; }
 html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry svg stop:last-child { stop-color: #f4b4d0 !important; }
@@ -3048,7 +2635,7 @@ html #ipe-panel#ipe-panel .ipe-btn-grid { gap: 10px 8px !important; margin-top: 
 html #ipe-panel#ipe-panel .ipe-preview-actions { gap: 9px 8px !important; padding-bottom: 3px !important; }
 html #ipe-panel#ipe-panel .ipe-preview-actions > select { min-width: 92px !important; padding-left: 10px !important; padding-right: 22px !important; }
 /* 标题栏那三颗小圆钮不吃上面普通按钮的边和厚度 */
-html #ipe-panel#ipe-panel .ipe-panel-header .ipe-btn { border-color: var(--dg-hbtn-edge) !important; background: var(--dg-hbtn) !important; box-shadow: 0 3px 0 var(--dg-hbtn-thick) !important; }
+
 html #ipe-panel#ipe-panel .ipe-panel-header .ipe-btn:active { box-shadow: 0 1px 0 var(--dg-hbtn-thick) !important; }
 
 /* ---- 状态行：点缀色的小纸条 ---- */
@@ -3081,7 +2668,7 @@ html #ipe-panel#ipe-panel .ipe-anchor-guide-title { color: var(--dg-ink) !import
 html #ipe-panel#ipe-panel hr { border-top: 2px dashed var(--dg-a-soft) !important; }
 
 /* ---- 挂账页的三张卡 ---- */
-html #ipe-panel#ipe-panel .ipe-desk-overview { padding: 0 !important; background: transparent !important; }
+
 html #ipe-panel#ipe-panel .ipe-desk-card {
     margin: 12px 0 !important;
     border: 2px solid var(--dg-b-line) !important;
@@ -3240,14 +2827,7 @@ html body.ipe-skin-dango:not(#_) #ipe-drawer > .inline-drawer {
         radial-gradient(circle, rgba(189,234,213,.50) 1.3px, transparent 1.8px) 10px 10px / 20px 20px,
         linear-gradient(180deg, #FFF1F4 0%, #FFFAF3 30%, #F4FBF7 100%) !important;
 }
-html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"] {
-    border-color: #E3D5DB !important;
-    background: radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px), #EADFE4 !important;
-}
-html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"]:checked {
-    border-color: #6CCBA8 !important;
-    background: radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px), linear-gradient(90deg, #7FD6B6, #A6E3CB) !important;
-}
+
 
 /* ---- 浮标：一串三色团子 + IPE。海螺和涟漪收起来，团子换出来（团子会轮流轻轻跳一下，关了「浮标动效」就不跳） ---- */
 html body.ipe-skin-dango:not(#_) #ipe-chat-quick-entry svg stop:first-child { stop-color: #FFD3DF !important; }
@@ -3300,14 +2880,8 @@ html body.ipe-skin-oreo:not(#_) #ipe-drawer > .inline-drawer {
         radial-gradient(circle, rgba(0,0,0,.20) 1px, transparent 1.5px) 0 0 / 7px 7px,
         #ffffff !important;
 }
-html body.ipe-skin-oreo:not(#_) #ipe-drawer input[type="checkbox"] {
-    border-color: #111111 !important;
-    background: radial-gradient(circle at 9px 50%, #ffffff 0 6px, transparent 6.6px), #e2e2e2 !important;
-}
-html body.ipe-skin-oreo:not(#_) #ipe-drawer input[type="checkbox"]:checked {
-    border-color: #111111 !important;
-    background: radial-gradient(circle at calc(100% - 9px) 50%, #ffffff 0 6px, transparent 6.6px), #111111 !important;
-}
+
+
 /* 浮标：白胶囊、黑勾线，左边一块侧着看的奥利奥（黑饼干夹白奶油），右边黑色的 IPE。海螺和涟漪收起来。
    投影是一块偏右下的实心黑影（漫画里的投影），在 index.js 的 ipeCapsuleShadow 里给 */
 html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg stop:first-child,
@@ -3366,9 +2940,7 @@ html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="ok"] { bor
 html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="err"] { border: 1.5px solid #111111 !important; background: #111111 !important; color: #ffffff !important; }
 html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="warn"] { border: 1.5px dashed #111111 !important; background: #f3f3f3 !important; color: #111111 !important; }
 /* 抽屉里的状态行是普通的小灰字：只换字色，出错加粗 */
-#ipe-drawer#ipe-drawer [data-ipe-tone="ok"] { color: #4f9a63 !important; -webkit-text-fill-color: #4f9a63 !important; }
-#ipe-drawer#ipe-drawer [data-ipe-tone="err"] { color: #d4726a !important; -webkit-text-fill-color: #d4726a !important; font-weight: 700 !important; }
-#ipe-drawer#ipe-drawer [data-ipe-tone="warn"] { color: #c9a227 !important; -webkit-text-fill-color: #c9a227 !important; }
+
 
 /* 「常用短语」：下拉以前跟「存为常用」「删」挤一排，手机上只露两个字。下拉自己占一整行，两颗按钮排在下面 */
 html #ipe-panel#ipe-panel .ipe-preview-actions > #ipe-supp-presets { flex: 1 1 100% !important; min-width: 0 !important; }
@@ -3426,7 +2998,7 @@ html #ipe-panel#ipe-panel .ipe-card-flash { animation: ipe-card-flash 1.5s ease 
 .ipe-undo-row { margin-top: 8px; }
 #ipe-panel .ipe-undo-row { padding-right: var(--ipe-thumb); }
 html #ipe-panel#ipe-panel .ipe-undo-row .ipe-undo-title { margin: 0 0 6px; }
-html #ipe-panel#ipe-panel .ipe-undo-row .ipe-btn.ipe-undo-item { font-weight: 500; font-size: 12.5px; min-height: 36px; padding: 7px 14px; }
+
 
 /* ============================================================
    2.43.0 抽屉（酒馆「扩展」页里那一份）也用上同一套做工
@@ -3559,7 +3131,7 @@ html body:not(#_) #ipe-drawer#ipe-drawer hr { border: 0 !important; border-top: 
 
 /* ---- 开关那一栏：副色的虚线小盒 ---- */
 html body:not(#_) #ipe-drawer#ipe-drawer .ipe-switch-row { padding: 10px 8px !important; border: 2px dashed var(--dg-b-line) !important; border-radius: 16px !important; background: var(--dg-b-soft) !important; }
-html body:not(#_) #ipe-drawer#ipe-drawer .ipe-switch-row label { color: var(--dg-ink) !important; }
+
 html body:not(#_) #ipe-drawer#ipe-drawer input[type="checkbox"] {
     border: 1.5px solid var(--dg-a-line) !important;
     background: radial-gradient(circle at 9px 50%, var(--ipe-sw-knob) 0 6px, transparent 6.6px), var(--ipe-sw-off) !important;
@@ -3683,8 +3255,10 @@ html body.ipe-skin-dango:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on { bo
 :is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-done .ipe-guide-text { color: var(--dg-faint) !important; }
 :is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide .ipe-guide-go { min-height: 32px !important; min-width: 62px; padding: 4px 13px !important; margin: 0 !important; }
 :is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide-foot { margin: 0 !important; padding-top: 8px; border-top: 2px dashed var(--dg-a-soft); color: var(--dg-faint) !important; font-size: 11px !important; line-height: 1.55; }
-/* 小面板右边那一条是留给拇指滑动的：按钮别伸进去 */
-html #ipe-panel#ipe-panel .ipe-guide-step { padding-right: var(--ipe-thumb); }
+/* 小面板右边那一条是留给拇指滑动的：按钮别伸进去。
+   2.45.0：上面那条 padding 的选择器里带着抽屉那一支（三个 id），原来这条只有两个 id，一直被盖住、没生效；加 :not(#_) 和 body 垫到比它高 */
+html:not(#_) body #ipe-panel#ipe-panel .ipe-guide-step { padding-right: var(--ipe-thumb); }
+
 /* 抽屉里「下一步」那颗用主按钮色（小面板是加 ipe-btn-primary 类） */
 html body:not(#_) #ipe-drawer#ipe-drawer .ipe-guide-next .ipe-guide-go { border-color: var(--dg-p-edge) !important; background: var(--dg-p) !important; color: var(--dg-p-ink) !important; -webkit-text-fill-color: var(--dg-p-ink) !important; box-shadow: 0 3px 0 var(--dg-p-thick) !important; }
 /* 奥利奥：细黑线，打勾的圆点黑底白勾 */

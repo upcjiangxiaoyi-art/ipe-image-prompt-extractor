@@ -486,7 +486,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const rep2 = String(w.eval('ipeDiagReport')());
         check(/酒馆主题给按钮加的效果：[^\n]*模糊[^\n]*滤镜[^\n]*过渡[^\n]*动画/.test(rep2) && !d.querySelector('input.ipe-probe-btn'), '🩺 体检里多一行：酒馆主题给普通按钮加了什么（量完那颗探针按钮就拿掉）');
         // 2.39.0 状态行分得出成败；「常用短语」那一排下拉不再被挤扁
-        check(['ok', 'err', 'warn'].every(t => css.includes('.ipe-preview-status[data-ipe-tone="' + t + '"]')) && css.includes('--dg-err-soft') && css.includes('html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="err"]') && ['ok', 'err', 'warn'].every(t => css.includes('#ipe-drawer#ipe-drawer [data-ipe-tone="' + t + '"]')), '状态行按 ok / err / warn 各有样子，九套皮肤和抽屉都有');
+        check(['ok', 'err', 'warn'].every(t => css.includes('.ipe-preview-status[data-ipe-tone="' + t + '"]')) && css.includes('--dg-err-soft') && css.includes('html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="err"]') && ['ok', 'err', 'warn'].every(t => css.includes('#ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="' + t + '"]')), '状态行按 ok / err / warn 各有样子，九套皮肤和抽屉都有');
         w.eval('setStatus')('失败: x', '#d4726a');
         check(d.querySelector('#iped-status').getAttribute('data-ipe-tone') === 'err' && d.querySelector('#ipe-status').getAttribute('data-ipe-tone') === 'err', '抽屉和浮窗的状态行一起标上');
         check(css.includes('#ipe-supp-presets { flex: 1 1 100%') && css.includes('#iped-supp-presets { flex: 1 1 100%') && d.querySelector('#ipe-supp-presets').parentElement === d.querySelector('#ipe-supp-save').parentElement, '「常用短语」下拉自己占一整行，「存为常用」「删」排在下面（还在同一组里）');
@@ -525,7 +525,11 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(d.querySelector('#iped-auto-inject').checked && d.querySelector('#ipe-auto-inject').checked && w.eval('cfg().autoInject') === true && g44.querySelector('[data-step="auto"]').classList.contains('ipe-guide-done') && p44.querySelector('[data-step="auto"]').classList.contains('ipe-guide-done'), '在抽屉里点第 ③ 步「打开」：两边的自动注入开关都打开，两张卡一起打勾');
         g44.querySelector('.ipe-guide-close').click();
         check(g44.style.display === 'none' && p44.style.display === 'none' && w.eval('cfg().guideState') === 'done', '点 ×：两张一起关掉');
-        check(css.includes('.ipe-guide-step { padding-right: var(--ipe-thumb); }') && css.includes(':is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide {'), '引导卡的样式小面板、抽屉共用一份；小面板里按钮不伸进拇指滑动道');
+        check(css.includes('html:not(#_) body #ipe-panel#ipe-panel .ipe-guide-step { padding-right: var(--ipe-thumb); }') && css.includes(':is(html #ipe-panel#ipe-panel, html body:not(#_) #ipe-drawer#ipe-drawer) .ipe-guide {'), '引导卡的样式小面板、抽屉共用一份；小面板里按钮不伸进拇指滑动道');
+        // 2.45.0 样式表清掉了从没生效的旧规则（一直被后面的做工层盖住的那些）：清掉的不能回来，活着的各层都还在
+        check(css.length < 172000, '样式表瘦下来了（原来 18.9 万字，清掉约 2.8 万）：现在 ' + css.length + ' 字');
+        check(['html #ipe-panel.ipe-beach .ipe-btn {', '#ipe-panel .ipe-toggle-slider::before {', '#ipe-drawer#ipe-drawer [data-ipe-tone="ok"]', 'html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"]:checked {', 'html #ipe-panel#ipe-panel .ipe-undo-row .ipe-btn.ipe-undo-item'].every(x => !css.includes(x)), '被做工层盖住、从没生效过的旧规则清掉了（各皮肤旧的按钮 / 开关 / 抽屉开关那些）');
+        check(['2.37.0 八套皮肤共用一套「贴纸」做工', '2.43.0 抽屉（酒馆「扩展」页里那一份）也用上同一套做工', 'html #ipe-panel#ipe-panel .ipe-btn {', '@media (max-width: 480px)', '@media (prefers-reduced-motion: reduce)', '@keyframes ipe-card-flash', '.ipe-notice[class*="ipe-skin-"].ipe-notice-error'].every(x => css.includes(x)) && (css.match(/@keyframes /g) || []).length === 17 && (css.match(/@media /g) || []).length === 10, '活着的都在：两层做工、媒体查询 10 处、动画 17 个、名字是运行时拼出来的通知卡规则');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
