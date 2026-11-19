@@ -263,7 +263,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         // 2.37.0 八套皮肤共用一套「贴纸」做工：形状规则只有一份，颜色走变量，每套皮肤各配一组（2.36.0 的打磨层并进来了）
         const skinSel = ['', '.ipe-mist', '.ipe-apricot', '.ipe-jade', '.ipe-beach', '.ipe-pearl', '.ipe-lemon', '.ipe-dango', '.ipe-oreo'];
         check(css.includes('2.37.0 八套皮肤共用一套「贴纸」做工') && !css.includes('2.36.0 七套老皮肤的细节打磨') && !css.includes('html #ipe-panel.ipe-mist.ipe-dango '), '样式表里是共用做工层，旧的打磨层和草莓团子专用的面板规则都并掉了');
-        check(skinSel.every(k => css.includes('html #ipe-panel' + k + ' { --ipe-sw-')) && skinSel.every(k => new RegExp('html #ipe-panel' + k.replace('.', '\\.') + ' \\{\\s+--dg-a: ').test(css)) && (css.match(/--dg-bullet: "/g) || []).length === 9, '九套皮肤各有一组自己的颜色（--dg-*）、开关颜色（--ipe-sw-*）和一个小标记');
+        const palSel = k => k ? 'html #ipe-panel' + k + ', html body.ipe-skin-' + k.slice(5) + ' #ipe-drawer {' : 'html #ipe-panel, html #ipe-drawer {';   // 2.43.0 起这组颜色抽屉也用，选择器里多了抽屉
+        check(skinSel.every(k => css.includes(palSel(k) + ' --ipe-sw-')) && skinSel.every(k => new RegExp(palSel(k).replace(/[.#{]/g, '\\$&') + '\\s+--dg-a: ').test(css)) && (css.match(/--dg-bullet: "/g) || []).length === 9, '九套皮肤各有一组自己的颜色（--dg-*）、开关颜色（--ipe-sw-*）和一个小标记');
         check(css.includes('html #ipe-panel#ipe-panel .ipe-toggle { width: 38px') && /html #ipe-panel#ipe-panel \.ipe-section-body input\[type="checkbox"\] \{\s+width: 38px/.test(css), '总开关和小开关同一个尺寸（38×22）');
         check(css.includes('html #ipe-panel#ipe-panel .ipe-zoom-btn') && css.includes('.ipe-zoom-wrap > textarea { padding-right: 38px') && css.includes('html #ipe-panel#ipe-panel .ipe-panel-header::after') && css.includes('-webkit-mask: radial-gradient'), '⤢ 是小圆钮、文字给它让位；标题栏花边用遮罩切，什么底色都接得上');
         check(['mist', 'apricot', 'jade', 'beach', 'pearl', 'lemon', 'dango', 'oreo'].every(k => css.includes(':is(.ipe-zoom-overlay, .ipe-notice).ipe-skin-' + k + ' { --o-rim')) && css.includes(':is(.ipe-zoom-overlay, .ipe-notice) { --o-rim'), '放大编辑框、通知卡：八套各有一组颜色（月潮是默认那组）');
@@ -271,7 +272,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         tt.click();
         check(settings.mistTheme === true && settings.oreoTheme === true && settings.dangoTheme === false && panel.classList.contains('ipe-mist') && panel.classList.contains('ipe-oreo') && !panel.classList.contains('ipe-dango') && d.body.classList.contains('ipe-skin-oreo') && !d.body.classList.contains('ipe-skin-dango'), '奥利奥 = 浅色皮 + ipe-oreo，草莓团子标记清掉');
         check(tt.title.indexOf('奥利奥') >= 0 && capD.querySelectorAll('svg > g.ipe-cap-oreo rect').length === 3 && capD.querySelector('svg > g.ipe-cap-oreo').style.display === 'none' && String(capD.style.getPropertyValue('filter')).indexOf('1.5px 1.5px 0') >= 0, '浮标里有一块奥利奥（两片黑饼干夹白奶油，平时藏着），投影换成偏右下的实心黑影');
-        check(css.includes('html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-oreo') && css.includes('ipe-cap-pulse-oreo') && css.includes('ipe-cap-ledger-pulse-oreo') && /html #ipe-panel\.ipe-oreo \{\s+--dg-a: #111111/.test(css) && css.includes('--dg-head-ink: #ffffff'), '样式里有奥利奥的黑白配色、黑底白字的标题栏、浮标和忙碌脉冲');
+        check(css.includes('html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry svg > g.ipe-cap-oreo') && css.includes('ipe-cap-pulse-oreo') && css.includes('ipe-cap-ledger-pulse-oreo') && /html #ipe-panel\.ipe-oreo, html body\.ipe-skin-oreo #ipe-drawer \{\s+--dg-a: #111111/.test(css) && css.includes('--dg-head-ink: #ffffff'), '样式里有奥利奥的黑白配色、黑底白字的标题栏、浮标和忙碌脉冲');
         tt.click();
         check(settings.mistTheme === false && settings.oreoTheme === false && settings.dangoTheme === false && settings.lemonTheme === false && settings.pearlTheme === false && !panel.classList.contains('ipe-oreo') && !panel.classList.contains('ipe-dango') && !panel.classList.contains('ipe-lemon') && !panel.classList.contains('ipe-mist'), '奥利奥再点一下回到月潮');
         check(!d.body.classList.contains('ipe-skin-mist') && !d.body.classList.contains('ipe-skin-lemon') && !d.body.classList.contains('ipe-skin-dango') && !d.body.classList.contains('ipe-skin-oreo'), '月潮：body 上没有任何 ipe-skin-* 类');
@@ -504,6 +505,17 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         d.querySelector('#iped-undo-row .ipe-undo-item').click();
         check(d.querySelector('#iped-preview-text').value === 'undo take one' && d.querySelector('#ipe-preview-text').value === 'undo take one' && d.querySelector('#ipe-undo-row .ipe-undo-item').textContent.indexOf('undo take two') >= 0, '在抽屉里点一下：两边预览框都换回去，被换下的那次排到下面');
         check(css.includes('#ipe-panel .ipe-undo-row { padding-right: var(--ipe-thumb); }'), '面板里那一排给拇指留了右边的滑动道');
+        // 2.43.0 抽屉用上小面板那套做工：颜色共用同一组变量；这一层不许出现会让 iPhone 漏画的东西
+        const D43 = 'html body:not(#_) #ipe-drawer#ipe-drawer';
+        const IPE_SKINS_9 = ['night', 'mist', 'apricot', 'jade', 'beach', 'pearl', 'lemon', 'dango', 'oreo'];
+        const blk43 = css.slice(css.indexOf('2.43.0 抽屉（酒馆「扩展」页里那一份）也用上同一套做工'));
+        check(blk43.length > 2000 && IPE_SKINS_9.every(k => k === 'night' ? css.includes('html #ipe-panel, html #ipe-drawer {') : css.includes('html #ipe-panel.ipe-' + k + ', html body.ipe-skin-' + k + ' #ipe-drawer {')), '九套皮肤那组颜色（--dg-*）抽屉和小面板共用同一处定义，不另抄一份');
+        const shared43 = k => (css.match(new RegExp('html #ipe-panel\\.ipe-' + k + ', html body\\.ipe-skin-' + k + ' #ipe-drawer \\{[^}]*--dg-a:[^}]*\\}')) || ['background'])[0];
+        check(['dango', 'oreo'].every(k => !shared43(k).includes('background') && !shared43(k).includes('color-scheme') && shared43(k).includes('--dg-bullet')), '共用的那几条里不带小面板自己的底图（团子的波点、奥利奥的网点不会铺到抽屉上）');
+        check([' .ipe-zoom-btn {', ' .inline-drawer-toggle::after {', ' .ipe-tabs {', ' :is(.ipe-organized-card, .ipe-desk-card) {', ' :is(.menu_button, input[type="button"]) {'].every(x => blk43.includes(D43 + x)), '抽屉：花边标题栏、胶囊页签、粗描边卡片、带厚度的按钮、圆的 ⤢ 都有');
+        check(!/(^|[\s;{])(transform|filter|backdrop-filter|-webkit-backdrop-filter|animation|will-change|transition)\s*:/m.test(blk43), '抽屉这一层不用位移 / 滤镜 / 模糊 / 动画 / 过渡（iPhone 上抽屉展开时这些会漏画，2.38.1）');
+        const ai43 = d.querySelector('#iped-auto-inject'), bi43 = d.querySelector('#iped-btn-inject');
+        check(blk43.includes('input[type="button"]:is([id$="-inject"]') && !blk43.includes(':is(input[id$="-inject"]') && !!ai43 && ai43.type === 'checkbox' && !ai43.matches('input[type="button"]:is([id$="-inject"])') && !!bi43 && bi43.matches('input[type="button"]:is([id$="-inject"])'), '主按钮的颜色只给真正的按钮：「自动注入」开关不再被当成主按钮涂色');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

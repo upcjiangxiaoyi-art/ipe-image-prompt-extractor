@@ -2615,19 +2615,19 @@ html body.ipe-skin-lemon:not(#_) #ipe-chat-quick-entry.processing::after { backg
    ============================================================ */
 
 /* ---- 开关颜色：各用各皮肤总开关原来的那一套 ---- */
-html #ipe-panel { --ipe-sw-off: rgba(93,114,137,.30); --ipe-sw-knob: #dce8ef; --ipe-sw-on: linear-gradient(90deg,#6478aa,#778fc0 52%,#72a7bc); --ipe-sw-knob-on: #d8c79f; --ipe-sw-edge-on: rgba(132,156,207,.55); }
-html #ipe-panel.ipe-mist { --ipe-sw-off: rgba(92,121,150,.17); --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#7d9fc9,#9589c5); --ipe-sw-knob-on: #fff8e8; --ipe-sw-edge-on: rgba(126,137,193,.42); }
-html #ipe-panel.ipe-apricot { --ipe-sw-on: #959e96; --ipe-sw-edge-on: rgba(149,158,150,.60); }
-html #ipe-panel.ipe-jade { --ipe-sw-on: #488883; --ipe-sw-edge-on: rgba(72,136,131,.60); }
-html #ipe-panel.ipe-beach { --ipe-sw-off: rgba(232,178,198,.55); --ipe-sw-on: rgba(114,177,207,.65); --ipe-sw-knob-on: #0091bd; --ipe-sw-edge-on: rgba(0,145,189,.35); }
-html #ipe-panel.ipe-pearl { --ipe-sw-off: rgba(201,208,216,.80); --ipe-sw-knob: #fffdfa; --ipe-sw-on: rgba(111,127,146,.70); --ipe-sw-knob-on: #f6f2d8; --ipe-sw-edge-on: rgba(111,127,146,.50); }
-html #ipe-panel.ipe-lemon { --ipe-sw-off: rgba(175,197,230,.55); --ipe-sw-on: #8fabdc; --ipe-sw-knob-on: #f7ea5e; --ipe-sw-edge-on: rgba(127,157,214,.70); }
-html #ipe-panel.ipe-oreo { --ipe-sw-off: #e2e2e2; --ipe-sw-knob: #ffffff; --ipe-sw-on: #111111; --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #111111; }
-html #ipe-panel.ipe-dango { --ipe-sw-off: #EADFE4; --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#74D0AE,#A6E3CB); --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #6CCBA8; }
+html #ipe-panel, html #ipe-drawer { --ipe-sw-off: rgba(93,114,137,.30); --ipe-sw-knob: #dce8ef; --ipe-sw-on: linear-gradient(90deg,#6478aa,#778fc0 52%,#72a7bc); --ipe-sw-knob-on: #d8c79f; --ipe-sw-edge-on: rgba(132,156,207,.55); }
+html #ipe-panel.ipe-mist, html body.ipe-skin-mist #ipe-drawer { --ipe-sw-off: rgba(92,121,150,.17); --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#7d9fc9,#9589c5); --ipe-sw-knob-on: #fff8e8; --ipe-sw-edge-on: rgba(126,137,193,.42); }
+html #ipe-panel.ipe-apricot, html body.ipe-skin-apricot #ipe-drawer { --ipe-sw-on: #959e96; --ipe-sw-edge-on: rgba(149,158,150,.60); }
+html #ipe-panel.ipe-jade, html body.ipe-skin-jade #ipe-drawer { --ipe-sw-on: #488883; --ipe-sw-edge-on: rgba(72,136,131,.60); }
+html #ipe-panel.ipe-beach, html body.ipe-skin-beach #ipe-drawer { --ipe-sw-off: rgba(232,178,198,.55); --ipe-sw-on: rgba(114,177,207,.65); --ipe-sw-knob-on: #0091bd; --ipe-sw-edge-on: rgba(0,145,189,.35); }
+html #ipe-panel.ipe-pearl, html body.ipe-skin-pearl #ipe-drawer { --ipe-sw-off: rgba(201,208,216,.80); --ipe-sw-knob: #fffdfa; --ipe-sw-on: rgba(111,127,146,.70); --ipe-sw-knob-on: #f6f2d8; --ipe-sw-edge-on: rgba(111,127,146,.50); }
+html #ipe-panel.ipe-lemon, html body.ipe-skin-lemon #ipe-drawer { --ipe-sw-off: rgba(175,197,230,.55); --ipe-sw-on: #8fabdc; --ipe-sw-knob-on: #f7ea5e; --ipe-sw-edge-on: rgba(127,157,214,.70); }
+html #ipe-panel.ipe-oreo, html body.ipe-skin-oreo #ipe-drawer { --ipe-sw-off: #e2e2e2; --ipe-sw-knob: #ffffff; --ipe-sw-on: #111111; --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #111111; }
+html #ipe-panel.ipe-dango, html body.ipe-skin-dango #ipe-drawer { --ipe-sw-off: #EADFE4; --ipe-sw-knob: #ffffff; --ipe-sw-on: linear-gradient(90deg,#74D0AE,#A6E3CB); --ipe-sw-knob-on: #ffffff; --ipe-sw-edge-on: #6CCBA8; }
 
 /* ---- 每套皮肤的一组颜色 ---- */
 /* 🌙 月潮（唯一的深色）：深海蓝的卡，青蓝的边，星星做标记 */
-html #ipe-panel {
+html #ipe-panel, html #ipe-drawer {
     --dg-a: #86c4dc; --dg-a-line: #2c5a78; --dg-a-soft: #173a54;
     --dg-b: #a79be0; --dg-b-line: #414a80; --dg-b-soft: #1d2a4c;
     --dg-c: #d8c79f; --dg-c-soft: #2a3542;
@@ -2644,7 +2644,7 @@ html #ipe-panel {
     --dg-bullet: "✦";
 }
 /* ☀️ 海雾：天蓝 + 暖沙 */
-html #ipe-panel.ipe-mist {
+html #ipe-panel.ipe-mist, html body.ipe-skin-mist #ipe-drawer {
     --dg-a: #6fa8cc; --dg-a-line: #bfd9ea; --dg-a-soft: #e8f2f9;
     --dg-b: #c7a35e; --dg-b-line: #ecdcb4; --dg-b-soft: #faf4e2;
     --dg-c: #d8d2f0; --dg-c-soft: #f2f0fb;
@@ -2660,7 +2660,7 @@ html #ipe-panel.ipe-mist {
     --dg-bullet: "✧";
 }
 /* 🌅 杏岸：奶杏 + 鼠尾草绿 */
-html #ipe-panel.ipe-apricot {
+html #ipe-panel.ipe-apricot, html body.ipe-skin-apricot #ipe-drawer {
     --dg-a: #c98f74; --dg-a-line: #edd3c4; --dg-a-soft: #fbf0e8;
     --dg-b: #7b8c80; --dg-b-line: #cfd8cf; --dg-b-soft: #eef2ee;
     --dg-c: #ecdcc2; --dg-c-soft: #faf4ea;
@@ -2675,7 +2675,7 @@ html #ipe-panel.ipe-apricot {
     --dg-bullet: "❀";
 }
 /* 🌊 碧岸：浅碧 + 粉沙 */
-html #ipe-panel.ipe-jade {
+html #ipe-panel.ipe-jade, html body.ipe-skin-jade #ipe-drawer {
     --dg-a: #488883; --dg-a-line: #b9d8ce; --dg-a-soft: #e9f5f0;
     --dg-b: #b79080; --dg-b-line: #ead3c8; --dg-b-soft: #faf0ea;
     --dg-c: #d1e5db; --dg-c-soft: #f1f8f4;
@@ -2690,7 +2690,7 @@ html #ipe-panel.ipe-jade {
     --dg-bullet: "❖";
 }
 /* 🏝️ 粉蓝海滩：海蓝 + 浅粉 */
-html #ipe-panel.ipe-beach {
+html #ipe-panel.ipe-beach, html body.ipe-skin-beach #ipe-drawer {
     --dg-a: #3d93b8; --dg-a-line: #b5d8ea; --dg-a-soft: #e7f3fa;
     --dg-b: #d07fa8; --dg-b-line: #f1cfdd; --dg-b-soft: #fcedf3;
     --dg-c: #e3c6e6; --dg-c-soft: #f8eef9;
@@ -2705,7 +2705,7 @@ html #ipe-panel.ipe-beach {
     --dg-bullet: "♡";
 }
 /* 🐚 珠光海螺：风暴蓝 + 月漾奶黄 */
-html #ipe-panel.ipe-pearl {
+html #ipe-panel.ipe-pearl, html body.ipe-skin-pearl #ipe-drawer {
     --dg-a: #6f7f92; --dg-a-line: #c6ced8; --dg-a-soft: #eef1f4;
     --dg-b: #b8a868; --dg-b-line: #ece5c4; --dg-b-soft: #faf7e6;
     --dg-c: #d5dae1; --dg-c-soft: #f3f4f6;
@@ -2720,7 +2720,7 @@ html #ipe-panel.ipe-pearl {
     --dg-bullet: "◇";
 }
 /* 🍋 柠檬海滩：长春花蓝 + 樱花粉，主按钮柠檬黄 */
-html #ipe-panel.ipe-lemon {
+html #ipe-panel.ipe-lemon, html body.ipe-skin-lemon #ipe-drawer {
     --dg-a: #7f9dd6; --dg-a-line: #c6d6f0; --dg-a-soft: #edf2fb;
     --dg-b: #e58bb2; --dg-b-line: #f8d0e1; --dg-b-soft: #fdeef5;
     --dg-c: #f6ec8c; --dg-c-soft: #fdfad9;
@@ -2735,7 +2735,7 @@ html #ipe-panel.ipe-lemon {
     --dg-bullet: "✽";
 }
 /* 🍡 草莓团子：草莓奶粉 + 薄荷绿 + 奶黄，奶油底加波点 */
-html #ipe-panel.ipe-dango {
+html #ipe-panel.ipe-dango, html body.ipe-skin-dango #ipe-drawer {
     --dg-a: #FF8FAB; --dg-a-line: #FFD0DC; --dg-a-soft: #FFE6ED;
     --dg-b: #6CCBA8; --dg-b-line: #C6EDDD; --dg-b-soft: #EAF8F1;
     --dg-c: #FFE7A0; --dg-c-soft: #FFF6D6;
@@ -2749,6 +2749,8 @@ html #ipe-panel.ipe-dango {
     --dg-p: linear-gradient(180deg, #FFCBD8, #FFAAC1); --dg-p-edge: #FF9DB7; --dg-p-thick: #F58CA9; --dg-p-ink: #8A3B58;
     --dg-sw-main: linear-gradient(90deg, #FF9DB8, #FFB9A6); --dg-sw-main-edge: #FF93B0;
     --dg-bullet: "✿";
+}
+html #ipe-panel.ipe-dango {
     --ipe-ui-ink: #6A5560; --ipe-ui-muted: #937D89; --ipe-ui-faint: #B9A7B0;
     --ipe-ui-line: #FFE6ED; --ipe-ui-line-strong: #FFD0DC;
     --ipe-ui-card: #ffffff; --ipe-ui-card-strong: #ffffff; --ipe-ui-field: #ffffff;
@@ -2762,7 +2764,7 @@ html #ipe-panel.ipe-dango {
 }
 /* 🍪 奥利奥（2.38.0）：黑白两色，给喜欢极简的人。白底黑字、黑描边、黑色的厚度，像漫画的勾线；
    标题栏和页脚是两片黑饼干，中间夹着白的；底上一层很淡的网点（漫画里的网点纸），越往下越明显 */
-html #ipe-panel.ipe-oreo {
+html #ipe-panel.ipe-oreo, html body.ipe-skin-oreo #ipe-drawer {
     --dg-a: #111111; --dg-a-line: #111111; --dg-a-soft: #dcdcdc;
     --dg-b: #111111; --dg-b-line: #111111; --dg-b-soft: #f3f3f3;
     --dg-c: #111111; --dg-c-soft: #eeeeee;
@@ -2777,6 +2779,8 @@ html #ipe-panel.ipe-oreo {
     --dg-sw-main: #111111; --dg-sw-main-edge: #111111;
     --dg-foot: #111111;
     --dg-bullet: "●";
+}
+html #ipe-panel.ipe-oreo {
     --ipe-ui-ink: #111111; --ipe-ui-muted: #4a4a4a; --ipe-ui-faint: #8c8c8c;
     --ipe-ui-line: #dcdcdc; --ipe-ui-line-strong: #111111;
     --ipe-ui-card: #ffffff; --ipe-ui-card-strong: #ffffff; --ipe-ui-field: #ffffff;
@@ -3352,8 +3356,8 @@ html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.processing::after { backgr
    状态行：index.js 把原来的颜色翻成 data-ipe-tone = ok / err / warn（空闲不带）。
    前面一个小圆点像红绿灯，底色和字色跟着变；出错的字加粗。月潮是深色的一组，奥利奥只有黑白：出错反白。
    ============================================================ */
-html #ipe-panel { --dg-ok: #8fe0a8; --dg-ok-soft: #153a2a; --dg-err: #ffa0aa; --dg-err-soft: #46202b; --dg-warn: #f0cf7a; --dg-warn-soft: #3d3216; }
-html #ipe-panel.ipe-mist { --dg-ok: #2f7d46; --dg-ok-soft: #e4f5e9; --dg-err: #b23b3b; --dg-err-soft: #fde6e6; --dg-warn: #8a6510; --dg-warn-soft: #fff2d2; }
+html #ipe-panel, html #ipe-drawer { --dg-ok: #8fe0a8; --dg-ok-soft: #153a2a; --dg-err: #ffa0aa; --dg-err-soft: #46202b; --dg-warn: #f0cf7a; --dg-warn-soft: #3d3216; }
+html #ipe-panel.ipe-mist, html body.ipe-skin-mist #ipe-drawer { --dg-ok: #2f7d46; --dg-ok-soft: #e4f5e9; --dg-err: #b23b3b; --dg-err-soft: #fde6e6; --dg-warn: #8a6510; --dg-warn-soft: #fff2d2; }
 html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone]::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1.5px; }
 html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone="ok"] { background: var(--dg-ok-soft) !important; color: var(--dg-ok) !important; }
 html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone="err"] { background: var(--dg-err-soft) !important; color: var(--dg-err) !important; font-weight: 700 !important; }
@@ -3423,3 +3427,225 @@ html #ipe-panel#ipe-panel .ipe-card-flash { animation: ipe-card-flash 1.5s ease 
 #ipe-panel .ipe-undo-row { padding-right: var(--ipe-thumb); }
 html #ipe-panel#ipe-panel .ipe-undo-row .ipe-undo-title { margin: 0 0 6px; }
 html #ipe-panel#ipe-panel .ipe-undo-row .ipe-btn.ipe-undo-item { font-weight: 500; font-size: 12.5px; min-height: 36px; padding: 7px 14px; }
+
+/* ============================================================
+   2.43.0 抽屉（酒馆「扩展」页里那一份）也用上同一套做工
+   2.37.0 那套「贴纸」做工只给了点浮标出来的小面板，抽屉还停在更早的样子：细线卡片、扁按钮、
+   主按钮不管哪套皮肤都是紫蓝渐变、⤢ 是一块灰方块。这里把同一套做工搬过来：
+   粗描边带厚度的卡片和按钮、花边标题栏、胶囊页签、标题前的小标记、圆的 ⤢、主按钮用各皮肤自己的主色。
+   颜色不另抄一份：上面每套皮肤那组 --dg-* 的选择器里加上了抽屉，两边用的是同一组变量。
+   抽屉各皮肤原来的渐变底不动。
+   iPhone 上抽屉展开那一下，带模糊 / 滤镜 / 动画 / 位移的东西会漏画（2.38.1）：这一层一样都不用，按下去只收厚度、不位移。
+   选择器里 :not(#_) 加两遍 #ipe-drawer 是为了压过前面所有抽屉规则。
+   ============================================================ */
+html body:not(#_) #ipe-drawer#ipe-drawer { color: var(--dg-ink) !important; font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(button, input, select, textarea, summary, label, h3, small, b) { font-family: inherit !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer > .inline-drawer {
+    border: 2px solid var(--dg-a-line) !important;
+    border-radius: 22px !important;
+    box-shadow: 0 4px 0 var(--dg-a-line) !important;
+    overflow: hidden !important;
+}
+/* ---- 标题栏：各皮肤自己的渐变，下沿一排花边 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-toggle {
+    position: relative !important;
+    z-index: 1;
+    padding: 12px 14px 12px 16px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--dg-head) !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-toggle::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: calc(100% - 1px);
+    height: 9px;
+    background: var(--dg-head);
+    -webkit-mask: radial-gradient(circle at 9px 0, #000 8.6px, transparent 9.1px) 0 0 / 18px 9px repeat-x;
+    mask: radial-gradient(circle at 9px 0, #000 8.6px, transparent 9.1px) 0 0 / 18px 9px repeat-x;
+    pointer-events: none;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-toggle b { color: var(--dg-head-ink, var(--dg-ink)) !important; -webkit-text-fill-color: var(--dg-head-ink, var(--dg-ink)) !important; font-weight: 800 !important; letter-spacing: .05em !important; text-shadow: var(--dg-title-shadow) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-toggle b::after { content: var(--dg-bullet) " IMAGE PROMPT EXTRACTOR " var(--dg-bullet) !important; color: var(--dg-sub) !important; -webkit-text-fill-color: var(--dg-sub) !important; font-weight: 700 !important; letter-spacing: .2em !important; text-shadow: none !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-icon { color: var(--dg-head-ink, var(--dg-ink)) !important; opacity: .8 !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content { padding-top: 20px !important; color: var(--dg-ink) !important; }
+
+/* ---- 页签：一颗长胶囊，选中的那半垫起来 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tabs {
+    gap: 5px !important;
+    padding: 5px !important;
+    border: 2px solid var(--dg-rim) !important;
+    border-radius: 999px !important;
+    background: var(--dg-tabs) !important;
+    box-shadow: 0 3px 0 var(--dg-a-line) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tab {
+    min-height: 36px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: transparent !important;
+    color: var(--dg-muted) !important; -webkit-text-fill-color: var(--dg-muted) !important;
+    box-shadow: none !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tab::before { font-size: 13px !important; font-weight: 700 !important; letter-spacing: .12em; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on {
+    border: 0 !important;
+    background: var(--dg-tab-on) !important;
+    color: var(--dg-tab-ink) !important; -webkit-text-fill-color: var(--dg-tab-ink) !important;
+    box-shadow: 0 2.5px 0 var(--dg-a) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on[data-ipe-tabbtn="image"]::before { content: var(--dg-bullet) " 生图"; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on[data-ipe-tabbtn="ledger"]::before { content: var(--dg-bullet) " 挂账"; }
+/* 页签、体检那一条、两页内容外面原来各套着一层细线框：卡片自己有边了，外面这层拿掉 */
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content > [data-ipe-tab] { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+/* 页签下面放「🩺 体检」的那一条：不要自己的壳 */
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content > div:has(> #iped-diag-open) { padding: 2px 2px 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
+
+/* ---- 大卡片：粗描边、一道厚度；主色副色相间 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-organized-card, .ipe-desk-card) {
+    --dg-edge: var(--dg-a-line);
+    --dg-edge-soft: var(--dg-a-soft);
+    --dg-mark: var(--dg-a);
+    margin: 12px 0 !important;
+    border: 2px solid var(--dg-edge) !important;
+    border-radius: 20px !important;
+    background: var(--dg-card) !important;
+    box-shadow: 0 4px 0 var(--dg-edge) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer [data-ipe-tab] > .ipe-organized-card:nth-of-type(even),
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-card:is(.ipe-desk-record, .ipe-desk-tools) {
+    --dg-edge: var(--dg-b-line);
+    --dg-edge-soft: var(--dg-b-soft);
+    --dg-mark: var(--dg-b);
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card:not([open]) { box-shadow: 0 3px 0 var(--dg-edge) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card > summary { min-height: 44px !important; padding: 11px 14px !important; color: var(--dg-ink) !important; font-size: 13px !important; font-weight: 700 !important; letter-spacing: .06em !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card:not([open]) > summary { color: var(--dg-muted) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card > summary::before,
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-card > h3::before { content: var(--dg-bullet); margin-right: 7px; color: var(--dg-mark); font-size: 12px; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card[open] > summary { border-bottom: 2px dashed var(--dg-edge-soft) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card > .ipe-fold-body { padding: 12px 11px 14px !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-card > h3 { padding: 14px 15px 0 !important; color: var(--dg-ink) !important; font-size: 13.5px !important; font-weight: 800 !important; letter-spacing: .08em !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-content { gap: 9px !important; padding: 10px 13px 15px !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > h3 { margin: 20px 6px 8px !important; color: var(--dg-faint) !important; font-size: 11px !important; font-weight: 700 !important; letter-spacing: .2em !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-overview { padding: 0 !important; background: transparent !important; }
+
+/* ---- 小折叠卡（卡片里面的、挂账页「规则与连接」下面的）：点缀色细一号，没有厚度 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-fold:not(.ipe-organized-card),
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card,
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold {
+    margin: 9px 0 !important;
+    border: 2px solid var(--dg-c-soft) !important;
+    border-radius: 16px !important;
+    background: var(--dg-fold) !important;
+    box-shadow: none !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-fold:not(.ipe-organized-card)[open],
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card[open],
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold[open] { border-color: var(--dg-c) !important; background: var(--dg-card) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-fold:not(.ipe-organized-card) > summary,
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card > summary,
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold > summary { min-height: 40px !important; padding: 9px 13px !important; color: var(--dg-muted) !important; font-size: 12px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-fold:not(.ipe-organized-card)[open] > summary,
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card[open] > summary,
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold[open] > summary { border-bottom: 2px dashed var(--dg-c-soft) !important; color: var(--dg-ink) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card > summary::before,
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold > summary::before { content: none; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-ledger-age, .ipe-anchor-guide) { border: 2px solid var(--dg-b-soft) !important; border-radius: 14px !important; background: var(--dg-fold) !important; color: var(--dg-muted) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-anchor-guide-title { color: var(--dg-ink) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer hr { border: 0 !important; border-top: 2px dashed var(--dg-a-soft) !important; background: none !important; }
+
+/* ---- 开关那一栏：副色的虚线小盒 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-switch-row { padding: 10px 8px !important; border: 2px dashed var(--dg-b-line) !important; border-radius: 16px !important; background: var(--dg-b-soft) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-switch-row label { color: var(--dg-ink) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer input[type="checkbox"] {
+    border: 1.5px solid var(--dg-a-line) !important;
+    background: radial-gradient(circle at 9px 50%, var(--ipe-sw-knob) 0 6px, transparent 6.6px), var(--ipe-sw-off) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer input[type="checkbox"]:checked {
+    border-color: var(--ipe-sw-edge-on) !important;
+    background: radial-gradient(circle at calc(100% - 9px) 50%, var(--ipe-sw-knob-on) 0 6px, transparent 6.6px), var(--ipe-sw-on) !important;
+}
+
+/* ---- 输入框（只改底色，不动 background 里别的：酒馆主题画的下拉箭头留着） ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="password"], input[type="number"], input.text_pole, select, textarea) {
+    border: 2px solid var(--dg-a-soft) !important;
+    border-radius: 14px !important;
+    background-color: var(--dg-field) !important;
+    color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink) !important;
+    box-shadow: none !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="password"], input[type="number"], input.text_pole, select, textarea):focus { border-color: var(--dg-a) !important; box-shadow: 0 0 0 3px var(--dg-a-soft) !important; outline: none !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content ::placeholder { color: var(--dg-faint) !important; -webkit-text-fill-color: var(--dg-faint) !important; opacity: .75; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content label { color: var(--dg-muted) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content :is(small, .ipe-hint, [style*="color:#888"]) { color: var(--dg-faint) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-zoom-wrap > textarea { padding-right: 38px !important; }
+
+/* 主按钮只认真正的按钮：「自动注入」那个开关的 id 也以 -inject 结尾，以前被当成主按钮涂了色、圆钮都看不见 */
+/* ---- 按钮：一道厚度；按下去只收厚度，不位移 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.menu_button, input[type="button"]) {
+    min-height: 36px !important;
+    padding: 6px 12px !important;
+    border: 2px solid var(--dg-a-line) !important;
+    border-radius: 999px !important;
+    background: var(--dg-card) !important;
+    color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    text-shadow: none !important;
+    box-shadow: 0 3px 0 var(--dg-a-line) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.menu_button, input[type="button"]):hover:not(:disabled) { border-color: var(--dg-a) !important; background: var(--dg-a-soft) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.menu_button, input[type="button"]):active:not(:disabled) { box-shadow: 0 1px 0 var(--dg-a-line) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer input[type="button"]:is([id$="-inject"], [id$="-save"], [id$="-save-now"], [id$="-run"], [id$="-adopt"]) {
+    border-color: var(--dg-p-edge) !important;
+    background: var(--dg-p) !important;
+    color: var(--dg-p-ink) !important; -webkit-text-fill-color: var(--dg-p-ink) !important;
+    box-shadow: 0 3px 0 var(--dg-p-thick) !important;
+}
+html body:not(#_) #ipe-drawer#ipe-drawer input[type="button"]:is([id$="-inject"], [id$="-save"], [id$="-save-now"], [id$="-run"], [id$="-adopt"]):hover:not(:disabled) { border-color: var(--dg-p-thick) !important; background: var(--dg-p) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer input[type="button"]:is([id$="-inject"], [id$="-save"], [id$="-save-now"], [id$="-run"], [id$="-adopt"]):active:not(:disabled) { box-shadow: 0 1px 0 var(--dg-p-thick) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(.menu_button, input[type="button"]):disabled { opacity: .5 !important; box-shadow: none !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-btn-grid { gap: 10px 8px !important; }
+/* ⤢：小圆钮 */
+html body:not(#_) #ipe-drawer#ipe-drawer .ipe-zoom-btn {
+    top: 7px !important; right: 8px !important;
+    width: 24px !important; min-width: 24px !important; height: 24px !important; min-height: 0 !important; line-height: 19px !important;
+    padding: 0 !important;
+    border: 2px solid var(--dg-a-line) !important;
+    border-radius: 50% !important;
+    background: var(--dg-card) !important;
+    color: var(--dg-a) !important; -webkit-text-fill-color: var(--dg-a) !important;
+    font-size: 12px !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+}
+
+/* ---- 状态行：小纸条；成败的底色字色跟小面板一样 ---- */
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"]) { padding: 7px 12px !important; border-radius: 12px !important; background: var(--dg-c-soft) !important; color: var(--dg-muted) !important; -webkit-text-fill-color: currentColor !important; line-height: 1.55 !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"]):empty { display: none !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone]::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1.5px; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="ok"] { background: var(--dg-ok-soft) !important; color: var(--dg-ok) !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="err"] { background: var(--dg-err-soft) !important; color: var(--dg-err) !important; font-weight: 700 !important; }
+html body:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="warn"] { background: var(--dg-warn-soft) !important; color: var(--dg-warn) !important; }
+
+/* ---- 奥利奥自己的：细黑线、选中页签的厚度用灰的、状态行黑白 ---- */
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on { box-shadow: 0 2.5px 0 #7a7a7a !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="password"], input[type="number"], input.text_pole, select, textarea) { border: 1.5px solid #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .inline-drawer-content :is(input[type="text"], input[type="password"], input[type="number"], input.text_pole, select, textarea):focus { box-shadow: 3px 3px 0 #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(.menu_button, input[type="button"]):hover:not(:disabled) { background: #f3f3f3 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer input[type="button"]:is([id$="-inject"], [id$="-save"], [id$="-save-now"], [id$="-run"], [id$="-adopt"]):hover:not(:disabled) { background: #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .ipe-organized-card[open] > summary { border-bottom: 1.5px solid #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .ipe-fold:not(.ipe-organized-card),
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-fold-body, .ipe-desk-content) .ipe-organized-card,
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer .ipe-desk-settings > .ipe-fold { border: 1.5px solid #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(.ipe-ledger-age, .ipe-anchor-guide) { border: 1.5px dashed #111111 !important; background: #ffffff !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"]) { border: 1.5px dashed #111111 !important; background: #ffffff !important; color: #111111 !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="ok"] { border-style: solid !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="err"] { border-style: solid !important; background: #111111 !important; color: #ffffff !important; }
+html body.ipe-skin-oreo:not(#_) #ipe-drawer#ipe-drawer :is(#iped-status, [id$="-ledger-status"])[data-ipe-tone="warn"] { background: #f3f3f3 !important; }
+/* ---- 草莓团子自己的：没开的开关用灰粉的边，选中页签的厚度用浅一号的粉 ---- */
+html body.ipe-skin-dango:not(#_) #ipe-drawer#ipe-drawer input[type="checkbox"]:not(:checked) { border-color: #E3D5DB !important; }
+html body.ipe-skin-dango:not(#_) #ipe-drawer#ipe-drawer .ipe-tab.ipe-tab-on { box-shadow: 0 2.5px 0 #FFB3C6 !important; }
