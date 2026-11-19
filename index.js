@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.46.0";
+var IPE_VERSION = "2.47.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -87,6 +87,7 @@ const DEFAULTS = {
     baseTemplatesJson: "",
     commonBlocksJson: "[]",        // 2.23.0 公共块：[{id,name,value}]，模板的 common 字段指向其中一份
     activeCommonBlock: "",
+    commonCardLockJson: "{}",      // 2.47.0 同上：这张卡锁定的公共块 id（"(none)" = 锁的是不挂）
     commonInUse: null,     // 2.46.0 现在挂的公共块：null = 还没定（升级后头一回载入时，按当时那个模板挂的那份定下来）/ "" = 不挂 / 公共块 id
     anchorPresetsJson: "",
     activeAnchorPreset: "anchor_1",
@@ -4317,12 +4318,16 @@ function ipeCommonMigrate() {
 }
 /* 手动换挂的那份。编辑框顺手跟过去，看到的就是挂着的 */
 function ipeSetCommonInUse(id) {
+    try { ipeCardLockSync(); } catch(eK) {}   // 2.47.0 先核卡，再记你选的（跟画风、提取规则一个规矩）
     var blk = ipeGetCommonBlock(id);
     saveCritical("commonInUse", blk ? blk.id : "");
     if (blk) saveCritical("activeCommonBlock", blk.id);
     ipeSaveNow();
     ipeRefreshCommonEditors();
-    setStatus(blk ? "公共块换成「" + blk.name + "」：以后换哪个画风都挂它，直到你再换" : "现在不挂公共块：换哪个画风都不挂，直到你再选一份", "#6ec577");
+    var lk = null; try { lk = ipeCardLockedItem("common"); } catch(eL) {}
+    var temp = lk && lk.id !== (blk ? blk.id : IPE_COMMON_NONE.id) ? "（这张卡锁的是「" + lk.name + "」，这是临时换；下次换到这张卡会切回去，想长期换点「改锁成当前这套」）" : "";
+    setStatus((blk ? "公共块换成「" + blk.name + "」：以后换哪个画风都挂它，直到你再换" : "现在不挂公共块：换哪个画风都不挂，直到你再选一份") + temp, temp ? "#c9a227" : "#6ec577");
+    try { ipeCardLockRefreshUI(); } catch(eR) {}
     return blk ? blk.id : "";
 }
 
@@ -4435,7 +4440,7 @@ function ipeRefreshCommonEditors() {
     });
     ["ipe-common-inuse-info", "iped-common-inuse-info"].forEach(function(id){
         var el = q("#" + id); if (!el) return;
-        el.textContent = (useBlk ? "现在挂着：「" + useBlk.name + "」" : "现在不挂公共块") + "。换画风不会动它，要换在「挂公共块」里选，或者在这儿点「挂这一份」。"
+        el.textContent = (useBlk ? "现在挂着：「" + useBlk.name + "」" : "现在不挂公共块") + "。换画风不会动它，要换在「挂公共块」里选，或者在这儿点「挂这一份」；想让某张卡固定用哪份，在「挂公共块」下面锁到这张卡。"
             + (item && useId !== active ? "你正在看的「" + item.name + "」只是在编辑，没换挂的。" : "");
     });
     ["ipe-common-name", "iped-common-name"].forEach(function(id){
@@ -4540,7 +4545,7 @@ function ipeRefreshAnchorLockUI() {
 }
 
 /* ============================================================
-   🔒 画风模板、挂账规则 锁到卡（2.31.0）；提取规则也接进来（2.33.0）
+   🔒 画风模板、挂账规则 锁到卡（2.31.0）；提取规则也接进来（2.33.0）；公共块也接进来（2.47.0）
    这几样选的是全局的一套：换卡得自己记着换，忘了就拿上一张卡的画风出图、拿上一张卡的规则记账。
    锁了的卡，每次换到它（换聊天、页面重新载入）自动把下拉切到锁的那套；没锁的卡照旧，下拉停在哪套就用哪套。
    跟锚点锁不一样的地方：这里下拉显示的永远就是在用的。在锁了的卡上从下拉换一套，照换（「换画风重注入」靠的就是它），
@@ -4551,18 +4556,27 @@ function ipeRefreshAnchorLockUI() {
 var IPE_CARD_LOCKS = {
     tpl:   { key: "templateCardLockJson",   what: "画风",     pre: "template" },
     rule:  { key: "ruleCardLockJson",       what: "提取规则", pre: "rule" },
-    lrule: { key: "ledgerRuleCardLockJson", what: "挂账规则", pre: "ledger-prompt" }
+    lrule: { key: "ledgerRuleCardLockJson", what: "挂账规则", pre: "ledger-prompt" },
+    common: { key: "commonCardLockJson",    what: "公共块",   pre: "template-common" }
 };
-var IPE_CARD_LOCK_KINDS = ["tpl", "rule", "lrule"];
+var IPE_CARD_LOCK_KINDS = ["tpl", "rule", "lrule", "common"];
+/* 2.47.0 公共块可以锁「不挂」（这张卡就是什么都不挂）：锁的表里空串当「没锁」用了，所以「不挂」记成这个记号 */
+var IPE_COMMON_NONE = { id: "(none)", name: "（不挂）" };
 var ipeCardLockSeen = null;    // 上一次核对时是哪张卡；null = 这个页面还没核过
 function ipeCardLockMap(kind) {
     var m = ipeSafeJsonParse(cfg()[IPE_CARD_LOCKS[kind].key], null);
     return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
 }
-function ipeCardLockList(kind) { return kind === "tpl" ? ipeGetBaseTemplates() : kind === "rule" ? ipeGetRulePresets() : ipePresetList.apply(null, LP); }
-function ipeCardLockActive(kind) { return kind === "tpl" ? ipeGetActiveTemplateItem() : kind === "rule" ? ipeGetActiveRuleItem() : ipePresetItem.apply(null, LP); }
+function ipeCardLockList(kind) { return kind === "common" ? [IPE_COMMON_NONE].concat(ipeGetCommonBlocks()) : kind === "tpl" ? ipeGetBaseTemplates() : kind === "rule" ? ipeGetRulePresets() : ipePresetList.apply(null, LP); }
+function ipeCardLockActive(kind) { return kind === "common" ? (ipeGetCommonBlock(ipeCommonInUseId()) || IPE_COMMON_NONE) : kind === "tpl" ? ipeGetActiveTemplateItem() : kind === "rule" ? ipeGetActiveRuleItem() : ipePresetItem.apply(null, LP); }
 function ipeCardLockSetActive(kind, id) {
-    if (kind === "tpl") { saveCritical("activeBaseTemplate", id); try { ipeRefreshTemplateEditors(); } catch(e) {} }
+    if (kind === "common") {   // 切过去的是「现在挂的」；编辑区顺手跟过去
+        var blkC = id === IPE_COMMON_NONE.id ? null : ipeGetCommonBlock(id);
+        saveCritical("commonInUse", blkC ? blkC.id : "");
+        if (blkC) saveCritical("activeCommonBlock", blkC.id);
+        try { ipeRefreshCommonEditors(); } catch(e0) {}
+    }
+    else if (kind === "tpl") { saveCritical("activeBaseTemplate", id); try { ipeRefreshTemplateEditors(); } catch(e) {} }
     else if (kind === "rule") { saveCritical("activeRulePreset", id); try { ipeRefreshRuleEditors(); } catch(e1) {} }
     else { saveCritical(LP[1], id); try { ipeLedgerRefreshBotEditors(); } catch(e2) {} }
 }
@@ -4634,7 +4648,8 @@ function ipeCardLockRefreshUI() {
             var e = q("#" + p + L.pre + "-lock-info"); if (e) e.textContent = txt;
             var u = q("#" + p + L.pre + "-unlock"); if (u) u.style.display = (k && lockedId) ? "" : "none";
             var b = q("#" + p + L.pre + "-lock"); if (!b) return;
-            var lbl = temp ? "🔒 改锁成当前这套" : "🔒 锁到这张卡";
+            /* 公共块的锁就在画风的锁上面一点，两排字一样容易点错：公共块那排写明是公共块 */
+            var lbl = kind === "common" ? (temp ? "🔒 公共块改锁成当前这份" : "🔒 公共块锁到这张卡") : (temp ? "🔒 改锁成当前这套" : "🔒 锁到这张卡");
             if (b.tagName === "INPUT") b.value = lbl; else b.textContent = lbl;
             b.disabled = !k;
         });
@@ -4649,13 +4664,13 @@ function ipeCardLockNote(kind) {
 
 /* ============================================================
    🃏 「这张卡」总览（2.40.0）
-   跟着卡走的东西有六样：锚点、画风、提取规则、挂账规则（这四样能锁）、本卡要点、本卡长期指令（这两样本来就按卡记）。
+   跟着卡走的东西有七样：锚点、画风、公共块、提取规则、挂账规则（这五样能锁；公共块是 2.47.0 加的）、本卡要点、本卡长期指令（这两样本来就按卡记）。
    它们散在两页六个地方，开一张新卡要挨个翻过去设。面板最上面这张小卡把六样摆在一起：
-   一眼看到这张卡现在用的是哪套、锁没锁；点名字跳到它在的地方；小锁点一下锁 / 解；一颗按钮把四样全锁上。
+   一眼看到这张卡现在用的是哪套、锁没锁；点名字跳到它在的地方；小锁点一下锁 / 解；一颗按钮把五样全锁上。
    它只是个遥控器：锁、解锁、跳转都调各自原来的函数，自己不存任何东西。
    ============================================================ */
-var IPE_CARD_OV_JUMP = { anchor: "ipe-anchor-slot", tpl: "ipe-template-slot", rule: "ipe-rule-slot", lrule: "ipe-ledger-prompt-slot", note: "ipe-ledger-note-slot", order: "ipe-card-order" };
-/* 四样能锁的各自的状态：现在用的那套、锁的那套、是不是临时换了 */
+var IPE_CARD_OV_JUMP = { anchor: "ipe-anchor-slot", tpl: "ipe-template-slot", common: "ipe-template-common", rule: "ipe-rule-slot", lrule: "ipe-ledger-prompt-slot", note: "ipe-ledger-note-slot", order: "ipe-card-order" };
+/* 五样能锁的各自的状态：现在用的那套、锁的那套、是不是临时换了 */
 function ipeCardOvState(kind) {
     if (kind === "anchor") {
         var lk = ipeAnchorLockedItem(), cur = ipeGetActiveAnchorItem() || {};
@@ -4668,7 +4683,7 @@ function ipeCardOverviewRefresh() {
     var root = q("#ipe-card-ov"); if (!root) return;
     function put(el, t) { if (el && el.textContent !== t) el.textContent = t; }   // 字没变就不写，省得白白重排
     var k = ipeAnchorCardKey(), label = ipeAnchorCardLabel() || "这张卡", n = 0, todo = 0;
-    ["anchor", "tpl", "rule", "lrule"].forEach(function(kind){
+    ["anchor", "tpl", "common", "rule", "lrule"].forEach(function(kind){
         var row = root.querySelector('[data-ov="' + kind + '"]'); if (!row) return;
         var s = { name: "", locked: false, temp: false, lockedName: "" };
         try { s = ipeCardOvState(kind); } catch(e) {}
@@ -4693,11 +4708,11 @@ function ipeCardOverviewRefresh() {
         put(ro, o ? o.length + " 字：" + (o.length > 16 ? o.slice(0, 16) + "…" : o) : "没写");
     }
     var t = q("#ipe-card-ov-title");
-    put(t, k ? "这张卡 · " + label + "　🔒 " + n + "/4" : "这张卡 · 还没打开角色卡");
+    put(t, k ? "这张卡 · " + label + "　🔒 " + n + "/5" : "这张卡 · 还没打开角色卡");
     var all = q("#ipe-card-lock-all");
     if (all) {
         all.disabled = !k || todo === 0;
-        put(all, !k ? "先打开一张角色卡的聊天" : (todo === 0 ? "🔒 四样都锁好了" : "🔒 把现在这四样全锁到这张卡"));
+        put(all, !k ? "先打开一张角色卡的聊天" : (todo === 0 ? "🔒 五样都锁好了" : "🔒 把现在这五样全锁到这张卡"));
     }
 }
 /* 跳到某个控件：切到它那一页，把外面收着的卡和折叠一层层打开，滚到眼前闪一下 */
@@ -4732,8 +4747,8 @@ function ipeCardOvToggleLock(kind) {
 function ipeCardOvLockAll() {
     var k = ipeAnchorCardKey();
     if (!k) { setStatus("先打开一张角色卡的聊天，再锁", "#d4726a"); return false; }
-    var names = { anchor: "锚点", tpl: "画风", rule: "提取规则", lrule: "挂账规则" }, said = [];
-    ["anchor", "tpl", "rule", "lrule"].forEach(function(kind){
+    var names = { anchor: "锚点", tpl: "画风", common: "公共块", rule: "提取规则", lrule: "挂账规则" }, said = [];
+    ["anchor", "tpl", "common", "rule", "lrule"].forEach(function(kind){
         try {
             var s = ipeCardOvState(kind);
             if (!s.locked || s.temp) { if (kind === "anchor") ipeAnchorLockCurrent(); else ipeCardLockCurrent(kind); }
@@ -7227,7 +7242,7 @@ function ipeDiagReport() {
         var raw = ipeGetTemplateValue() || c.baseTemplate || IPE_DEFAULT_IMAGE_TEMPLATE;   // 跟 buildInjectTag 同一个取法：预设是空的就用默认模板
         var phs = String(raw).match(IPE_IMG_TPL_PH_RE) || [];
         if (!phs.length) warn.push("画风模板「" + (it.name || "") + "」里一个占位符都没有（{Description} 之类），描述会直接接在模板后面");
-        return "「" + (it.name || "") + "」" + ipeCardLockNote("tpl") + "｜公共块：" + (blk ? "「" + (blk.name || "") + "」" : "不挂") + "｜占位符：" + (phs.length ? phs.filter(function(x, i){ return phs.indexOf(x) === i; }).join(" ") : "没有");
+        return "「" + (it.name || "") + "」" + ipeCardLockNote("tpl") + "｜公共块：" + (blk ? "「" + (blk.name || "") + "」" : "不挂") + ipeCardLockNote("common") + "｜占位符：" + (phs.length ? phs.filter(function(x, i){ return phs.indexOf(x) === i; }).join(" ") : "没有");
     });
     line("提取规则 / 系统提示", function(){ return "「" + ((ipeGetActiveRuleItem() || {}).name || "") + "」" + ipeCardLockNote("rule") + " /「" + ((ipeGetActiveSystemPromptItem() || {}).name || "") + "」"; });
     line("正文标签", function(){
@@ -8157,13 +8172,13 @@ function createPanel() {
     h += '<div class="ipe-section collapsed" id="ipe-section-card">'
        + '<button type="button" class="ipe-section-header" aria-expanded="false"><span id="ipe-card-ov-title">这张卡</span><span class="ipe-collapse-icon" aria-hidden="true">▾</span></button>'
        + '<div class="ipe-section-body"><div id="ipe-card-ov" class="ipe-card-ov">'
-       + [["anchor", "锚点", 1], ["tpl", "画风", 1], ["rule", "提取规则", 1], ["lrule", "挂账规则", 1], ["note", "本卡要点", 0], ["order", "长期指令", 0]].map(function(r){
+       + [["anchor", "锚点", 1], ["tpl", "画风", 1], ["common", "公共块", 1], ["rule", "提取规则", 1], ["lrule", "挂账规则", 1], ["note", "本卡要点", 0], ["order", "长期指令", 0]].map(function(r){
              return '<div class="ipe-card-row" data-ov="' + r[0] + '"><span class="ipe-card-k">' + r[1] + '</span>'
                   + '<button type="button" class="ipe-card-v" title="点一下跳到它在的地方"></button>'
                   + (r[2] ? '<button type="button" class="ipe-card-lock"></button>' : '') + '</div>';
          }).join("")
        + '</div>'
-       + '<div class="ipe-preview-actions"><button id="ipe-card-lock-all" class="ipe-btn ipe-btn-primary" type="button">🔒 把现在这四样全锁到这张卡</button></div>'
+       + '<div class="ipe-preview-actions"><button id="ipe-card-lock-all" class="ipe-btn ipe-btn-primary" type="button">🔒 把现在这五样全锁到这张卡</button></div>'
        + '<div class="ipe-hint">点左边的名字跳到它在的地方；小锁点一下锁上、再点解开。锁了的，以后换到这张卡自动切回来。</div>'
        + '</div></div>';
 
@@ -8196,6 +8211,11 @@ function createPanel() {
         '<label>模板名称<input type="text" id="ipe-template-name" value="" placeholder="例如：乙游CG"></label>'+
         '<label>所属分组<select id="ipe-template-group"></select></label>'+
         '<label>挂公共块（换画风不跟着变）<select id="ipe-template-common"></select></label>'+
+        '<div class="ipe-preview-actions" style="margin-top:2px">'+
+            '<button id="ipe-template-common-lock" class="ipe-btn" type="button">🔒 公共块锁到这张卡</button>'+
+            '<button id="ipe-template-common-unlock" class="ipe-btn" type="button" style="display:none">🔓 公共块解锁</button>'+
+        '</div>'+
+        '<div id="ipe-template-common-lock-info" class="ipe-hint"></div>'+
         '<div class="ipe-preview-actions" style="margin-top:2px">'+
             '<button id="ipe-template-add" class="ipe-btn" type="button">新增模板</button>'+
             '<button id="ipe-template-delete" class="ipe-btn" type="button">删除当前</button>'+
@@ -8899,6 +8919,8 @@ function createDrawer() {
     h += '<label>模板名称</label><input type="text" id="iped-template-name" class="text_pole" value="" placeholder="例如：乙游CG">';
     h += '<label>所属分组</label><select id="iped-template-group" class="text_pole"></select>';
     h += '<label>挂公共块（换画风不跟着变）</label><select id="iped-template-common" class="text_pole"></select>';
+    h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-common-lock" class="menu_button" value="🔒 公共块锁到这张卡"><input type="button" id="iped-template-common-unlock" class="menu_button" value="🔓 公共块解锁" style="display:none"></div>';
+    h += '<small id="iped-template-common-lock-info" style="color:#888"></small>';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-add" class="menu_button" value="新增模板"><input type="button" id="iped-template-delete" class="menu_button" value="删除当前"></div>';
     h += '<div style="display:flex;gap:6px;margin-top:6px"><input type="button" id="iped-template-lock" class="menu_button" value="🔒 锁到这张卡"><input type="button" id="iped-template-unlock" class="menu_button" value="🔓 解锁" style="display:none"></div>';
     h += '<small id="iped-template-lock-info" style="color:#888"></small>';

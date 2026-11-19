@@ -3548,19 +3548,19 @@ await (async () => {
     w.eval("ipeSetActiveTab")("ledger");
     ok(sec.style.display !== "none", "切到挂账页它还在");
     w.eval("ipeSetActiveTab")("image");
-    ok(title().indexOf("苑无忧") >= 0 && title().indexOf("0/4") >= 0, "标题：这张卡的名字 + 锁了几样（" + title() + "）");
+    ok(title().indexOf("苑无忧") >= 0 && title().indexOf("0/5") >= 0, "标题：这张卡的名字 + 锁了几样（" + title() + "）");
     ok(val("anchor").indexOf("苑无忧的锚点") >= 0 && val("tpl").indexOf("水墨") >= 0 && val("rule").indexOf("写实") >= 0 && val("lrule").indexOf("修仙") >= 0, "四行写着现在用的锚点、画风、提取规则、挂账规则");
     ok(val("note").indexOf("707号室") >= 0 && val("order").indexOf("没写") >= 0, "本卡要点写着这张卡选的那套；本卡长期指令没写就说没写", val("note") + " / " + val("order"));
 
     chip("tpl").click();
-    ok(locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && chip("tpl").textContent.indexOf("已锁") >= 0 && title().indexOf("1/4") >= 0, "点画风那行的小锁：锁上，标题变 1/4", chip("tpl").textContent + " / " + title());
+    ok(locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && chip("tpl").textContent.indexOf("已锁") >= 0 && title().indexOf("1/5") >= 0, "点画风那行的小锁：锁上，标题变 1/5", chip("tpl").textContent + " / " + title());
     chip("tpl").click();
-    ok(!("char:yuan.png" in locks("templateCardLockJson")) && title().indexOf("0/4") >= 0, "再点一下：解锁");
+    ok(!("char:yuan.png" in locks("templateCardLockJson")) && title().indexOf("0/5") >= 0, "再点一下：解锁");
 
     const all = d.querySelector("#ipe-card-lock-all");
     all.click();
-    ok(locks("anchorCardLockJson")["char:yuan.png"] === "anchor_1" && locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && locks("ruleCardLockJson")["char:yuan.png"] === "rule_1" && locks("ledgerRuleCardLockJson")["char:yuan.png"] === "lp_1", "「全锁到这张卡」：四样一次锁好");
-    ok(title().indexOf("4/4") >= 0 && all.disabled && imgStatus(w).indexOf("水墨") >= 0 && imgStatus(w).indexOf("修仙") >= 0, "标题 4/4，按钮灰掉，状态行一句话说了锁的是哪四样", title() + " / " + imgStatus(w));
+    ok(locks("anchorCardLockJson")["char:yuan.png"] === "anchor_1" && locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && locks("ruleCardLockJson")["char:yuan.png"] === "rule_1" && locks("ledgerRuleCardLockJson")["char:yuan.png"] === "lp_1" && locks("commonCardLockJson")["char:yuan.png"] === "(none)", "「全锁到这张卡」：五样一次锁好（2.47.0 起公共块也算一样）");
+    ok(title().indexOf("5/5") >= 0 && all.disabled && imgStatus(w).indexOf("水墨") >= 0 && imgStatus(w).indexOf("修仙") >= 0, "标题 5/5，按钮灰掉，状态行一句话说了锁的是哪五样", title() + " / " + imgStatus(w));
 
     // 锁了的卡上临时换一套画风
     const sel = d.querySelector("#ipe-template-slot"); sel.value = "tpl_1"; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
@@ -3586,7 +3586,7 @@ await (async () => {
     // 换卡
     tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.chatMetadata = {}; tavern.getCurrentChatId = () => "chat-1";
     await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
-    ok(title().indexOf("顾寒") >= 0 && title().indexOf("0/4") >= 0 && val("note").indexOf("还没选") >= 0 && !all.disabled, "换到另一张卡：标题、几样锁没锁、本卡要点都换成这张卡的", title() + " / " + val("note"));
+    ok(title().indexOf("顾寒") >= 0 && title().indexOf("0/5") >= 0 && val("note").indexOf("还没选") >= 0 && !all.disabled, "换到另一张卡：标题、几样锁没锁、本卡要点都换成这张卡的", title() + " / " + val("note"));
     tavern.characterId = undefined; tavern.name2 = ""; tavern.getCurrentChatId = () => "";
     await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
     ok(title().indexOf("还没打开") >= 0 && all.disabled, "没打开角色卡：标题说还没打开，全锁按钮灰着", title());
@@ -3905,6 +3905,76 @@ await (async () => {
     // 全新安装：没有公共块，定成不挂
     const n = boot(10);
     eq(n.tavern.extensionSettings[n.F("EXT_NAME")].commonInUse, "", "全新安装：载入时就定成不挂");
+})();
+
+console.log("\n【85】 公共块也能锁到卡（2.47.0）：古风卡锁「古风」那份、现代卡锁「通用」那份，换卡自动切；能锁「不挂」；在锁了的卡上手动换是临时换；「这张卡」总览多一行");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "水墨", value: "<draw>INK {Description}</draw>" }]); st.activeBaseTemplate = "t1";
+    st.commonInUse = "c2";
+    F("ipeRefreshTemplateEditors")(); w.eval("ipeCardLockRefreshUI")();
+    const tag = () => F("buildInjectTag")("d", null);
+    const locks = () => { try { return JSON.parse(st.commonCardLockJson || "{}"); } catch (e) { return {}; } };
+    const lk = d.querySelector("#ipe-template-common-lock"), un = d.querySelector("#ipe-template-common-unlock"), info = d.querySelector("#ipe-template-common-lock-info"), cm = d.querySelector("#ipe-template-common");
+    const go = async (charId, name, chat) => { tavern.characterId = charId; tavern.name2 = name; tavern.chatMetadata = {}; tavern.getCurrentChatId = () => chat; await tavern.eventSource.emit("CHAT_CHANGED"); };
+    ok(!!lk && !!un && !!info && lk.parentElement.previousElementSibling.contains(cm) && un.style.display === "none" && info.textContent.indexOf("还没锁公共块") >= 0, "「挂公共块」下面有「锁到这张卡」，没锁时说明写着还没锁", info ? info.textContent : "没有");
+    await until(() => lk.textContent.indexOf("锁到这张卡") >= 0);
+    ok(lk.textContent === "🔒 公共块锁到这张卡" && un.textContent === "🔓 公共块解锁" && d.querySelector("#ipe-template-lock").textContent === "🔒 锁到这张卡", "公共块那排按钮写明是公共块，跟下面画风那排分得开");
+    lk.click();
+    ok(locks()["char:yuan.png"] === "c2" && info.textContent.indexOf("已锁定「古风」") >= 0 && un.style.display !== "none" && imgStatus(w).indexOf("已锁定公共块「古风」") >= 0, "点一下：这张卡（苑无忧）锁上「古风」", info.textContent + " / " + imgStatus(w));
+
+    // 换到另一张卡：没锁，停在哪份就用哪份；在那边换成「通用」并锁上
+    await go(1, "顾寒", "chat-gu");
+    await until(() => info.textContent.indexOf("顾寒") >= 0);
+    ok(st.commonInUse === "c2" && info.textContent.indexOf("还没锁公共块") >= 0, "换到没锁的卡（顾寒）：公共块不自己变", info.textContent);
+    cm.value = "c1"; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    lk.click();
+    ok(locks()["char:gu.png"] === "c1" && locks()["char:yuan.png"] === "c2", "顾寒锁「通用」，两张卡各锁各的");
+
+    // 换回苑无忧：自动切回「古风」
+    await go(0, "苑无忧", "chat-yuan");
+    await until(() => st.commonInUse === "c2");
+    ok(st.commonInUse === "c2" && tag() === "<draw>INK d\n\nANCIENT.</draw>" && cm.value === "c2" && imgStatus(w).indexOf("公共块：「古风」") >= 0, "换回苑无忧：公共块自动切回锁的「古风」，状态行说一声", imgStatus(w));
+    await go(1, "顾寒", "chat-gu");
+    await until(() => st.commonInUse === "c1");
+    eq(tag(), "<draw>INK d\n\nCOMMON.</draw>", "换到顾寒：自动切到它锁的「通用」");
+
+    // 在锁了的卡上手动换：临时换，说明写清，按钮变「改锁」
+    cm.value = "c2"; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    ok(st.commonInUse === "c2" && info.textContent.indexOf("临时换成了「古风」") >= 0 && lk.textContent === "🔒 公共块改锁成当前这份" && imgStatus(w).indexOf("临时换") >= 0 && d.querySelector("#ipe-status").getAttribute("data-ipe-tone") === "warn", "在锁了「通用」的卡上手动换成「古风」：照换，但说明这是临时换", info.textContent + " / " + imgStatus(w));
+    eq(tag(), "<draw>INK d\n\nANCIENT.</draw>", "这会儿按临时换的来");
+    lk.click();
+    ok(locks()["char:gu.png"] === "c2" && info.textContent.indexOf("已锁定「古风」") >= 0, "点「公共块改锁成当前这份」：改锁成「古风」");
+
+    // 锁「不挂」
+    cm.value = ""; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    lk.click();
+    ok(locks()["char:gu.png"] === "(none)" && info.textContent.indexOf("已锁定「（不挂）」") >= 0, "选「（不挂）」再锁：这张卡锁的就是不挂", info.textContent);
+    await go(0, "苑无忧", "chat-yuan"); await until(() => st.commonInUse === "c2");
+    await go(1, "顾寒", "chat-gu"); await until(() => st.commonInUse === "");
+    eq(tag(), "<draw>INK d</draw>", "从挂着「古风」的卡换到锁了不挂的卡：自动变成不挂");
+
+    // 解锁；锁的那份被删
+    un.click();
+    ok(!("char:gu.png" in locks()) && un.style.display === "none" && imgStatus(w).indexOf("公共块已解锁") >= 0, "解锁：这张卡不再自动切", imgStatus(w));
+    await go(0, "苑无忧", "chat-yuan"); await until(() => st.commonInUse === "c2");
+    w.confirm = () => true;
+    F("ipeDeleteCommonBlock")("c2");
+    ok(st.commonInUse === "" && info.textContent.indexOf("锁定的公共块已被删除") >= 0, "锁的那份被删了：变成不挂，说明里写锁定的已被删除", info.textContent);
+
+    // 「这张卡」总览多一行；换聊天事件漏了，拼注入段时也会核一遍
+    const row = d.querySelector('#ipe-card-ov [data-ov="common"]');
+    ok(!!row && row.querySelector(".ipe-card-k").textContent === "公共块" && row.querySelector(".ipe-card-v").textContent.indexOf("（不挂）") >= 0 && !!row.querySelector(".ipe-card-lock") && d.querySelector("#ipe-card-ov-title").textContent.indexOf("/5") >= 0, "「这张卡」总览里多一行公共块，带小锁；标题按五样算", row ? row.textContent : "没有");
+    row.querySelector(".ipe-card-v").click();
+    ok(cm.classList.contains("ipe-card-flash"), "点那行的名字：跳到「挂公共块」那格");
+    st.commonCardLockJson = JSON.stringify({ "char:gu.png": "c1" }); st.commonInUse = "";
+    tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.getCurrentChatId = () => "chat-gu";   // 换了卡，但没发换聊天事件
+    eq(tag(), "<draw>INK d\n\nCOMMON.</draw>", "换聊天事件漏了：拼注入段之前自己核一遍，照样用这张卡锁的那份");
+    ok(/公共块：「通用」（🔒 这张卡锁的就是它）/.test(w.eval("ipeDiagReport")()), "体检里公共块后面注明这张卡锁的就是它");
 })();
 
 console.log("\n" + "\u2500".repeat(46));

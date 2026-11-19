@@ -538,6 +538,14 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         w.eval('(function(){ var c = cfg(); c.commonBlocksJson = JSON.stringify([{ id: "u1", name: "通用", value: "U." }, { id: "u2", name: "古风", value: "G." }]); c.commonInUse = "u1"; c.activeCommonBlock = "u2"; ipeRefreshTemplateEditors(); ipeRefreshCommonEditors(); })()');
         d.querySelector('#iped-common-use').click();
         check(w.eval('cfg().commonInUse') === 'u2' && d.querySelector('#iped-template-common').value === 'u2' && d.querySelector('#ipe-template-common').value === 'u2' && d.querySelector('#iped-common-use').disabled && d.querySelector('#iped-common-inuse-info').textContent.indexOf('现在挂着：「古风」') >= 0 && d.querySelector('#ipe-common-inuse-info').textContent.indexOf('现在挂着：「古风」') >= 0, '在抽屉里点「挂这一份」：挂上了，两边的下拉和说明一起变');
+        // 2.47.0 公共块也能锁到卡：小面板、抽屉的「挂公共块」下面都有锁 / 解锁和说明；总览按五样算
+        for (const prefix of ['ipe', 'iped']) {
+            const g = id => d.querySelector('#' + prefix + '-' + id);
+            check(!!g('template-common-lock') && !!g('template-common-unlock') && !!g('template-common-lock-info') && (g('template-common').compareDocumentPosition(g('template-common-lock')) & w.Node.DOCUMENT_POSITION_FOLLOWING) && (g('template-common-lock').compareDocumentPosition(g('template-add')) & w.Node.DOCUMENT_POSITION_FOLLOWING), prefix + ' 「挂公共块」那格下面紧跟着「锁到这张卡 / 解锁」和说明');
+        }
+        d.querySelector('#iped-template-common-lock').click();
+        check(JSON.parse(w.eval('cfg().commonCardLockJson') || '{}')[w.eval('ipeAnchorCardKey()')] === 'u2' && d.querySelector('#iped-template-common-lock-info').textContent.indexOf('已锁定「古风」') >= 0 && d.querySelector('#ipe-template-common-lock-info').textContent.indexOf('已锁定「古风」') >= 0 && d.querySelector('#iped-template-common-unlock').style.display !== 'none', '在抽屉里锁公共块：两边的说明一起变，解锁按钮露出来');
+        check(!!d.querySelector('#ipe-card-ov [data-ov="common"] .ipe-card-lock') && d.querySelector('#ipe-card-ov [data-ov="common"] .ipe-card-lock').textContent.indexOf('已锁') >= 0 && d.querySelector('#ipe-card-ov-title').textContent.indexOf('/5') >= 0 && d.querySelector('#ipe-card-lock-all').textContent.indexOf('五样') >= 0, '「这张卡」总览多了公共块那行，小锁显示已锁；标题和全锁按钮按五样算');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
