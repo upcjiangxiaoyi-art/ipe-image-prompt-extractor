@@ -3346,3 +3346,29 @@ html body.ipe-skin-oreo:not(#_) #ipe-chat-quick-entry.processing::after { backgr
     transform: none !important;
     transition: background-color .15s ease, border-color .15s ease !important;
 }
+
+/* ============================================================
+   2.39.0 状态行分得出成败；「常用短语」那一排
+   状态行：index.js 把原来的颜色翻成 data-ipe-tone = ok / err / warn（空闲不带）。
+   前面一个小圆点像红绿灯，底色和字色跟着变；出错的字加粗。月潮是深色的一组，奥利奥只有黑白：出错反白。
+   ============================================================ */
+html #ipe-panel { --dg-ok: #8fe0a8; --dg-ok-soft: #153a2a; --dg-err: #ffa0aa; --dg-err-soft: #46202b; --dg-warn: #f0cf7a; --dg-warn-soft: #3d3216; }
+html #ipe-panel.ipe-mist { --dg-ok: #2f7d46; --dg-ok-soft: #e4f5e9; --dg-err: #b23b3b; --dg-err-soft: #fde6e6; --dg-warn: #8a6510; --dg-warn-soft: #fff2d2; }
+html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone]::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1.5px; }
+html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone="ok"] { background: var(--dg-ok-soft) !important; color: var(--dg-ok) !important; }
+html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone="err"] { background: var(--dg-err-soft) !important; color: var(--dg-err) !important; font-weight: 700 !important; }
+html #ipe-panel#ipe-panel .ipe-preview-status[data-ipe-tone="warn"] { background: var(--dg-warn-soft) !important; color: var(--dg-warn) !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="ok"] { border: 1.5px solid #111111 !important; background: #ffffff !important; color: #111111 !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="err"] { border: 1.5px solid #111111 !important; background: #111111 !important; color: #ffffff !important; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="warn"] { border: 1.5px dashed #111111 !important; background: #f3f3f3 !important; color: #111111 !important; }
+/* 抽屉里的状态行是普通的小灰字：只换字色，出错加粗 */
+#ipe-drawer#ipe-drawer [data-ipe-tone="ok"] { color: #4f9a63 !important; -webkit-text-fill-color: #4f9a63 !important; }
+#ipe-drawer#ipe-drawer [data-ipe-tone="err"] { color: #d4726a !important; -webkit-text-fill-color: #d4726a !important; font-weight: 700 !important; }
+#ipe-drawer#ipe-drawer [data-ipe-tone="warn"] { color: #c9a227 !important; -webkit-text-fill-color: #c9a227 !important; }
+
+/* 「常用短语」：下拉以前跟「存为常用」「删」挤一排，手机上只露两个字。下拉自己占一整行，两颗按钮排在下面 */
+html #ipe-panel#ipe-panel .ipe-preview-actions > #ipe-supp-presets { flex: 1 1 100% !important; min-width: 0 !important; }
+#ipe-drawer#ipe-drawer div:has(> #iped-supp-presets) { flex-wrap: wrap !important; }
+#ipe-drawer#ipe-drawer #iped-supp-presets { flex: 1 1 100% !important; min-width: 0 !important; }
+/* 「换画风重注入」前面那个模板下拉也别太窄 */
+html #ipe-panel#ipe-panel .ipe-preview-actions > #ipe-reinject-tpl { flex: 1 1 40% !important; min-width: 118px !important; }

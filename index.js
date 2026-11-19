@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.38.1";
+var IPE_VERSION = "2.39.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -3477,7 +3477,7 @@ function ipeLedgerNoteCardSync() {
 /* ---- 状态行 ---- */
 function ipeLedgerStatus(t, color) {
     ["#ipe-ledger-status","#iped-ledger-status"].forEach(function(id){
-        var e = q(id); if (e) { e.textContent = t; e.style.color = color || ""; }
+        var e = q(id); if (e) ipeStatusPaint(e, t, color);
     });
     ipeLogStatus("挂账", t);
 }
@@ -7199,9 +7199,23 @@ function ipeDiagOpen() {
     return true;
 }
 
+/* 2.39.0 状态行的「语气」：代码一直按颜色给状态行上色（#6ec577 正常 / 成功、#d4726a 出错、#c9a227 等待 / 提醒），
+   但面板的皮肤把字色统一盖掉了，失败和完成长得一样。这里把颜色翻成一个标记写在元素上，样式认标记，九套皮肤各画各的 */
+function ipeStatusTone(color) {
+    var c = String(color || "").trim().toLowerCase();
+    if (c === "#d4726a") return "err";
+    if (c === "#c9a227") return "warn";
+    if (c === "#6ec577" || c === "#62c073") return "ok";
+    return "";
+}
+function ipeStatusPaint(e, t, color) {
+    e.textContent = t; e.style.color = color || "";
+    var tone = ipeStatusTone(color);
+    if (tone) e.setAttribute("data-ipe-tone", tone); else e.removeAttribute("data-ipe-tone");
+}
 function setStatus(t, color) {
     ["#ipe-status","#iped-status"].forEach(function(id){
-        var e = q(id); if(e){e.textContent=t;e.style.color=color||"";}
+        var e = q(id); if (e) ipeStatusPaint(e, t, color);
     });
     ipeLogStatus("生图", t);
 }

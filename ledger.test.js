@@ -3507,6 +3507,27 @@ await (async () => {
     ov.querySelector(".ipe-zoom-close").click();
 })();
 
+console.log("\n【79】 状态行分得出成败（2.39.0）：代码一直给状态行上色（成功绿、出错红、等待黄），但皮肤把颜色盖成同一种灰，「失败」和「完成」长得一样。现在状态行带一个「语气」标记，样式认标记");
+await (async () => {
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const tone = id => d.querySelector("#" + id).getAttribute("data-ipe-tone") || "";
+    w.eval("setStatus")("失败: API 400：余额不够", "#d4726a");
+    eq(tone("ipe-status"), "err", "生图状态行：出错 → 标成 err");
+    w.eval("setStatus")("提取完成并已自动注入 ✓", "#6ec577");
+    eq(tone("ipe-status"), "ok", "成功 / 正常进行 → ok");
+    w.eval("setStatus")("自动重试中…", "#c9a227");
+    eq(tone("ipe-status"), "warn", "等待 / 提醒 → warn");
+    w.eval("setStatus")("等待新消息…", "");
+    eq(tone("ipe-status"), "", "空闲：不带标记（跟以前一样的灰字）");
+    w.eval("ipeLedgerStatus")("挂账失败：API 500", "#d4726a");
+    eq(tone("ipe-ledger-status"), "err", "挂账状态行：出错 → err");
+    w.eval("ipeLedgerStatus")("已挂账 ✓ 第 3 楼", "#6ec577");
+    eq(tone("ipe-ledger-status"), "ok", "挂账成功 → ok");
+    w.eval("ipeLedgerStatus")("自动挂账中…", "#c9a227");
+    eq(tone("ipe-ledger-status"), "warn", "挂账进行中 → warn");
+    eq(d.querySelector("#ipe-ledger-status").style.color.replace(/\s/g, ""), "rgb(201,162,39)", "原来行内的颜色照旧写着（没有这层样式的地方不受影响）");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

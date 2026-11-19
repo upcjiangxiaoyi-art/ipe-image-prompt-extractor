@@ -483,6 +483,11 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(['-webkit-backdrop-filter: none !important', 'backdrop-filter: none !important', 'filter: none !important', 'animation: none !important', 'will-change: auto !important', 'transform: none !important'].every(k => btnRule.includes(k)) && /transition: [^;]*background-color[^;]*!important/.test(btnRule) && !/transition:[^;]*(all|opacity|filter)/.test(btnRule), '抽屉按钮关掉了主题可能加的模糊、滤镜、动画、位移，过渡只留底色和边框');
         const rep2 = String(w.eval('ipeDiagReport')());
         check(/酒馆主题给按钮加的效果：[^\n]*模糊[^\n]*滤镜[^\n]*过渡[^\n]*动画/.test(rep2) && !d.querySelector('input.ipe-probe-btn'), '🩺 体检里多一行：酒馆主题给普通按钮加了什么（量完那颗探针按钮就拿掉）');
+        // 2.39.0 状态行分得出成败；「常用短语」那一排下拉不再被挤扁
+        check(['ok', 'err', 'warn'].every(t => css.includes('.ipe-preview-status[data-ipe-tone="' + t + '"]')) && css.includes('--dg-err-soft') && css.includes('html #ipe-panel#ipe-panel.ipe-oreo .ipe-preview-status[data-ipe-tone="err"]') && ['ok', 'err', 'warn'].every(t => css.includes('#ipe-drawer#ipe-drawer [data-ipe-tone="' + t + '"]')), '状态行按 ok / err / warn 各有样子，九套皮肤和抽屉都有');
+        w.eval('setStatus')('失败: x', '#d4726a');
+        check(d.querySelector('#iped-status').getAttribute('data-ipe-tone') === 'err' && d.querySelector('#ipe-status').getAttribute('data-ipe-tone') === 'err', '抽屉和浮窗的状态行一起标上');
+        check(css.includes('#ipe-supp-presets { flex: 1 1 100%') && css.includes('#iped-supp-presets { flex: 1 1 100%') && d.querySelector('#ipe-supp-presets').parentElement === d.querySelector('#ipe-supp-save').parentElement, '「常用短语」下拉自己占一整行，「存为常用」「删」排在下面（还在同一组里）');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });
