@@ -3372,3 +3372,48 @@ html #ipe-panel#ipe-panel .ipe-preview-actions > #ipe-supp-presets { flex: 1 1 1
 #ipe-drawer#ipe-drawer #iped-supp-presets { flex: 1 1 100% !important; min-width: 0 !important; }
 /* 「换画风重注入」前面那个模板下拉也别太窄 */
 html #ipe-panel#ipe-panel .ipe-preview-actions > #ipe-reinject-tpl { flex: 1 1 40% !important; min-width: 118px !important; }
+
+/* ============================================================
+   2.40.0 「这张卡」总览
+   一行一样：左边是哪一样，中间是现在用的那套（点了跳过去），右边一颗小锁。
+   ============================================================ */
+html #ipe-panel#ipe-panel #ipe-section-card .ipe-section-header > span:first-child::before { content: "🃏"; font-size: 13px; }
+html #ipe-panel#ipe-panel .ipe-card-ov { display: flex; flex-direction: column; }
+html #ipe-panel#ipe-panel .ipe-card-row {
+    display: flex; align-items: center; gap: 8px;
+    min-height: 40px;
+    padding: 4px 0;
+    border-bottom: 1.5px dashed var(--dg-a-soft);
+}
+html #ipe-panel#ipe-panel .ipe-card-row:last-child { border-bottom: 0; }
+html #ipe-panel#ipe-panel .ipe-card-k { flex: 0 0 58px; color: var(--dg-muted); font-size: 11.5px; font-weight: 600; }
+html #ipe-panel#ipe-panel .ipe-card-v {
+    flex: 1 1 auto; min-width: 0;
+    padding: 6px 2px;
+    border: 0; background: transparent;
+    color: var(--dg-ink); -webkit-text-fill-color: var(--dg-ink);
+    font-size: 12.5px; font-weight: 600; line-height: 1.4;
+    text-align: left;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    cursor: pointer;
+}
+html #ipe-panel#ipe-panel .ipe-card-lock {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 4px 10px;
+    border: 2px solid var(--dg-a-line);
+    border-radius: 999px;
+    background: var(--dg-card);
+    color: var(--dg-muted); -webkit-text-fill-color: var(--dg-muted);
+    font-size: 11px; font-weight: 700; white-space: nowrap;
+    box-shadow: 0 2px 0 var(--dg-a-line);
+    cursor: pointer;
+}
+html #ipe-panel#ipe-panel .ipe-card-lock.ipe-card-locked { background: var(--dg-a-soft); color: var(--dg-ink); -webkit-text-fill-color: var(--dg-ink); }
+html #ipe-panel#ipe-panel .ipe-card-lock:active:not(:disabled) { transform: translateY(1.5px); box-shadow: 0 .5px 0 var(--dg-a-line); }
+html #ipe-panel#ipe-panel .ipe-card-lock:disabled { opacity: .5; box-shadow: none; }
+html #ipe-panel#ipe-panel.ipe-oreo .ipe-card-lock.ipe-card-locked { background: #111111; color: #ffffff; -webkit-text-fill-color: #ffffff; box-shadow: 0 2px 0 #7a7a7a; }
+/* 从总览跳过去的那个控件闪一下，好找 */
+@keyframes ipe-card-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30%, 70% { box-shadow: 0 0 0 4px var(--dg-a); } }
+html #ipe-panel#ipe-panel .ipe-card-flash { animation: ipe-card-flash 1.5s ease 1 !important; }

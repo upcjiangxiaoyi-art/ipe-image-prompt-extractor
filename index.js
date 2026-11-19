@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.39.0";
+var IPE_VERSION = "2.40.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4531,6 +4531,7 @@ function ipeRefreshAnchorLockUI() {
         if (e.tagName === "INPUT") e.value = lbl; else e.textContent = lbl;
         e.disabled = !k;
     });
+    try { ipeCardOverviewRefresh(); } catch(eOv) {}
 }
 
 /* ============================================================
@@ -4633,11 +4634,120 @@ function ipeCardLockRefreshUI() {
             b.disabled = !k;
         });
     });
+    try { ipeCardOverviewRefresh(); } catch(eOv) {}
 }
 /* 体检报告里那半句 */
 function ipeCardLockNote(kind) {
     var it = ipeCardLockedItem(kind); if (!it) return "";
     return ipeCardLockActive(kind).id === it.id ? "（🔒 这张卡锁的就是它）" : "（🔒 这张卡锁的是「" + (it.name || "") + "」，现在临时换了）";
+}
+
+/* ============================================================
+   🃏 「这张卡」总览（2.40.0）
+   跟着卡走的东西有六样：锚点、画风、提取规则、挂账规则（这四样能锁）、本卡要点、本卡长期指令（这两样本来就按卡记）。
+   它们散在两页六个地方，开一张新卡要挨个翻过去设。面板最上面这张小卡把六样摆在一起：
+   一眼看到这张卡现在用的是哪套、锁没锁；点名字跳到它在的地方；小锁点一下锁 / 解；一颗按钮把四样全锁上。
+   它只是个遥控器：锁、解锁、跳转都调各自原来的函数，自己不存任何东西。
+   ============================================================ */
+var IPE_CARD_OV_JUMP = { anchor: "ipe-anchor-slot", tpl: "ipe-template-slot", rule: "ipe-rule-slot", lrule: "ipe-ledger-prompt-slot", note: "ipe-ledger-note-slot", order: "ipe-card-order" };
+/* 四样能锁的各自的状态：现在用的那套、锁的那套、是不是临时换了 */
+function ipeCardOvState(kind) {
+    if (kind === "anchor") {
+        var lk = ipeAnchorLockedItem(), cur = ipeGetActiveAnchorItem() || {};
+        return { name: (lk || cur).name || "", locked: !!lk, temp: false, lockedName: lk ? lk.name : "" };   // 锚点锁了就一律用锁的那套，没有「临时换」
+    }
+    var it = ipeCardLockedItem(kind), c = ipeCardLockActive(kind) || {};
+    return { name: c.name || "", locked: !!it, temp: !!(it && it.id !== c.id), lockedName: it ? it.name : "" };
+}
+function ipeCardOverviewRefresh() {
+    var root = q("#ipe-card-ov"); if (!root) return;
+    function put(el, t) { if (el && el.textContent !== t) el.textContent = t; }   // 字没变就不写，省得白白重排
+    var k = ipeAnchorCardKey(), label = ipeAnchorCardLabel() || "这张卡", n = 0, todo = 0;
+    ["anchor", "tpl", "rule", "lrule"].forEach(function(kind){
+        var row = root.querySelector('[data-ov="' + kind + '"]'); if (!row) return;
+        var s = { name: "", locked: false, temp: false, lockedName: "" };
+        try { s = ipeCardOvState(kind); } catch(e) {}
+        if (s.locked && !s.temp) n++; else todo++;
+        var v = row.querySelector(".ipe-card-v"), b = row.querySelector(".ipe-card-lock");
+        put(v, "「" + s.name + "」" + (s.temp ? "　临时换的，锁的是「" + s.lockedName + "」" : ""));
+        if (b) {
+            put(b, s.temp ? "🔒 改锁" : (s.locked ? "🔒 已锁" : "🔓 没锁"));
+            b.classList.toggle("ipe-card-locked", s.locked && !s.temp);
+            b.disabled = !k;
+            b.title = !k ? "先打开一张角色卡的聊天" : (s.temp ? "锁成现在用的这套" : (s.locked ? "点一下解锁" : "点一下锁到这张卡"));
+        }
+    });
+    var rn = root.querySelector('[data-ov="note"] .ipe-card-v');
+    if (rn) {
+        var ni = null; try { ni = ipeLedgerNoteItem(); } catch(e2) {}
+        put(rn, ni ? "「" + (ni.name || "") + "」" + (String(ni.value || "").trim() ? "" : "（里面是空的）") : "还没选（不发给副 AI）");
+    }
+    var ro = root.querySelector('[data-ov="order"] .ipe-card-v');
+    if (ro) {
+        var o = ""; try { o = ipeCardOrderGet().trim(); } catch(e3) {}
+        put(ro, o ? o.length + " 字：" + (o.length > 16 ? o.slice(0, 16) + "…" : o) : "没写");
+    }
+    var t = q("#ipe-card-ov-title");
+    put(t, k ? "这张卡 · " + label + "　🔒 " + n + "/4" : "这张卡 · 还没打开角色卡");
+    var all = q("#ipe-card-lock-all");
+    if (all) {
+        all.disabled = !k || todo === 0;
+        put(all, !k ? "先打开一张角色卡的聊天" : (todo === 0 ? "🔒 四样都锁好了" : "🔒 把现在这四样全锁到这张卡"));
+    }
+}
+/* 跳到某个控件：切到它那一页，把外面收着的卡和折叠一层层打开，滚到眼前闪一下 */
+function ipeCardOvJump(kind) {
+    var el = q("#" + IPE_CARD_OV_JUMP[kind]); if (!el) return false;
+    var tabHost = el.closest("[data-ipe-tab]");
+    if (tabHost) ipeSetActiveTab(tabHost.getAttribute("data-ipe-tab"));
+    for (var n = el.parentElement; n && n.id !== "ipe-panel"; n = n.parentElement) {
+        if (n.tagName === "DETAILS") n.open = true;
+        if (n.classList && n.classList.contains("ipe-section") && n.classList.contains("collapsed")) {
+            n.classList.remove("collapsed");
+            var h = n.querySelector(":scope > .ipe-section-header"); if (h) h.setAttribute("aria-expanded", "true");
+            try { ipeRememberFold(n.id, true); } catch(eF) {}
+        }
+    }
+    try { if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch(eS) {}
+    try {
+        el.classList.add("ipe-card-flash");
+        setTimeout(function(){ try { el.classList.remove("ipe-card-flash"); } catch(eR) {} }, 1600);
+    } catch(eC) {}
+    return true;
+}
+function ipeCardOvToggleLock(kind) {
+    var s = ipeCardOvState(kind);
+    if (kind === "anchor") { if (s.locked) ipeAnchorUnlock(); else ipeAnchorLockCurrent(); }
+    else if (s.locked && !s.temp) ipeCardUnlock(kind);
+    else ipeCardLockCurrent(kind);
+    ipeCardOverviewRefresh();
+}
+function ipeCardOvLockAll() {
+    var k = ipeAnchorCardKey();
+    if (!k) { setStatus("先打开一张角色卡的聊天，再锁", "#d4726a"); return false; }
+    var names = { anchor: "锚点", tpl: "画风", rule: "提取规则", lrule: "挂账规则" }, said = [];
+    ["anchor", "tpl", "rule", "lrule"].forEach(function(kind){
+        try {
+            var s = ipeCardOvState(kind);
+            if (!s.locked || s.temp) { if (kind === "anchor") ipeAnchorLockCurrent(); else ipeCardLockCurrent(kind); }
+            said.push(names[kind] + "「" + ipeCardOvState(kind).name + "」");
+        } catch(e) {}
+    });
+    ipeCardOverviewRefresh();
+    var msg = "🔒 「" + (ipeAnchorCardLabel() || "这张卡") + "」全锁好了：" + said.join("、");
+    setStatus(msg, "#6ec577"); ipeLedgerStatus(msg, "#6ec577");
+    return true;
+}
+function ipeCardOverviewBind() {
+    var root = q("#ipe-card-ov"); if (!root || root.__ipeBound) return; root.__ipeBound = true;
+    root.addEventListener("click", function(ev){
+        var t = ev.target, row = t && t.closest ? t.closest(".ipe-card-row") : null; if (!row) return;
+        var kind = row.getAttribute("data-ov");
+        if (t.closest(".ipe-card-lock")) ipeCardOvToggleLock(kind);
+        else if (t.closest(".ipe-card-v")) ipeCardOvJump(kind);
+    });
+    var all = q("#ipe-card-lock-all"); if (all) all.addEventListener("click", function(){ ipeCardOvLockAll(); });
+    ipeCardOverviewRefresh();
 }
 
 /* ============================================================
@@ -4677,6 +4787,7 @@ function ipeCardOrderRefreshUI() {
     var info = !k ? "没有打开角色卡：先进一张卡的聊天再写。"
         : "只对「" + (label || "这张卡") + "」生效，每楼提取和「🔍 自动提取人物外貌」都放在最前面，优先于锚点和提取规则。";
     ["ipe-card-order-info", "iped-card-order-info"].forEach(function(id){ var e = q("#" + id); if (e) e.textContent = info; });
+    try { ipeCardOverviewRefresh(); } catch(eOv) {}
 }
 function ipeCardOrderBindUI() {
     ["ipe-card-order", "iped-card-order"].forEach(function(id){
@@ -4684,6 +4795,7 @@ function ipeCardOrderBindUI() {
         el.addEventListener("input", function(){
             ipeCardOrderSet(el.value);
             var o = q("#" + (id === "ipe-card-order" ? "iped-card-order" : "ipe-card-order")); if (o && o !== el) o.value = el.value;
+            try { ipeCardOverviewRefresh(); } catch(eOv) {}
         });
         el.addEventListener("change", function(){ ipeCardOrderSet(el.value); ipeSaveNow(); });
     });
@@ -8033,6 +8145,20 @@ function createPanel() {
        + '</div>';
     h += '<div class="ipe-sections">';
 
+    /* 2.40.0 「这张卡」总览：不带 data-ipe-tab，生图、挂账两页都在；默认收着，只占一行 */
+    h += '<div class="ipe-section collapsed" id="ipe-section-card">'
+       + '<button type="button" class="ipe-section-header" aria-expanded="false"><span id="ipe-card-ov-title">这张卡</span><span class="ipe-collapse-icon" aria-hidden="true">▾</span></button>'
+       + '<div class="ipe-section-body"><div id="ipe-card-ov" class="ipe-card-ov">'
+       + [["anchor", "锚点", 1], ["tpl", "画风", 1], ["rule", "提取规则", 1], ["lrule", "挂账规则", 1], ["note", "本卡要点", 0], ["order", "长期指令", 0]].map(function(r){
+             return '<div class="ipe-card-row" data-ov="' + r[0] + '"><span class="ipe-card-k">' + r[1] + '</span>'
+                  + '<button type="button" class="ipe-card-v" title="点一下跳到它在的地方"></button>'
+                  + (r[2] ? '<button type="button" class="ipe-card-lock"></button>' : '') + '</div>';
+         }).join("")
+       + '</div>'
+       + '<div class="ipe-preview-actions"><button id="ipe-card-lock-all" class="ipe-btn ipe-btn-primary" type="button">🔒 把现在这四样全锁到这张卡</button></div>'
+       + '<div class="ipe-hint">点左边的名字跳到它在的地方；小锁点一下锁上、再点解开。锁了的，以后换到这张卡自动切回来。</div>'
+       + '</div></div>';
+
     h += secHTML("api-config","API 配置", true,
         '<label>API 预设<select id="ipe-api-profile"></select></label>'+
         '<label>预设名称<input type="text" id="ipe-api-profile-name" value="" placeholder="例如：DeepSeek / Flash 3.5"></label>'+
@@ -9843,6 +9969,7 @@ function bindAll() {
         var el=q("#"+id); if(!el) return;
         el.addEventListener("click", function(){ ipeAnchorLockCurrent(); });
     });
+    try { ipeCardOverviewBind(); } catch(eOv) {}   // 2.40.0 「这张卡」总览
     // 2.31.0 画风模板、挂账规则 锁到卡
     IPE_CARD_LOCK_KINDS.forEach(function(kind){
         ["ipe-", "iped-"].forEach(function(p){
@@ -10686,7 +10813,8 @@ function bindAll() {
                         ab = ipeAnchorLockApply();
                         if (ab) setStatus("🔒 这张卡锁定的锚点：「" + ab + "」", "#6ec577");
                     } catch(eA) {}
-                    try { ipeCardLockSync(true, ab ? "锚点：「" + ab + "」" : ""); } catch(eK) {}    // 2.31.0 锁了画风 / 提取规则 / 挂账规则的卡：切到锁的那套
+                    try { ipeCardLockSync(true, ab ? "锚点：「" + ab + "」" : ""); } catch(eK) {}
+                    try { ipeCardOverviewRefresh(); } catch(eOv) {}   // 2.40.0 总览换成这张卡的    // 2.31.0 锁了画风 / 提取规则 / 挂账规则的卡：切到锁的那套
                     try { ipeInstallMesButtonsObserver(); ipeInstallMesButtons(); } catch(eM) {}   // 楼层 🎨 按钮换成本聊天的
                 }, 200);
             });

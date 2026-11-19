@@ -22,7 +22,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         const afterIDs = new Set([...d.querySelectorAll('#ipe-panel [id], #ipe-drawer [id]')].map(el => el.id));
         check(beforeIDs.every(id => afterIDs.has(id)), '整理前后原有控件 ID 一个不少（2.29.0 只多了「备份与外观」区块自己的 id）');
         check(new Set(beforeIDs).size === beforeIDs.length, '两处入口没有重复控件 ID');
-        check(panel.querySelector('.ipe-sections').firstElementChild.id === 'ipe-section-preview', '浮窗预览在生图配置之前');
+        const secIds = [...panel.querySelectorAll('.ipe-sections > .ipe-section')].map(x => x.id);
+        check(secIds[0] === 'ipe-section-card' && secIds[1] === 'ipe-section-preview' && secIds.indexOf('ipe-section-preview') < secIds.indexOf('ipe-section-api-config'), '浮窗最上面是「这张卡」总览（2.40.0），紧接着是预览，都在生图配置之前');
         for (const prefix of ['ipe', 'iped']) {
             const order = d.querySelector('#' + prefix + '-card-order'), sup = d.querySelector('#' + prefix + '-supplement');
             check(!!order && !!(order.compareDocumentPosition(sup) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !order.closest('details:not([open])'), prefix + ' 本卡长期指令框在补充指令之前、直接可见');
@@ -35,7 +36,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         // 2.29.0 按「多久用一次」排：预览（工作台）→ 这张卡 → 画风与规则 → API → 备份；公共块并进画风模板当子折叠
         const wantTitle = { preview: '预览', anchors: '这张卡 · 角色锚点', template: '画风模板', system: '系统提示', rules: '提取规则', api: 'API 配置 · 副 AI 连接', backup: '备份与外观' };
         check(drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '')).join(',') === Object.keys(wantTitle).join(',') && drawerCards.every(c => wantTitle[c.dataset.ipeFold.replace('drawer-image-', '')] === c.querySelector('summary').textContent), '抽屉七张卡按工作台 → 这张卡 → 画风与规则 → API → 备份排，名字和标题一一对上（' + drawerCards.map(c => c.dataset.ipeFold.replace('drawer-image-', '') + '=' + c.querySelector('summary').textContent).join(' ') + '）');
-        check([...panel.querySelectorAll('.ipe-sections > .ipe-section')].map(s => s.id.replace('ipe-section-', '')).join(',') === 'preview,char-anchors,base-template,system-prompt,extract-rules,api-config,backup,ledger', '浮窗区块同样的顺序');
+        check([...panel.querySelectorAll('.ipe-sections > .ipe-section')].map(s => s.id.replace('ipe-section-', '')).join(',') === 'card,preview,char-anchors,base-template,system-prompt,extract-rules,api-config,backup,ledger', '浮窗区块同样的顺序（2.40.0 最前面多了「这张卡」总览）');
         for (const prefix of ['ipe', 'iped']) {
             const g = id => d.querySelector('#' + prefix + '-' + id);
             check(!!g('common-slot').closest('details') && g('common-slot').closest('details').querySelector('summary').textContent.indexOf('公共块') === 0 && !!g('common-slot').closest(prefix === 'ipe' ? '#ipe-section-base-template' : '[data-ipe-fold="drawer-image-template"]'), prefix + ' 公共块并进了画风模板，当子折叠');

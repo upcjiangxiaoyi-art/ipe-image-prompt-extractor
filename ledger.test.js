@@ -356,7 +356,8 @@ await (async () => {
     const before = F("failStreak")();
     const t0 = Date.now();
     await F("ipeLedgerRun")(9, true);
-    ok(Date.now() - t0 < 5000, "没有干等：1 秒左右就断了");
+    // 上限放到 20 秒：要证明的是「没按默认的 300 秒干等」。整套跑到这里时前面十几个页面的收尾定时器还在排队，机器一忙 5 秒不够（2.40.0 撞过一次）
+    ok(Date.now() - t0 < 20000, "没有干等：1 秒左右就断了", (Date.now() - t0) + " ms");
     eq(F("failStreak")(), before + 1, "超时算一次失败（不是「已中断」）");
     ok(statusText(w).indexOf("超时") >= 0 && statusText(w).indexOf("已中断") < 0, "状态行报的是超时不是中断", statusText(w));
     eq(st.ledgerAutoRun, true, "只撞一次，自动挂账还开着");
@@ -1320,17 +1321,26 @@ await (async () => {
     tavern.chat[9].mes = "第 10 层正文：两人买了去北京的票。够长够长够长。";
     await F("ipeLedgerRun")(9, true);
     eq(F("ipeLedgerRead")().lastFloor, 10, "自动挂账落了第 10 楼");
+    /* 2.40.0 不按固定毫秒数等：改楼的提醒是事件之后 0.3 秒才写的，整套一起跑时前面测试留下的页面还在后台干活，
+       固定等 0.8 秒时过时不过。把写进状态行的每一句都记下来，等到要的那句出现为止。 */
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const seen = []; w.__seen = seen;
+    w.eval('var __st0 = ipeLedgerStatus; ipeLedgerStatus = function(t, c){ __seen.push(String(t)); return __st0(t, c); };');
+    const said = k => seen.some(t => t.indexOf(k) >= 0);
     // 改更早的楼：不动账，提醒只能手动改账本
-    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await wait(800);
+    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await until(() => said("手动改掉"));
     ok(F("ipeLedgerRead")().lastFloor === 10 && statusText(w).indexOf("手动改掉") >= 0, "改第 4 楼：现任账本还是第 10 楼的，提醒要改得在账本里手动改", statusText(w));
     // 打开编辑框原样保存：正文没变，不提醒、不重挂
+    // 「没发生」没法直接等：后面再改一次第 4 楼当哨兵（同样 0.3 秒的定时，先定的先到），哨兵的提醒到了，前面那次就一定处理完了
     const n0 = calls;
-    w.eval('ipeLedgerStatus("（测试占位）", "#999")');
-    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(800);
-    ok(calls === n0 && statusText(w).indexOf("改过了") < 0, "原样保存：不提醒、不重挂", statusText(w));
+    seen.length = 0;
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9);
+    await tavern.eventSource.emit("MESSAGE_EDITED", 3); await until(() => said("手动改掉"));
+    ok(calls === n0 && said("手动改掉") && !said("第 10 楼改过了"), "原样保存：不提醒、不重挂", seen.join(" / "));
     // 真改了第 10 楼：不撕账、不重挂，状态行提醒
     tavern.chat[9].mes = "第 10 层改过的正文：不去北京了，留在学校。够长够长够长。";
-    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await wait(800);
+    seen.length = 0;
+    await tavern.eventSource.emit("MESSAGE_EDITED", 9); await until(() => said("重新挂账"));
     let s = F("ipeLedgerRead")();
     ok(calls === n0 && s.lastFloor === 10 && s.current.indexOf("北京") >= 0, "改了正文：不自动重挂，账本先不动");
     ok(statusText(w).indexOf("改过了") >= 0 && statusText(w).indexOf("重新挂账") >= 0, "状态行提醒：改的是剧情就点「重新挂账」", statusText(w));
@@ -3526,6 +3536,72 @@ await (async () => {
     w.eval("ipeLedgerStatus")("自动挂账中…", "#c9a227");
     eq(tone("ipe-ledger-status"), "warn", "挂账进行中 → warn");
     eq(d.querySelector("#ipe-ledger-status").style.color.replace(/\s/g, ""), "rgb(201,162,39)", "原来行内的颜色照旧写着（没有这层样式的地方不受影响）");
+})();
+
+console.log("\n【80】 「这张卡」总览（2.40.0）：跟着卡走的六样（锚点、画风、提取规则、挂账规则、本卡要点、本卡长期指令）散在两页六个地方，开新卡要挨个翻。面板最上面一张小卡：一眼看全、点一下跳过去、一颗按钮全锁");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "默认", value: "<draw>{Description}</draw>" }, { id: "tpl_2", name: "水墨", value: "<draw>INK: {Description}</draw>" }]); st.activeBaseTemplate = "tpl_2";
+    st.rulePresetsJson = JSON.stringify([{ id: "rule_1", name: "写实", value: "规则甲" }]); st.activeRulePreset = "rule_1";
+    st.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp_1", name: "修仙", value: "修仙规则。" + "够长".repeat(20) }]); st.activeLedgerPrompt = "lp_1";
+    st.anchorPresetsJson = JSON.stringify([{ id: "anchor_1", name: "苑无忧的锚点", value: "苑无忧：a tall woman" }]); st.activeAnchorPreset = "anchor_1";
+    st.ledgerNotePresetsJson = JSON.stringify([{ id: "ln_1", name: "707号室", value: "此人体质特殊。" }]); st.activeLedgerNote = "ln_1"; st.ledgerNoteCardJson = JSON.stringify({ "char:yuan.png": "ln_1" });
+    w.eval("ipeRefreshTemplateEditors")(); w.eval("ipeRefreshRuleEditors")(); w.eval("ipeRefreshAnchorEditors")(); w.eval("ipeLedgerRefreshBotEditors")();
+    await wait(200);
+    const sec = d.querySelector("#ipe-section-card");
+    const title = () => sec.querySelector(".ipe-section-header > span").textContent;
+    const row = k => sec.querySelector('[data-ov="' + k + '"]');
+    const val = k => row(k).querySelector(".ipe-card-v").textContent;
+    const chip = k => row(k).querySelector(".ipe-card-lock");
+    const locks = key => { try { return JSON.parse(st[key] || "{}"); } catch (e) { return {}; } };
+    ok(!!sec && sec === d.querySelector("#ipe-panel .ipe-sections").firstElementChild && sec.classList.contains("collapsed") && !sec.hasAttribute("data-ipe-tab"), "面板里第一张卡就是它，默认收着（只占一行），不属于哪一页");
+    w.eval("ipeSetActiveTab")("ledger");
+    ok(sec.style.display !== "none", "切到挂账页它还在");
+    w.eval("ipeSetActiveTab")("image");
+    ok(title().indexOf("苑无忧") >= 0 && title().indexOf("0/4") >= 0, "标题：这张卡的名字 + 锁了几样（" + title() + "）");
+    ok(val("anchor").indexOf("苑无忧的锚点") >= 0 && val("tpl").indexOf("水墨") >= 0 && val("rule").indexOf("写实") >= 0 && val("lrule").indexOf("修仙") >= 0, "四行写着现在用的锚点、画风、提取规则、挂账规则");
+    ok(val("note").indexOf("707号室") >= 0 && val("order").indexOf("没写") >= 0, "本卡要点写着这张卡选的那套；本卡长期指令没写就说没写", val("note") + " / " + val("order"));
+
+    chip("tpl").click();
+    ok(locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && chip("tpl").textContent.indexOf("已锁") >= 0 && title().indexOf("1/4") >= 0, "点画风那行的小锁：锁上，标题变 1/4", chip("tpl").textContent + " / " + title());
+    chip("tpl").click();
+    ok(!("char:yuan.png" in locks("templateCardLockJson")) && title().indexOf("0/4") >= 0, "再点一下：解锁");
+
+    const all = d.querySelector("#ipe-card-lock-all");
+    all.click();
+    ok(locks("anchorCardLockJson")["char:yuan.png"] === "anchor_1" && locks("templateCardLockJson")["char:yuan.png"] === "tpl_2" && locks("ruleCardLockJson")["char:yuan.png"] === "rule_1" && locks("ledgerRuleCardLockJson")["char:yuan.png"] === "lp_1", "「全锁到这张卡」：四样一次锁好");
+    ok(title().indexOf("4/4") >= 0 && all.disabled && imgStatus(w).indexOf("水墨") >= 0 && imgStatus(w).indexOf("修仙") >= 0, "标题 4/4，按钮灰掉，状态行一句话说了锁的是哪四样", title() + " / " + imgStatus(w));
+
+    // 锁了的卡上临时换一套画风
+    const sel = d.querySelector("#ipe-template-slot"); sel.value = "tpl_1"; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
+    ok(val("tpl").indexOf("默认") >= 0 && row("tpl").textContent.indexOf("水墨") >= 0 && chip("tpl").textContent.indexOf("改锁") >= 0 && !all.disabled, "临时换了一套：这行写着现在用的和锁的各是哪套，小锁变「改锁」，全锁按钮又能点", row("tpl").textContent);
+    chip("tpl").click();
+    eq(locks("templateCardLockJson")["char:yuan.png"], "tpl_1", "点「改锁」：锁成现在这套");
+
+    // 点一行跳过去
+    d.querySelector("#ipe-section-char-anchors").classList.add("collapsed");
+    row("anchor").querySelector(".ipe-card-v").click();
+    ok(!d.querySelector("#ipe-section-char-anchors").classList.contains("collapsed"), "点锚点那行：角色锚点那张卡展开");
+    row("lrule").querySelector(".ipe-card-v").click();
+    const slot = d.querySelector("#ipe-ledger-prompt-slot");
+    ok(st.activeTab === "ledger" && d.querySelector("#ipe-section-ledger").style.display !== "none" && slot.closest("details").open, "点挂账规则那行：切到挂账页、规则那一折展开");
+    row("order").querySelector(".ipe-card-v").click();
+    ok(st.activeTab === "image" && !d.querySelector("#ipe-section-preview").classList.contains("collapsed"), "点长期指令那行：回到生图页的预览卡");
+
+    // 长期指令写了
+    const co = d.querySelector("#ipe-card-order"); co.value = "顾寒脖子上的纹身必须提取"; co.dispatchEvent(new w.Event("input", { bubbles: true })); co.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await wait(50);
+    ok(val("order").indexOf("12 字") >= 0 || val("order").indexOf("纹身") >= 0, "长期指令写了：这行显示字数和开头", val("order"));
+
+    // 换卡
+    tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.chatMetadata = {}; tavern.getCurrentChatId = () => "chat-1";
+    await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(title().indexOf("顾寒") >= 0 && title().indexOf("0/4") >= 0 && val("note").indexOf("还没选") >= 0 && !all.disabled, "换到另一张卡：标题、几样锁没锁、本卡要点都换成这张卡的", title() + " / " + val("note"));
+    tavern.characterId = undefined; tavern.name2 = ""; tavern.getCurrentChatId = () => "";
+    await tavern.eventSource.emit("CHAT_CHANGED"); await wait(260);
+    ok(title().indexOf("还没打开") >= 0 && all.disabled, "没打开角色卡：标题说还没打开，全锁按钮灰着", title());
 })();
 
 console.log("\n" + "\u2500".repeat(46));
