@@ -530,6 +530,14 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         check(css.length < 172000, '样式表瘦下来了（原来 18.9 万字，清掉约 2.8 万）：现在 ' + css.length + ' 字');
         check(['html #ipe-panel.ipe-beach .ipe-btn {', '#ipe-panel .ipe-toggle-slider::before {', '#ipe-drawer#ipe-drawer [data-ipe-tone="ok"]', 'html body.ipe-skin-dango:not(#_) #ipe-drawer input[type="checkbox"]:checked {', 'html #ipe-panel#ipe-panel .ipe-undo-row .ipe-btn.ipe-undo-item'].every(x => !css.includes(x)), '被做工层盖住、从没生效过的旧规则清掉了（各皮肤旧的按钮 / 开关 / 抽屉开关那些）');
         check(['2.37.0 八套皮肤共用一套「贴纸」做工', '2.43.0 抽屉（酒馆「扩展」页里那一份）也用上同一套做工', 'html #ipe-panel#ipe-panel .ipe-btn {', '@media (max-width: 480px)', '@media (prefers-reduced-motion: reduce)', '@keyframes ipe-card-flash', '.ipe-notice[class*="ipe-skin-"].ipe-notice-error'].every(x => css.includes(x)) && (css.match(/@keyframes /g) || []).length === 17 && (css.match(/@media /g) || []).length === 10, '活着的都在：两层做工、媒体查询 10 处、动画 17 个、名字是运行时拼出来的通知卡规则');
+        // 2.46.0 公共块跟画风解绑：抽屉里也是同一套（挂哪份单独选、「挂这一份」按钮、没有批量挂接）
+        for (const prefix of ['ipe', 'iped']) {
+            const g = id => d.querySelector('#' + prefix + '-' + id);
+            check(!!g('common-use') && !!g('common-inuse-info') && !g('common-batch-run') && !g('common-batch-kw') && !g('common-batch-target') && (g('template-common').closest('label') || g('template-common').previousElementSibling).textContent.indexOf('换画风不跟着变') >= 0, prefix + ' 「挂公共块」写明换画风不跟着变；公共块编辑区有「挂这一份」和现在挂着哪份；批量挂接拿掉了');
+        }
+        w.eval('(function(){ var c = cfg(); c.commonBlocksJson = JSON.stringify([{ id: "u1", name: "通用", value: "U." }, { id: "u2", name: "古风", value: "G." }]); c.commonInUse = "u1"; c.activeCommonBlock = "u2"; ipeRefreshTemplateEditors(); ipeRefreshCommonEditors(); })()');
+        d.querySelector('#iped-common-use').click();
+        check(w.eval('cfg().commonInUse') === 'u2' && d.querySelector('#iped-template-common').value === 'u2' && d.querySelector('#ipe-template-common').value === 'u2' && d.querySelector('#iped-common-use').disabled && d.querySelector('#iped-common-inuse-info').textContent.indexOf('现在挂着：「古风」') >= 0 && d.querySelector('#ipe-common-inuse-info').textContent.indexOf('现在挂着：「古风」') >= 0, '在抽屉里点「挂这一份」：挂上了，两边的下拉和说明一起变');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

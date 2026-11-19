@@ -65,7 +65,7 @@ function boot(floors, reuse) {   // reuse：拿同一个聊天再开一个新页
         "ipeLedgerRun", "ipeLedgerCallAPI", "ipeLedgerReadStream", "ipeLedgerIsReasoningModel",
         "runExtract", "ipeImgParseLayers", "buildInjectTag", "reinjectDescToMessage", "injectDescToMessage", "ipeInstallMesButtons", "ipeGetSuppPresets", "ipeRefreshSuppPresets", "buildVisionUserPrompt", "ipeImgLayersRead", "onRerollLayer",
         "ipeInstallZoomButtons", "ipeZoomOpen", "ipeZoomClose", "ipeZoomTitleFor",
-        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeGetAnchorValue", "ipeBatchSetTemplateCommon", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
+        "ipeImgPackBuild", "ipeImgPackImportText", "ipeGetBaseTemplates", "ipeGetCommonBlocks", "ipeDeleteCommonBlock", "ipeRefreshAnchorEditors", "ipeGetAnchorValue", "ipeGetRulePresets", "ipeGetSystemPromptPresets", "ipeGetAnchorPresets", "ipeGetAnchorUsageGuide",
         "ipeLedgerReadModeMarker", "ipeLedgerStripModeTag", "ipeLedgerModeEffective", "ipeLedgerModeState", "ipeLedgerModeSnippet", "ipeLedgerSystemText",
         "ipeLedgerMirrorFlush", "ipeLedgerMirrorInvalidate", "ipeSortByName", "ipeRefreshTemplateEditors",
         "ipeLedgerCompress", "ipeLedgerCommitCompressed", "ipeLedgerEstimateChars", "ipeLedgerVersionInfo", "ipeLedgerHistoryBlock", "ipeLedgerRefreshEditors", "ipeLedgerInherit", "ipeLedgerInheritList", "ipeLedgerRefreshInherit", "ipeLedgerCardKey", "ipeLedgerCardSlotSet", "ipeLedgerPromptValueForMode", "ipeLedgerModeRefresh",
@@ -746,7 +746,7 @@ await (async () => {
     ok(F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-ledger", data: {} })) === null, "账本包拒收，不会串门");
 })();
 
-console.log("\n【31c】 公共块（2.23.0）：拼接顺序、{Common} 占位符、自动插到 </draw> 前、防重复、剥标签");
+console.log("\n【31c】 公共块（2.23.0；2.46.0 起挂哪份是单独选的，不写在模板上）：拼接顺序、{Common} 占位符、自动插到 </draw> 前、防重复、剥标签");
 {
     const { w, tavern, F } = boot(4);
     const st = tavern.extensionSettings[F("EXT_NAME")];
@@ -754,129 +754,117 @@ console.log("\n【31c】 公共块（2.23.0）：拼接顺序、{Common} 占位�
     st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON RULES.\nClosing line." }, { id: "c2", name: "古风", value: "ANCIENT RULES." }]);
     const FIVE = "<draw>\n{Camera}\n{Env}\n{Mood}\n{Chars}\n{Pose}\n{Description}\nSTYLE BODY.\n</draw>";
     const five = { camera: "C.", env: "E.", mood: "M.", chars: "CH.", pose: "P." };
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE, common: "c1" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]); st.commonInUse = "c1";
     st.activeBaseTemplate = "tpl_1";
     eq(F("buildInjectTag")("ignored", five), "<draw>\nC.\nE.\nM.\nCH.\nP.\nSTYLE BODY.\n\nCOMMON RULES.\nClosing line.\n</draw>", "场景五段 → 画风正文 → 空一行 → 公共块（含收尾句）→ </draw>");
     eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n\nCOMMON RULES.\nClosing line.\n</draw>", "没分层：整段 → 画风正文 → 公共块");
     eq(F("buildInjectTag")("d", null).split("COMMON RULES.").length, 2, "只拼一份");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]); st.commonInUse = "";
     eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n</draw>", "不挂：跟以前一模一样");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE, common: "gone" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]); st.commonInUse = "gone";
     eq(F("buildInjectTag")("flat.", null), "<draw>\nflat.\nSTYLE BODY.\n</draw>", "挂的公共块不存在：当不挂");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "单行", value: "<draw>{Description}</draw>", common: "c2" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "单行", value: "<draw>{Description}</draw>" }]); st.commonInUse = "c2";
     eq(F("buildInjectTag")("d", null), "<draw>d\n\nANCIENT RULES.</draw>", "单行包裹：插在 </draw> 前一行");
     // {Common} 占位符
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "占位", value: "<draw>{Description}\n{Common}\nSPECIAL TAIL.\n</draw>", common: "c2" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "占位", value: "<draw>{Description}\n{Common}\nSPECIAL TAIL.\n</draw>" }]); st.commonInUse = "c2";
     eq(F("buildInjectTag")("d", null), "<draw>d\nANCIENT RULES.\nSPECIAL TAIL.\n</draw>", "写了 {Common}：就放在那里，不再自动追加");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "占位", value: "<draw>{Description}\n{Common}\nSPECIAL TAIL.\n</draw>" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "占位", value: "<draw>{Description}\n{Common}\nSPECIAL TAIL.\n</draw>" }]); st.commonInUse = "";
     eq(F("buildInjectTag")("d", null), "<draw>d\nSPECIAL TAIL.\n</draw>", "不挂：{Common} 那一行整行去掉，不留字面量");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "行内", value: "<draw>{Description} {Common}</draw>", common: "c2" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "行内", value: "<draw>{Description} {Common}</draw>" }]); st.commonInUse = "c2";
     eq(F("buildInjectTag")("d", null), "<draw>d ANCIENT RULES.</draw>", "行内 {Common}");
     // 防重复：正文里已原样带着（空白不同也算）
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "旧", value: "<draw>{Description}\nSTYLE.\nCOMMON   RULES.\n  Closing line.\n</draw>", common: "c1" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "旧", value: "<draw>{Description}\nSTYLE.\nCOMMON   RULES.\n  Closing line.\n</draw>" }]); st.commonInUse = "c1";
     eq(F("buildInjectTag")("d", null), "<draw>d\nSTYLE.\nCOMMON   RULES.\n  Closing line.\n</draw>", "旧正文已原样带着通用段落：不再叠一份");
     // 非包裹型：追加在末尾；剥标签照样剥得掉，公共块改过后老楼也剥得掉
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "非包裹", value: "IMG START\n{Description}\nIMG END", common: "c2" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "非包裹", value: "IMG START\n{Description}\nIMG END" }]); st.commonInUse = "c2";
     const t1 = F("buildInjectTag")("d", null);
     eq(t1, "IMG START\nd\nIMG END\n\nANCIENT RULES.", "非包裹型：公共块追加在末尾");
     eq(strip("正文。\n\n" + t1), "正文。", "非包裹型挂公共块：挂账剥得掉");
     st.commonBlocksJson = JSON.stringify([{ id: "c2", name: "古风", value: "ANCIENT RULES v2." }]);
     eq(strip("正文。\n\n" + t1), "正文。", "公共块改过之后，旧文本注入的老楼照样剥得掉（后缀对不上退回按前缀剥到楼尾）");
     eq(strip("正文。\n\nIMG START\nd\nIMG END"), "正文。", "挂之前注入的老楼（不带公共块）也剥得掉");
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE, common: "c2" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: FIVE }]); st.commonInUse = "c2";
     eq(strip("正文。\n\n" + F("buildInjectTag")("d", null)), "正文。", "包裹型：按标签对剥");
 }
 
-console.log("\n【31d】 公共块：删除回落为不挂并报名单；批量挂接 / 批量不挂，执行前列名单确认");
+console.log("\n【31d】 公共块：删掉现在挂的那份 = 变成不挂并说一声；模板区「挂公共块」下拉改的是「现在挂的」，不是某一个模板的（2.46.0）");
 {
     const { w, tavern, F } = boot(4);
     const st = tavern.extensionSettings[F("EXT_NAME")];
-    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }]);
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }, { id: "c3", name: "闲置", value: "IDLE." }]);
     st.baseTemplatesJson = JSON.stringify([
         { id: "t1", name: "古风水墨", value: "<draw>{Description}</draw>" },
-        { id: "t2", name: "古风工笔", value: "<draw>{Description}</draw>", common: "c1" },
-        { id: "t3", name: "日系厚涂", value: "<draw>{Description}</draw>", common: "c1" }]);
-    const T = () => Object.fromEntries(F("ipeGetBaseTemplates")().map(t => [t.name, t.common]));
+        { id: "t2", name: "古风工笔", value: "<draw>{Description}</draw>" },
+        { id: "t3", name: "日系厚涂", value: "<draw>{Description}</draw>" }]);
+    st.activeBaseTemplate = "t1"; st.commonInUse = "c1";
     let asked = "";
     w.confirm = m => { asked = m; return false; };
-    eq(F("ipeBatchSetTemplateCommon")("古风", "c2"), null, "确认框取消：返回 null");
-    ok(asked.indexOf("古风水墨") >= 0 && asked.indexOf("古风工笔") >= 0 && asked.indexOf("日系厚涂") < 0, "确认框列出将被修改的模板名单");
-    eq(T()["古风水墨"], "", "取消 = 什么都没动");
-    w.confirm = () => true;
-    const r1 = F("ipeBatchSetTemplateCommon")("古风", "c2");
-    eq(r1.changed.length, 2, "名字含「古风」的两个模板改挂古风");
-    eq(JSON.stringify(T()), JSON.stringify({ "古风水墨": "c2", "古风工笔": "c2", "日系厚涂": "c1" }), "其他模板不动");
-    const r2 = F("ipeBatchSetTemplateCommon")("", "");
-    eq(r2.changed.length, 3, "关键词留空 = 全部模板；目标空 = 批量改为不挂");
-    eq(JSON.stringify(T()), JSON.stringify({ "古风水墨": "", "古风工笔": "", "日系厚涂": "" }), "全部不挂");
-    F("ipeBatchSetTemplateCommon")("", "c1");
-    asked = ""; w.confirm = m => { asked = m; return true; };
+    eq(F("ipeDeleteCommonBlock")("c1"), null, "确认框取消：返回 null，什么都没动");
+    ok(asked.indexOf("现在挂的就是它") >= 0 && st.commonInUse === "c1" && F("ipeGetCommonBlocks")().length === 3, "删的是现在挂的那份：确认框里说清删掉以后变成不挂", asked);
+    w.confirm = m => { asked = m; return true; };
+    const d0 = F("ipeDeleteCommonBlock")("c3");
+    ok(d0 && d0.wasInUse === false && asked.indexOf("现在挂的不是它") >= 0 && st.commonInUse === "c1", "删一份没挂着的：现在挂的不动");
     const del = F("ipeDeleteCommonBlock")("c1");
-    ok(asked.indexOf("3 个模板") >= 0 && asked.indexOf("日系厚涂") >= 0, "删除前说清哪些模板受影响");
-    eq(JSON.stringify(del.affected.sort()), JSON.stringify(["古风工笔", "古风水墨", "日系厚涂"].sort()), "返回受影响的模板名");
-    eq(JSON.stringify(T()), JSON.stringify({ "古风水墨": "", "古风工笔": "", "日系厚涂": "" }), "引用它的模板回落为不挂");
+    ok(del && del.wasInUse === true && st.commonInUse === "", "删掉现在挂的那份：变成不挂");
+    eq(F("buildInjectTag")("d", null), "<draw>d</draw>", "不挂了：贴出来没有公共块");
     eq(F("ipeGetCommonBlocks")().map(b => b.id).join(), "c2", "公共块删掉了");
     // 界面：模板区的「挂公共块」下拉
     const d = w.document;
     F("ipeRefreshTemplateEditors")();
     const sel = d.querySelector("#ipe-template-common");
-    ok(sel && Array.from(sel.options).map(o => o.textContent).join("|") === "（不挂）|古风", "模板区「挂公共块」下拉：不挂 + 各公共块");
+    ok(sel && Array.from(sel.options).map(o => o.textContent).join("|") === "（不挂）|古风" && sel.value === "", "模板区「挂公共块」下拉：不挂 + 各公共块，停在现在挂的那格");
     sel.value = "c2"; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
-    eq(F("ipeGetBaseTemplates")().find(t => t.id === st.activeBaseTemplate).common, "c2", "下拉改挂写回当前模板");
+    ok(st.commonInUse === "c2" && F("ipeGetBaseTemplates")().every(t => !t.common), "下拉改的是「现在挂的」，不往模板上写");
+    ok(!d.querySelector("#ipe-common-batch-run") && !d.querySelector("#ipe-common-batch-kw"), "「批量挂接」那一组拿掉了（公共块不跟模板绑，用不上了）");
 }
 
-console.log("\n【31e】 画风包 _v 2：带公共块导出导入；旧版包导入默认不挂");
+console.log("\n【31e】 画风包：带公共块导出导入；导入不动现在挂的那份、也不往模板上绑（2.46.0）");
 {
     const a = boot(4);
     const sa = a.tavern.extensionSettings[a.F("EXT_NAME")];
     sa.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }, { id: "c3", name: "闲置", value: "IDLE." }]);
-    sa.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "水墨", value: "<draw>{Description}</draw>", common: "c2" }, { id: "t2", name: "厚涂", value: "<draw>{Description}</draw>", common: "c1" }, { id: "t3", name: "素", value: "<draw>{Description}</draw>" }]);
-    sa.activeBaseTemplate = "t1";
+    sa.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "水墨", value: "<draw>{Description}</draw>" }, { id: "t2", name: "厚涂", value: "<draw>{Description}</draw>" }, { id: "t3", name: "素", value: "<draw>{Description}</draw>" }]);
+    sa.activeBaseTemplate = "t1"; sa.commonInUse = "c2";
     const all = a.F("ipeImgPackBuild")("all");
-    eq(all._v, 2, "格式版本 _v 升到 2");
+    eq(all._v, 2, "格式版本 _v 还是 2（老版本照样读得了）");
     eq(all.commons.length, 3, "全部：公共块都在");
-    eq(all.templates.find(t => t.name === "水墨").commonName, "古风", "模板带 common / commonName");
-    eq(all.templates.find(t => t.name === "素").common, "", "不挂的模板 common 为空");
+    ok(all.templates.every(t => t.commonName === "古风" && t.common === "c2"), "模板上照旧写着 common / commonName（写的是现在挂的那份）：给 2.45.0 以前的版本导入时认");
     const cur = a.F("ipeImgPackBuild")("current");
-    eq(cur.commons.map(c => c.name).join(), "古风", "只导出当前：只带当前模板挂的那份");
+    eq(cur.commons.map(c => c.name).join(), "古风", "只导出当前：只带现在挂的那份");
+    sa.commonInUse = "";
+    eq(a.F("ipeImgPackBuild")("current").commons.length, 0, "现在不挂：当前这套不带公共块");
     eq(a.F("ipeImgPackBuild")("anchors").commons.length, 0, "锚点包不带公共块");
 
     const b = boot(4);
     const sb = b.tavern.extensionSettings[b.F("EXT_NAME")];
-    b.w.confirm = () => true;
+    let asked = [];
+    b.w.confirm = m => { asked.push(m); return true; };
     sb.commonBlocksJson = JSON.stringify([{ id: "mine", name: "通用", value: "MY COMMON." }]);
     sb.baseTemplatesJson = JSON.stringify([{ id: "x1", name: "水墨", value: "<draw>{Description}</draw>" }]);
+    sb.activeBaseTemplate = "x1"; sb.commonInUse = "mine";
     const sum = b.F("ipeImgPackImportText")(JSON.stringify(all));
     eq(sum.commons.added, 2, "公共块：古风、闲置新增"); eq(sum.commons.replaced, 1, "同名「通用」覆盖");
     const bc = b.F("ipeGetCommonBlocks")();
     eq(bc.find(c => c.name === "通用").id, "mine", "同名覆盖保留本地 id");
-    const bt = b.F("ipeGetBaseTemplates")();
-    const gu = bc.find(c => c.name === "古风");
-    eq(bt.find(t => t.name === "水墨").common, gu.id, "正文相同只是改挂：也算覆盖，挂到本地的「古风」");
-    eq(sum.templates.replaced, 1, "改挂计入覆盖");
-    eq(bt.find(t => t.name === "厚涂").common, "mine", "新模板按名字挂到本地「通用」");
-    sb.activeBaseTemplate = bt.find(t => t.name === "水墨").id;
-    eq(b.F("buildInjectTag")("d", null), "<draw>d\n\nANCIENT.</draw>", "导入后直接能拼");
+    eq(sum.templates.replaced, 0, "正文一样的同名模板不算覆盖（包里它挂哪份不再算数）");
+    ok(b.F("ipeGetBaseTemplates")().every(t => !t.common), "导进来的模板不往上绑公共块");
+    eq(sb.commonInUse, "mine", "导入不替你换现在挂的那份");
+    eq(b.F("buildInjectTag")("d", null), "<draw>d\n\nCOMMON.</draw>", "还是挂着自己的「通用」（内容被包里同名的那份覆盖了）");
     eq(b.F("ipeImgPackImportText")(JSON.stringify(all)) && b.F("ipeGetBaseTemplates")().length, 3, "再导一次：没有重复");
 
-    // 旧版包：没有 commons
+    // 旧版包：没有 commons。以前要问一句挂不挂，现在不问了，也不动现在挂的
     const c = boot(4);
     const sc = c.tavern.extensionSettings[c.F("EXT_NAME")];
     sc.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }]);
-    sc.activeCommonBlock = "c1";
-    sc.baseTemplatesJson = JSON.stringify([{ id: "x1", name: "水墨", value: "OLD", common: "c1" }, { id: "x2", name: "没动的", value: "SAME", common: "c1" }]);
-    let asked = [];
-    c.w.confirm = m => { asked.push(m); return m.indexOf("旧版画风包") < 0; };
+    sc.baseTemplatesJson = JSON.stringify([{ id: "x1", name: "水墨", value: "OLD" }, { id: "x2", name: "没动的", value: "SAME" }]);
+    sc.commonInUse = "c1";
+    asked = [];
+    c.w.confirm = m => { asked.push(m); return true; };
     const old = { _fmt: "ipe-image-pack", _v: 1, templates: [{ name: "水墨", value: "<draw>{Description}\nold generic rules.</draw>" }, { name: "新来的", value: "<draw>{Description}</draw>" }, { name: "没动的", value: "SAME" }] };
     const s1 = c.F("ipeImgPackImportText")(JSON.stringify(old));
-    ok(s1 && s1.legacy === true, "认得是旧版包");
-    ok(asked.some(m => m.indexOf("旧版画风包") >= 0 && m.indexOf("不挂") >= 0), "旧包导入问一句挂不挂，默认不挂");
-    const ct = Object.fromEntries(c.F("ipeGetBaseTemplates")().map(t => [t.name, t.common]));
-    eq(ct["水墨"], "", "被旧包覆盖的模板改为不挂（旧正文里带着通用段落）");
-    eq(ct["新来的"], "", "旧包新增的模板不挂");
-    eq(ct["没动的"], "c1", "内容相同没被覆盖的模板保持原挂");
-    c.F("ipeImgPackImportText")(JSON.stringify({ _fmt: "ipe-image-pack", templates: [{ name: "要挂", value: "<draw>{Description}</draw>" }] }), { legacyCommon: "c1" });
-    eq(c.F("ipeGetBaseTemplates")().find(t => t.name === "要挂").common, "c1", "开关打开：旧包模板挂到指定公共块");
+    ok(s1 && s1.templates.added === 1 && s1.templates.replaced === 1, "旧版包照常导入：新增一套、覆盖一套");
+    ok(!asked.some(m => m.indexOf("旧版画风包") >= 0), "不再问「旧包要不要挂公共块」");
+    eq(sc.commonInUse, "c1", "现在挂的不动");
     eq(c.F("ipeGetCommonBlocks")().length, 1, "旧包不动公共块");
 }
 
@@ -2756,7 +2744,7 @@ await (async () => {
     const { w, tavern, F } = boot(4);
     const st = tavern.extensionSettings[F("EXT_NAME")];
     st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON RULES." }]);
-    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: "<draw>\nCamera: {Camera}\nSetting: {Env}, warm watercolor wash\nMood: {Mood}\n{Chars}\nsoft light, {Pose}, dreamy haze\nSTYLE: ink and wash.\n</draw>", common: "c1" }]);
+    st.baseTemplatesJson = JSON.stringify([{ id: "tpl_1", name: "水彩", value: "<draw>\nCamera: {Camera}\nSetting: {Env}, warm watercolor wash\nMood: {Mood}\n{Chars}\nsoft light, {Pose}, dreamy haze\nSTYLE: ink and wash.\n</draw>" }]); st.commonInUse = "c1";   // 2.46.0 挂哪份公共块不写在模板上了
     st.activeBaseTemplate = "tpl_1";
     const B = F("buildInjectTag");
     eq(B("x", { camera: "C.", env: "E.", mood: "M.", chars: "CH.", pose: "P." }), "<draw>\nCamera: C.\nSetting: E., warm watercolor wash\nMood: M.\nCH.\nsoft light, P., dreamy haze\nSTYLE: ink and wash.\n\nCOMMON RULES.\n</draw>", "五层齐全：照常");
@@ -3850,6 +3838,73 @@ await (async () => {
     const eStep = () => e.w.document.querySelector('#ipe-guide [data-step="test"]');
     await until(() => !!eStep() && eStep().classList.contains("ipe-guide-done"));   // 卡片是记完设置后下一个瞬间才重画的
     ok(se.guideTested === true && !!eStep() && eStep().classList.contains("ipe-guide-done"), "没点测试、直接提取成功了：第 ② 步也算过");
+})();
+
+console.log("\n【84】 公共块跟画风解绑（2.46.0）：以前每个模板各挂一份，换一个画风就得再手动挂一次。现在「挂哪一份」是单独的一个选择：换画风它不动，手动换才换，不换就一直是那份");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }]);
+    // 旧数据里模板上还留着各自挂的那份：水墨挂古风、厚涂挂通用、素描不挂 —— 这些不再算数
+    st.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "水墨", value: "<draw>INK {Description}</draw>", common: "c2" }, { id: "t2", name: "厚涂", value: "<draw>OIL {Description}</draw>", common: "c1" }, { id: "t3", name: "素描", value: "<draw>PEN {Description}</draw>" }]);
+    st.activeBaseTemplate = "t1"; st.commonInUse = "c2";
+    F("ipeRefreshTemplateEditors")();
+    const tag = () => F("buildInjectTag")("d", null);
+    const slot = d.querySelector("#ipe-template-slot"), cm = d.querySelector("#ipe-template-common");
+    await until(() => cm.options.length === 3);
+    const pick = id => { slot.value = id; slot.dispatchEvent(new w.Event("change", { bubbles: true })); };
+    eq(tag(), "<draw>INK d\n\nANCIENT.</draw>", "水墨 + 现在挂的「古风」");
+    pick("t2");
+    ok(st.activeBaseTemplate === "t2" && tag() === "<draw>OIL d\n\nANCIENT.</draw>" && cm.value === "c2", "换成厚涂：公共块没动，还是「古风」（以前会跟着换成厚涂自己挂的「通用」）", tag());
+    pick("t3");
+    ok(tag() === "<draw>PEN d\n\nANCIENT.</draw>" && cm.value === "c2", "换成以前「不挂」的素描：照样挂着「古风」，不用再手动挂一次", tag());
+    // 手动换
+    cm.value = "c1"; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    ok(st.commonInUse === "c1" && tag() === "<draw>PEN d\n\nCOMMON.</draw>" && imgStatus(w).indexOf("公共块换成「通用」") >= 0, "手动换成「通用」：马上生效，状态行说以后换哪个画风都挂它", imgStatus(w));
+    pick("t1");
+    eq(tag(), "<draw>INK d\n\nCOMMON.</draw>", "再换回水墨：还是手动选的「通用」，不会偷偷换回它以前挂的「古风」");
+    cm.value = ""; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    ok(st.commonInUse === "" && tag() === "<draw>INK d</draw>" && imgStatus(w).indexOf("不挂公共块") >= 0, "选「（不挂）」：哪个画风都不挂", imgStatus(w));
+    pick("t2");
+    eq(tag(), "<draw>OIL d</draw>", "换画风也还是不挂");
+    ok(F("ipeGetBaseTemplates")().map(t => t.common).join("|") === "c2|c1|", "模板上旧的字段原样留着，没人去改它");
+
+    // 公共块编辑区：看的那份和挂的那份分得清，一颗按钮挂上
+    const es = d.querySelector("#ipe-common-slot"), use = d.querySelector("#ipe-common-use"), info = d.querySelector("#ipe-common-inuse-info");
+    es.value = "c2"; es.dispatchEvent(new w.Event("change", { bubbles: true }));
+    ok(st.commonInUse === "" && info.textContent.indexOf("现在不挂公共块") >= 0 && info.textContent.indexOf("只是在编辑") >= 0 && !use.disabled, "在编辑区切到「古风」只是看它、改它：挂的没换，底下写得明白", info.textContent);
+    use.click();
+    ok(st.commonInUse === "c2" && tag() === "<draw>OIL d\n\nANCIENT.</draw>" && cm.value === "c2" && use.disabled && use.textContent.indexOf("现在挂的就是这份") >= 0 && info.textContent.indexOf("现在挂着：「古风」") >= 0, "点「挂这一份」：挂上了，模板区那格跟着变，按钮写着现在挂的就是这份", info.textContent);
+    cm.value = "c1"; cm.dispatchEvent(new w.Event("change", { bubbles: true }));
+    eq(es.value, "c1", "在模板区换挂的那份：编辑区跟过去，看到的就是挂着的");
+
+    // 剥标签：老楼可能是任何一个模板配任何一份贴的，都认
+    const strip = F("ipeLedgerStripImageTag");
+    st.baseTemplatesJson = JSON.stringify([{ id: "n1", name: "非包裹", value: "IMG START\n{Description}\nIMG END" }]); st.activeBaseTemplate = "n1";
+    st.commonInUse = "c2"; const withGu = tag();
+    st.commonInUse = "c1"; const withTong = tag();
+    ok(withGu.indexOf("ANCIENT.") > 0 && withTong.indexOf("COMMON.") > 0 && strip("正文。\n\n" + withGu) === "正文。" && strip("正文。\n\n" + withTong) === "正文。" && strip("正文。\n\nIMG START\nd\nIMG END") === "正文。", "以前挂「古风」贴的楼、现在挂「通用」贴的楼、没挂时贴的楼：挂账都剥得干净");
+
+    // 体检那一行写的是现在挂的
+    ok(/画风模板[^\n]*公共块：「通用」/.test(w.eval("ipeDiagReport")()), "体检里「公共块」写的是现在挂的那份");
+
+    // 升级：头一回载入时还没定过（null）——按当时那个模板挂的那份定下来，出图不变
+    const u = boot(10); const su = u.tavern.extensionSettings[u.F("EXT_NAME")];
+    su.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }]);
+    su.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "水墨", value: "<draw>INK {Description}</draw>", common: "c2" }, { id: "t2", name: "厚涂", value: "<draw>OIL {Description}</draw>", common: "c1" }]);
+    su.activeBaseTemplate = "t1"; su.commonInUse = null;
+    eq(u.F("buildInjectTag")("d", null), "<draw>INK d\n\nANCIENT.</draw>", "还没定的那一下：照旧版的规矩用当前模板挂的那份，出图不变");
+    ok(u.w.eval("ipeCommonMigrate")() === true && su.commonInUse === "c2", "定下来：现在挂的 = 升级时那个模板挂着的「古风」");
+    su.activeBaseTemplate = "t2";
+    eq(u.F("buildInjectTag")("d", null), "<draw>OIL d\n\nANCIENT.</draw>", "定下来以后换画风：不再跟着模板走");
+    ok(u.w.eval("ipeCommonMigrate")() === false, "只定一次");
+    const r = boot(10, u.tavern);
+    eq(r.tavern.extensionSettings[r.F("EXT_NAME")].commonInUse, "c2", "重新载入页面：记着的还是那份");
+    // 全新安装：没有公共块，定成不挂
+    const n = boot(10);
+    eq(n.tavern.extensionSettings[n.F("EXT_NAME")].commonInUse, "", "全新安装：载入时就定成不挂");
 })();
 
 console.log("\n" + "\u2500".repeat(46));
