@@ -3977,6 +3977,56 @@ await (async () => {
     ok(/公共块：「通用」（🔒 这张卡锁的就是它）/.test(w.eval("ipeDiagReport")()), "体检里公共块后面注明这张卡锁的就是它");
 })();
 
+console.log("\n【86】 贴进楼里那一下要安静（2.47.1）：2.42.0 的后悔药每提取一次多叫了一回「存元数据」（单人聊天里 = 再存一遍整份聊天）；2.46.0 起认楼尾生图段要把每个模板配每份公共块都展开一遍，每次都从头算");
+await (async () => {
+    const { w, tavern, F } = boot(10); const d = w.document;
+    let desc = "A girl under the plum tree, first take.";
+    const st = imgApi(w, tavern, F, () => desc);
+    const n = { chat: 0, meta: 0 };
+    tavern.saveChatDebounced = () => { n.chat++; }; tavern.saveMetadataDebounced = () => { n.meta++; };
+    const mes = () => String(tavern.chat[9].mes || "");
+    await F("runExtract")(mes(), "", true, 9);
+    ok(mes().indexOf("first take") >= 0 && n.chat === 1 && n.meta === 0, "自动提取 + 自动注入一楼：只跟酒馆要一次存聊天（和酒馆自己的合并），不另外叫存元数据", JSON.stringify(n));
+    desc = "A girl under the plum tree, second take.";
+    await w.eval("onReroll")();
+    ok(mes().indexOf("second take") >= 0 && n.chat === 2 && n.meta === 0, "重新生成：同样只多一次", JSON.stringify(n));
+    ok(tavern.chatMetadata.ipe_img_undo_v1.floors["10"].items.length === 2, "后悔药照样记着两次（记在聊天数据里，跟着那一次存聊天一起落盘）");
+    d.querySelector("#ipe-undo-row .ipe-undo-item").click();
+    ok(mes().indexOf("first take") >= 0 && n.chat === 3 && n.meta === 0, "换回上一次：换楼里那段要存一次聊天，也不另叫存元数据", JSON.stringify(n));
+    desc = "preview only."; n.chat = 0; n.meta = 0;
+    await F("runExtract")(mes(), "", false, 9);
+    ok(n.chat === 0 && n.meta === 0, "只提取、没贴进楼里：什么都不存（预览框里的本来就只在内存里，贴的时候一起存）", JSON.stringify(n));
+    // 群聊：聊天数据记在群上，存它是一个小请求，不是整份聊天——这种才单独存
+    tavern.groupId = "g1"; desc = "group take."; n.chat = 0; n.meta = 0;
+    await F("runExtract")(mes(), "", false, 9);
+    ok(n.meta === 1 && n.chat === 0, "群聊里：记完单独存一下群的聊天数据（小请求）", JSON.stringify(n));
+    tavern.groupId = null;
+
+    // 认楼尾生图段：准备工作只做一次，设置没变就不重算；整段用一对标签包着的模板不用按公共块一份份展开
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON." }, { id: "c2", name: "古风", value: "ANCIENT." }, { id: "c3", name: "现代", value: "MODERN." }]);
+    const wrapped = []; for (let i = 0; i < 6; i++) wrapped.push({ id: "t" + i, name: "包裹" + i, value: "<draw>{Description}\nSTYLE " + i + "</draw>" });
+    st.baseTemplatesJson = JSON.stringify(wrapped.concat([{ id: "n1", name: "非包裹", value: "IMG START\n{Description}\nIMG END" }]));
+    st.activeBaseTemplate = "n1"; st.commonInUse = "c2";
+    let expands = 0; w.__cnt = () => { expands++; };
+    w.eval('var __ex0 = ipeExpandTemplateCommon; ipeExpandTemplateCommon = function(a, b, c){ __cnt(); return __ex0(a, b, c); };');
+    const strip = F("ipeLedgerStripImageTag");
+    const withGu = F("buildInjectTag")("d", null);
+    expands = 0;
+    eq(strip("正文。\n\n" + withGu), "正文。", "照样剥得干净");
+    const first = expands;
+    ok(first > 0 && first <= 6 + 4, "头一回要准备：6 个包裹型模板各展开一次，非包裹的那个按「不挂 + 3 份公共块」展开 4 次，一共不超过 10 次（以前是 7 × 4 = 28 次）", String(first));
+    expands = 0;
+    for (let i = 0; i < 20; i++) strip("正文 " + i + "。\n\n" + withGu);
+    eq(expands, 0, "设置没变：再剥 20 楼，一次都不用重新展开");
+    eq(strip("正文。\n\nIMG START\nd\nIMG END\n\nMODERN."), "正文。", "别的公共块贴的老楼照样认");
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "通用", value: "COMMON v2." }]);
+    expands = 0;
+    eq(strip("正文。\n\nIMG START\nd\nIMG END\n\nCOMMON v2."), "正文。", "公共块改了：自己发现、重新准备，新文本也认");
+    ok(expands > 0, "设置变了才重算");
+    st.baseTemplatesJson = JSON.stringify([{ id: "k1", name: "新的", value: "NEW START\n{Description}\nNEW END" }]);
+    eq(strip("正文。\n\nNEW START\nd\nNEW END"), "正文。", "模板改了也一样");
+})();
+
 console.log("\n" + "\u2500".repeat(46));
 console.log(fail === 0 ? `\u5168\u90E8\u901A\u8FC7 \u2705  ${pass} \u9879` : `${pass} \u901A\u8FC7 / ${fail} \u5931\u8D25 \u274C`);
 process.exit(fail === 0 ? 0 : 1);

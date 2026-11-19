@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.47.0";
+var IPE_VERSION = "2.47.1";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -1204,8 +1204,15 @@ function ipeLedgerHistoryBlock(dry, forFloor) {
    前缀 = 第一个占位符之前，后缀 = 最后一个占位符之后（以前这种模板整段当字面量找，永远找不到，
    几千字的风格正文就原样喂进了挂账）。
    模板整体是 <xxx>…</xxx> 一对标签包着的，直接按标签对剥：模板正文后来改过、旧楼是老版模板注入的，一样认得。 */
-function ipeLedgerStripImageTag(text) {
-    var out = String(text || "");
+/* 2.47.1 准备工作（把每个模板展开、推出前后缀、编好正则）只跟模板和公共块有关，跟楼无关：
+   算一次存着，模板 / 公共块的原文没变就一直用。以前每剥一楼都从头算一遍，2.46.0 起还要乘上公共块的份数，
+   几十个模板时一楼要十几毫秒，挂账、后悔药一楼要剥好几回。
+   整段用一对标签包着的模板（<draw>…</draw>，最常见）是按标签对剥的，挂哪份公共块都一样，不用一份份展开。 */
+var ipeStripPlanCache = { key: null, ops: null };
+function ipeLedgerStripPlan() {
+    var c = cfg();
+    var key = String(c.baseTemplatesJson || "") + "\u0001" + String(c.commonBlocksJson || "") + "\u0001" + String(c.baseTemplate || "");
+    if (ipeStripPlanCache.ops && ipeStripPlanCache.key === key) return ipeStripPlanCache.ops;
     var tpls = [];
     try {
         var list = ipeGetBaseTemplates(), blocks = ipeGetCommonBlocks();
@@ -1213,25 +1220,16 @@ function ipeLedgerStripImageTag(text) {
         // 2.46.0 公共块不跟模板绑了：老楼可能是任何一个模板配任何一份公共块贴的，每一份都试一遍
         if (Array.isArray(list)) list.forEach(function(x){
             if (!x || !x.value) return;
-            blocks.forEach(function(b){ if (String(b.value || "").trim()) tpls.push(ipeExpandTemplateCommon(x, b, blocks)); });
+            if (!ipeImgTemplateEnvelope(x.value)) blocks.forEach(function(b){ if (String(b.value || "").trim()) tpls.push(ipeExpandTemplateCommon(x, b, blocks)); });
             tpls.push(ipeExpandTemplateCommon(x, false));
         });
     } catch(e) {}
-    try { if (cfg().baseTemplate) tpls.push(String(cfg().baseTemplate)); } catch(e) {}
+    try { if (c.baseTemplate) tpls.push(String(c.baseTemplate)); } catch(e) {}
     tpls.push(IPE_DEFAULT_IMAGE_TEMPLATE);
     tpls.push(IPE_LEGACY_IMAGE_TEMPLATE);
 
     var esc = function(x){ return String(x).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
-    /* 注入永远追加在楼尾（injectDescToMessage 只做 trimEnd + "\n\n" + tag）。
-       所以「只有前缀」和「模板没占位符」这两种，都从**最后一次**出现的位置剥到楼尾，
-       而不是从第一次出现就一路剥——正文里恰好有同样的字，不会被误伤。 */
-    var stripTail = function(str, marker) {
-        var k = str.lastIndexOf(marker);
-        if (k < 0) return str;
-        return str.slice(0, k).replace(/\s+$/, "");
-    };
-
-    var seen = {};
+    var ops = [], seen = {}, seenEnv = {};
     for (var i = 0; i < tpls.length; i++) {
         var t = tpls[i];
         if (!t || seen[t]) continue;
@@ -1239,13 +1237,13 @@ function ipeLedgerStripImageTag(text) {
         var phs = ipeImgTemplatePlaceholders(t);
         if (!phs.length) {
             // buildInjectTag 对无占位符模板是 tpl + desc 直接拼接：整个模板字面量就是前缀
-            if (t.trim()) out = stripTail(out, t);
+            if (t.trim()) ops.push({ k: "tail", m: t });
             continue;
         }
         var envTag = ipeImgTemplateEnvelope(t);
         if (envTag) {
-            // <draw>…</draw> 这类整体包裹：按标签对剥，不依赖中间那几千字风格正文一字不差
-            try { out = out.replace(new RegExp("\\s*<" + esc(envTag) + "\\s*>[\\s\\S]*?<\\/" + esc(envTag) + "\\s*>", "g"), ""); } catch(e) {}
+            // <draw>…</draw> 这类整体包裹：按标签对剥，不依赖中间那几千字风格正文一字不差。同一个标签名只留一条
+            if (!seenEnv[envTag]) { seenEnv[envTag] = true; try { ops.push({ k: "re", re: new RegExp("\\s*<" + esc(envTag) + "\\s*>[\\s\\S]*?<\\/" + esc(envTag) + "\\s*>", "g") }); } catch(e) {} }
             continue;
         }
         var pre = t.slice(0, phs[0].i), suf = t.slice(phs[phs.length - 1].e);
@@ -1257,16 +1255,36 @@ function ipeLedgerStripImageTag(text) {
             suf = nl1 >= 0 ? suf.slice(nl1) : "";
         }
         if (!pre && !suf) continue;
-        if (pre && suf) {
-            var was = out;
-            try { out = out.replace(new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), ""); } catch(e) {}
-            // 2.23.0 后缀对不上（模板后半段或公共块改过，老楼是旧文本注入的）：注入永远在楼尾，退回按前缀剥到楼尾
-            if (out === was) out = stripTail(out, pre);
-        } else if (pre) {
-            out = stripTail(out, pre);
-        } else {
+        try {
+            if (pre && suf) ops.push({ k: "both", re: new RegExp("\\s*" + esc(pre) + "[\\s\\S]*?" + esc(suf), "g"), m: pre });
+            else if (pre) ops.push({ k: "tail", m: pre });
             // 只有后缀：desc + suf 追加在楼尾，没有可靠起点，只能剥掉最后一段（最后一个空行之后到后缀）
-            try { out = out.replace(new RegExp("\\n\\n(?:(?!\\n\\n)[\\s\\S])*?" + esc(suf) + "\\s*$"), ""); } catch(e) {}
+            else ops.push({ k: "re", re: new RegExp("\\n\\n(?:(?!\\n\\n)[\\s\\S])*?" + esc(suf) + "\\s*$") });
+        } catch(e) {}
+    }
+    ipeStripPlanCache = { key: key, ops: ops };
+    return ops;
+}
+function ipeLedgerStripImageTag(text) {
+    var out = String(text || "");
+    var ops = ipeLedgerStripPlan();
+    /* 注入永远追加在楼尾（injectDescToMessage 只做 trimEnd + "\n\n" + tag）。
+       所以「只有前缀」和「模板没占位符」这两种，都从**最后一次**出现的位置剥到楼尾，
+       而不是从第一次出现就一路剥——正文里恰好有同样的字，不会被误伤。 */
+    var stripTail = function(str, marker) {
+        var k = str.lastIndexOf(marker);
+        if (k < 0) return str;
+        return str.slice(0, k).replace(/\s+$/, "");
+    };
+    for (var i = 0; i < ops.length; i++) {
+        var op = ops[i];
+        if (op.k === "tail") out = stripTail(out, op.m);
+        else if (op.k === "re") { op.re.lastIndex = 0; out = out.replace(op.re, ""); }
+        else {
+            var was = out;
+            op.re.lastIndex = 0; out = out.replace(op.re, "");
+            // 2.23.0 后缀对不上（模板后半段或公共块改过，老楼是旧文本注入的）：注入永远在楼尾，退回按前缀剥到楼尾
+            if (out === was) out = stripTail(out, op.m);
         }
     }
     return out;
@@ -12005,9 +12023,19 @@ function ipeImgUndoPush(idx, desc, layers) {
         v.seq = (Number(v.seq) || 0) + 1; f.seq = v.seq;   // 哪楼最近动过：按先后编号，不按钟点（同一毫秒里连记几楼也分得清）
         var keys = Object.keys(v.floors).sort(function(a, b){ return (Number(v.floors[b].seq) || 0) - (Number(v.floors[a].seq) || 0); });
         keys.slice(IPE_IMG_UNDO_FLOORS).forEach(function(k2){ delete v.floors[k2]; });
-        var c = ctx(); if (c && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+        ipeImgUndoPersist();
         return true;
     } catch(e) { return false; }
+}
+/* 2.47.1 记完不单独叫存盘。单人聊天里「存元数据」= 酒馆把整份聊天再写一遍、再备份一份，
+   2.42.0 每提取一次就多叫一回，正好叠在贴进楼里那一下旁边（2.27.13 费劲避开的就是这个）。
+   这几条记录就在聊天数据里：贴进楼里时本来就要存一次聊天，跟着那一次一起落盘；只提取没贴的，预览框里的东西本来也只在内存里。
+   群聊不一样：聊天数据记在群上，存它是一个小请求，不碰整份聊天，这种才单独存。 */
+function ipeImgUndoPersist() {
+    try {
+        var c = ctx();
+        if (c && c.groupId != null && c.groupId !== "" && c.groupId !== false && typeof c.saveMetadataDebounced === "function") c.saveMetadataDebounced();
+    } catch(e) {}
 }
 function ipeImgUndoTime(it) {
     if (!it || !it.at) return "之前贴在楼里的";
