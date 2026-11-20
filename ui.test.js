@@ -546,6 +546,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         d.querySelector('#iped-template-common-lock').click();
         check(JSON.parse(w.eval('cfg().commonCardLockJson') || '{}')[w.eval('ipeAnchorCardKey()')] === 'u2' && d.querySelector('#iped-template-common-lock-info').textContent.indexOf('已锁定「古风」') >= 0 && d.querySelector('#ipe-template-common-lock-info').textContent.indexOf('已锁定「古风」') >= 0 && d.querySelector('#iped-template-common-unlock').style.display !== 'none', '在抽屉里锁公共块：两边的说明一起变，解锁按钮露出来');
         check(!!d.querySelector('#ipe-card-ov [data-ov="common"] .ipe-card-lock') && d.querySelector('#ipe-card-ov [data-ov="common"] .ipe-card-lock').textContent.indexOf('已锁') >= 0 && d.querySelector('#ipe-card-ov-title').textContent.indexOf('/5') >= 0 && d.querySelector('#ipe-card-lock-all').textContent.indexOf('五样') >= 0, '「这张卡」总览多了公共块那行，小锁显示已锁；标题和全锁按钮按五样算');
+        // 2.48.0 「这张卡」总览中间那格是下拉；下拉右边补了小箭头（共用做工层的 background 把面板下拉原来的箭头盖掉了）
+        check(['anchor', 'tpl', 'common', 'rule', 'lrule', 'note'].every(k => { const s = d.querySelector('#ipe-card-sel-' + k); return !!s && s.tagName === 'SELECT' && s.options.length > 0 && !!s.closest('#ipe-card-ov'); }) && d.querySelector('#ipe-card-ov [data-ov="anchor"] .ipe-card-k').tagName === 'BUTTON', '「这张卡」总览：六样中间都是下拉，选项都填上了；左边的名字是能点的');
+        check(/select\.ipe-card-sel \{[^}]*linear-gradient\(45deg, transparent 50%, var\(--dg-a\) 50%\)[^}]*var\(--dg-field\) !important;/.test(css), '总览的下拉右边有个小箭头，用各皮肤的主色');
         console.log('通过 ' + count + ' 项');
     } finally { w.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

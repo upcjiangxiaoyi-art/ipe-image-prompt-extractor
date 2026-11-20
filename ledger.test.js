@@ -3541,7 +3541,8 @@ await (async () => {
     const sec = d.querySelector("#ipe-section-card");
     const title = () => sec.querySelector(".ipe-section-header > span").textContent;
     const row = k => sec.querySelector('[data-ov="' + k + '"]');
-    const val = k => row(k).querySelector(".ipe-card-v").textContent;
+    const val = k => { const sl = row(k).querySelector(".ipe-card-sel"); return sl ? (sl.selectedOptions[0] ? sl.selectedOptions[0].textContent : "") : row(k).querySelector(".ipe-card-v").textContent; };   // 2.48.0 能换的几样是下拉
+    const tip = k => row(k).querySelector(".ipe-card-tip").textContent;
     const chip = k => row(k).querySelector(".ipe-card-lock");
     const locks = key => { try { return JSON.parse(st[key] || "{}"); } catch (e) { return {}; } };
     ok(!!sec && sec === d.querySelector("#ipe-panel .ipe-sections > .ipe-section") && sec.classList.contains("collapsed") && !sec.hasAttribute("data-ipe-tab"), "面板里第一张卡就是它，默认收着（只占一行），不属于哪一页");
@@ -3564,17 +3565,17 @@ await (async () => {
 
     // 锁了的卡上临时换一套画风
     const sel = d.querySelector("#ipe-template-slot"); sel.value = "tpl_1"; sel.dispatchEvent(new w.Event("change", { bubbles: true }));
-    ok(val("tpl").indexOf("默认") >= 0 && row("tpl").textContent.indexOf("水墨") >= 0 && chip("tpl").textContent.indexOf("改锁") >= 0 && !all.disabled, "临时换了一套：这行写着现在用的和锁的各是哪套，小锁变「改锁」，全锁按钮又能点", row("tpl").textContent);
+    ok(val("tpl").indexOf("默认") >= 0 && tip("tpl").indexOf("水墨") >= 0 && chip("tpl").textContent.indexOf("改锁") >= 0 && !all.disabled, "临时换了一套：下拉停在现在用的，下面一行小字写着锁的是哪套，小锁变「改锁」，全锁按钮又能点", val("tpl") + " / " + tip("tpl"));
     chip("tpl").click();
     eq(locks("templateCardLockJson")["char:yuan.png"], "tpl_1", "点「改锁」：锁成现在这套");
 
     // 点一行跳过去
     d.querySelector("#ipe-section-char-anchors").classList.add("collapsed");
-    row("anchor").querySelector(".ipe-card-v").click();
-    ok(!d.querySelector("#ipe-section-char-anchors").classList.contains("collapsed"), "点锚点那行：角色锚点那张卡展开");
-    row("lrule").querySelector(".ipe-card-v").click();
+    row("anchor").querySelector(".ipe-card-k").click();
+    ok(!d.querySelector("#ipe-section-char-anchors").classList.contains("collapsed"), "点锚点那行左边的名字：角色锚点那张卡展开");
+    row("lrule").querySelector(".ipe-card-k").click();
     const slot = d.querySelector("#ipe-ledger-prompt-slot");
-    ok(st.activeTab === "ledger" && d.querySelector("#ipe-section-ledger").style.display !== "none" && slot.closest("details").open, "点挂账规则那行：切到挂账页、规则那一折展开");
+    ok(st.activeTab === "ledger" && d.querySelector("#ipe-section-ledger").style.display !== "none" && slot.closest("details").open, "点挂账规则那行左边的名字：切到挂账页、规则那一折展开");
     row("order").querySelector(".ipe-card-v").click();
     ok(st.activeTab === "image" && !d.querySelector("#ipe-section-preview").classList.contains("collapsed"), "点长期指令那行：回到生图页的预览卡");
 
@@ -3968,9 +3969,9 @@ await (async () => {
 
     // 「这张卡」总览多一行；换聊天事件漏了，拼注入段时也会核一遍
     const row = d.querySelector('#ipe-card-ov [data-ov="common"]');
-    ok(!!row && row.querySelector(".ipe-card-k").textContent === "公共块" && row.querySelector(".ipe-card-v").textContent.indexOf("（不挂）") >= 0 && !!row.querySelector(".ipe-card-lock") && d.querySelector("#ipe-card-ov-title").textContent.indexOf("/5") >= 0, "「这张卡」总览里多一行公共块，带小锁；标题按五样算", row ? row.textContent : "没有");
-    row.querySelector(".ipe-card-v").click();
-    ok(cm.classList.contains("ipe-card-flash"), "点那行的名字：跳到「挂公共块」那格");
+    ok(!!row && row.querySelector(".ipe-card-k").textContent === "公共块" && row.querySelector(".ipe-card-sel").selectedOptions[0].textContent === "（不挂）" && !!row.querySelector(".ipe-card-lock") && d.querySelector("#ipe-card-ov-title").textContent.indexOf("/5") >= 0, "「这张卡」总览里多一行公共块，带小锁；标题按五样算", row ? row.textContent : "没有");
+    row.querySelector(".ipe-card-k").click();
+    ok(cm.classList.contains("ipe-card-flash"), "点那行左边的名字：跳到「挂公共块」那格");
     st.commonCardLockJson = JSON.stringify({ "char:gu.png": "c1" }); st.commonInUse = "";
     tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.getCurrentChatId = () => "chat-gu";   // 换了卡，但没发换聊天事件
     eq(tag(), "<draw>INK d\n\nCOMMON.</draw>", "换聊天事件漏了：拼注入段之前自己核一遍，照样用这张卡锁的那份");
@@ -4025,6 +4026,100 @@ await (async () => {
     ok(expands > 0, "设置变了才重算");
     st.baseTemplatesJson = JSON.stringify([{ id: "k1", name: "新的", value: "NEW START\n{Description}\nNEW END" }]);
     eq(strip("正文。\n\nNEW START\nd\nNEW END"), "正文。", "模板改了也一样");
+})();
+
+console.log("\n【87】 「这张卡」总览里直接下拉换（2.48.0）：以前点名字得跳过去再换。现在锚点、画风、公共块、提取规则、挂账规则、本卡要点中间那格就是下拉，换了跟在原地换一模一样；刷新时下拉没变就不重写，换的时候不碰聊天存盘");
+await (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const until = async (fn, ms) => { const end = Date.now() + (ms || 8000); while (Date.now() < end) { if (fn()) return true; await wait(20); } return !!fn(); };
+    const { w, tavern, F } = boot(10); const d = w.document;
+    const st = tavern.extensionSettings[F("EXT_NAME")];
+    st.baseTemplatesJson = JSON.stringify([{ id: "t1", name: "走这条街", value: "<draw>STREET {Description}</draw>", group: "现代" }, { id: "t2", name: "余晖未尽", value: "<draw>DUSK {Description}</draw>", group: "现代" }, { id: "t3", name: "水墨", value: "<draw>INK {Description}</draw>", group: "古风" }]); st.activeBaseTemplate = "t1";
+    st.imgTplGroupFilter = "古风";   // 画风区筛着「古风」：那边的下拉里只有水墨，总览里要全有
+    st.commonBlocksJson = JSON.stringify([{ id: "c1", name: "糖霜", value: "SUGAR." }, { id: "c2", name: "古风", value: "ANCIENT." }]); st.commonInUse = "c1";
+    st.rulePresetsJson = JSON.stringify([{ id: "r1", name: "现代糖霜", value: "R1" }, { id: "r2", name: "古风写意", value: "R2" }]); st.activeRulePreset = "r1";
+    st.anchorPresetsJson = JSON.stringify([{ id: "a1", name: "沈延行", value: "A1" }, { id: "a2", name: "顾寒", value: "A2" }]); st.activeAnchorPreset = "a1";
+    st.ledgerPromptPresetsJson = JSON.stringify([{ id: "lp1", name: "狸猫啊请爱我吧", value: "L1".repeat(30) }, { id: "lp2", name: "修仙", value: "L2".repeat(30) }]); st.activeLedgerPrompt = "lp1";
+    st.ledgerNotePresetsJson = JSON.stringify([{ id: "n1", name: "沈延行", value: "N1" }, { id: "n2", name: "707号室", value: "N2" }]); st.activeLedgerNote = "n1"; st.ledgerNoteCardJson = JSON.stringify({ "char:yuan.png": "n1" });
+    w.eval("ipeRefreshTemplateEditors")(); w.eval("ipeRefreshRuleEditors")(); w.eval("ipeRefreshAnchorEditors")(); w.eval("ipeLedgerRefreshBotEditors")();
+    await wait(200);
+    const saves = { chat: 0, meta: 0 }; tavern.saveChatDebounced = () => saves.chat++; tavern.saveMetadataDebounced = () => saves.meta++;
+    const sel = k => d.querySelector("#ipe-card-sel-" + k), row = k => d.querySelector('#ipe-card-ov [data-ov="' + k + '"]');
+    const pick = (k, v) => { const s = sel(k); s.value = v; s.dispatchEvent(new w.Event("change", { bubbles: true })); };
+    const shown = k => sel(k).selectedOptions[0] ? sel(k).selectedOptions[0].textContent : "";
+    const opts = k => Array.from(sel(k).options).map(o => o.textContent);
+    ok(["anchor", "tpl", "common", "rule", "lrule", "note"].every(k => !!sel(k) && sel(k).closest(".ipe-card-row") === row(k)) && !row("order").querySelector("select"), "能换的六样中间都是下拉；长期指令是一段字，照旧点了跳过去");
+    ok(shown("anchor") === "沈延行" && shown("tpl") === "走这条街" && shown("common") === "糖霜" && shown("rule") === "现代糖霜" && shown("lrule") === "狸猫啊请爱我吧" && shown("note") === "沈延行", "下拉停在现在用的那套");
+    ok(opts("tpl").join("|") === "水墨|余晖未尽|走这条街" && sel("tpl").querySelectorAll("optgroup").length === 2 && d.querySelector("#ipe-template-slot").options.length < 3, "画风：画风区筛着组，总览里照样列全部，按组分段", opts("tpl").join("|"));
+    ok(opts("common")[0] === "（不挂）", "公共块：最上面一格是「（不挂）」");
+
+    // 画风
+    pick("tpl", "t3");
+    ok(st.activeBaseTemplate === "t3" && F("buildInjectTag")("d", null).indexOf("INK d") >= 0 && d.querySelector("#ipe-reinject-tpl").value === "t3", "换画风：马上生效，预览区那个下拉跟着变");
+    ok(imgStatus(w).indexOf("画风换成「水墨」") >= 0 && d.querySelector("#ipe-status").getAttribute("data-ipe-tone") === "ok", "状态行说一声", imgStatus(w));
+    // 公共块（含不挂）
+    pick("common", "c2"); ok(st.commonInUse === "c2" && F("buildInjectTag")("d", null) === "<draw>INK d\n\nANCIENT.</draw>", "换公共块");
+    pick("common", ""); ok(st.commonInUse === "" && F("buildInjectTag")("d", null) === "<draw>INK d</draw>" && shown("common") === "（不挂）", "选「（不挂）」");
+    // 提取规则
+    pick("rule", "r2"); ok(st.activeRulePreset === "r2" && d.querySelector("#ipe-rule-slot").value === "r2", "换提取规则：规则区那个下拉跟着变");
+    // 锚点：没锁 → 换；锁着 → 换了锁也跟过去
+    pick("anchor", "a2"); ok(st.activeAnchorPreset === "a2" && w.eval("ipeGetActiveAnchorItem")().id === "a2", "换锚点");
+    w.eval("ipeAnchorLockCurrent")();
+    pick("anchor", "a1");
+    ok(JSON.parse(st.anchorCardLockJson)["char:yuan.png"] === "a1" && w.eval("ipeAnchorLockedItem")().id === "a1" && shown("anchor") === "沈延行" && imgStatus(w).indexOf("锁也跟着改成它了") >= 0, "锚点锁着时换：锚点锁着提取一律用锁的那套，光换下拉等于没换，所以锁也跟着改过去，状态行说清", imgStatus(w));
+    // 挂账规则、本卡要点：在挂账页换，说在挂账页的状态行
+    w.eval("ipeSetActiveTab")("ledger");
+    pick("lrule", "lp2");
+    ok(st.activeLedgerPrompt === "lp2" && d.querySelector("#ipe-ledger-prompt-slot").value === "lp2" && statusText(w).indexOf("挂账规则换成「修仙」") >= 0, "在挂账页换挂账规则：说在挂账页的状态行", statusText(w));
+    pick("note", "n2");
+    ok(JSON.parse(st.ledgerNoteCardJson)["char:yuan.png"] === "n2" && w.eval("ipeLedgerNoteItem")().id === "n2" && statusText(w).indexOf("本卡要点换成「707号室」") >= 0, "换本卡要点：记到这张卡上", statusText(w));
+    w.eval("ipeSetActiveTab")("image");
+
+    // 锁着的卡上换：临时换，小字和状态行都说清；换卡再回来切回锁的那套
+    pick("tpl", "t1"); w.eval("ipeCardLockCurrent")("tpl");
+    pick("tpl", "t2");
+    ok(st.activeBaseTemplate === "t2" && row("tpl").querySelector(".ipe-card-tip").textContent.indexOf("锁的是「走这条街」") >= 0 && row("tpl").querySelector(".ipe-card-lock").textContent.indexOf("改锁") >= 0 && imgStatus(w).indexOf("临时换") >= 0 && d.querySelector("#ipe-status").getAttribute("data-ipe-tone") === "warn", "锁了「走这条街」的卡上换成「余晖未尽」：照换，下面小字写锁的是哪套，状态行黄色提醒是临时换", imgStatus(w));
+    tavern.characterId = 1; tavern.name2 = "顾寒"; tavern.chatMetadata = {}; tavern.getCurrentChatId = () => "c-gu"; await tavern.eventSource.emit("CHAT_CHANGED");
+    await until(() => w.eval("ipeCardLockSeen") === "char:gu.png");   // 等插件真的核到换了卡（换聊天后 0.2 秒才核），不然切回来它以为没离开过
+    tavern.characterId = 0; tavern.name2 = "苑无忧"; tavern.getCurrentChatId = () => "c-yuan"; await tavern.eventSource.emit("CHAT_CHANGED");
+    await until(() => st.activeBaseTemplate === "t1");
+    ok(st.activeBaseTemplate === "t1" && shown("tpl") === "走这条街" && row("tpl").querySelector(".ipe-card-tip").textContent === "", "换卡再回来：切回锁的那套，小字消失", JSON.stringify({ a: st.activeBaseTemplate, s: shown("tpl"), t: row("tpl").querySelector(".ipe-card-tip").textContent, lock: st.templateCardLockJson, k: w.eval("ipeAnchorCardKey")() }));
+
+    ok(saves.chat === 0 && saves.meta === 0, "上面这一圈换来换去：一次都没碰聊天存盘（只存设置）", JSON.stringify(saves));
+
+    // 刷新便宜：选项没变不重写；正点开着的下拉不碰
+    let rewrites = 0;
+    const mo = new w.MutationObserver(recs => { recs.forEach(r => { if (r.type === "childList") rewrites++; }); });
+    d.querySelectorAll(".ipe-card-sel").forEach(s => mo.observe(s, { childList: true }));
+    for (let i = 0; i < 30; i++) w.eval("ipeCardOverviewRefresh")();
+    for (let i = 0; i < 5; i++) { w.eval("ipeCardLockRefreshUI")(); w.eval("ipeRefreshTemplateEditors")(); }
+    await wait(0);
+    eq(rewrites, 0, "刷新 40 次、东西没变：下拉一次都没重写");
+    sel("tpl").focus();
+    const list = JSON.parse(st.baseTemplatesJson); list.push({ id: "t4", name: "新来的", value: "<draw>NEW {Description}</draw>" }); st.baseTemplatesJson = JSON.stringify(list);
+    w.eval("ipeCardOverviewRefresh")(); await wait(0);
+    ok(rewrites === 0 && opts("tpl").indexOf("新来的") < 0, "正点开着的下拉：新增了画风也先不重写（iPhone 上正在选的时候不会被打断）");
+    sel("tpl").blur(); w.eval("ipeCardOverviewRefresh")(); await wait(0);
+    ok(rewrites === 1 && opts("tpl").indexOf("新来的") >= 0 && shown("tpl") === "走这条街", "放开以后：只重写那一个，新的那套出现了，选中的没变", JSON.stringify({ rewrites, o: opts("tpl"), s: shown("tpl") }));
+    mo.disconnect();
+
+    // 原来那个下拉里没有这一项（比如刚被删了）：不动
+    const before = st.activeRulePreset;
+    const o = d.createElement("option"); o.value = "gone"; o.textContent = "已删除"; sel("rule").appendChild(o); sel("rule").__ipeHtml = null;
+    pick("rule", "gone");
+    ok(st.activeRulePreset === before && sel("rule").value === before, "选了一项原来那边已经没有的：什么都不动，下拉退回现在用的那套");
+
+    // 换完照样安静地贴：存一次聊天，不叫存元数据；提取、贴进楼里、重新生成整个过程中，总览一次都不刷新（下拉不会拖慢贴的那一下）
+    let ovCalls = 0; w.__ovc = () => { ovCalls++; };
+    w.eval('var __ovr = ipeCardOverviewRefresh; ipeCardOverviewRefresh = function(){ __ovc(); return __ovr(); };');
+    saves.chat = 0; saves.meta = 0;
+    F("injectDescToMessage")("a girl.", 9);
+    ok(String(tavern.chat[9].mes).indexOf("STREET a girl.") >= 0 && saves.chat === 1 && saves.meta === 0, "换完贴进楼里：用的是换过的画风，存盘还是一次", JSON.stringify(saves));
+    let take = "take one.";
+    imgApi(w, tavern, F, () => take);
+    await F("runExtract")(tavern.chat[7].mes, "", true, 7);
+    take = "take two."; await F("runExtract")(tavern.chat[7].mes, "", "replace", 7);   // 「重新生成」按钮走的就是这一条（"replace" = 换掉这楼原来那段）
+    ok(String(tavern.chat[7].mes).indexOf("take two.") >= 0 && ovCalls === 0, "贴进楼里、自动提取并注入、重新生成：总览刷新被叫了 0 次", ovCalls + " / " + JSON.stringify(String(tavern.chat[7].mes).slice(-80)));
 })();
 
 console.log("\n" + "\u2500".repeat(46));

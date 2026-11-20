@@ -4,7 +4,7 @@
  */
 
 const EXT_NAME = "image-prompt-extractor";
-var IPE_VERSION = "2.47.1";
+var IPE_VERSION = "2.48.0";
 /* 内置生图包裹（2.14.0）：默认模板、新建模板的初值、挂账剥标签的兜底，都认这一个。
    之前是 image###…###；老聊天里已经注入过的 image### 楼仍按 IPE_LEGACY_IMAGE_TEMPLATE 剥，不留脏正文。 */
 var IPE_DEFAULT_IMAGE_TEMPLATE = "<draw>{Description}</draw>";
@@ -4686,28 +4686,33 @@ function ipeCardLockNote(kind) {
    它们散在两页六个地方，开一张新卡要挨个翻过去设。面板最上面这张小卡把六样摆在一起：
    一眼看到这张卡现在用的是哪套、锁没锁；点名字跳到它在的地方；小锁点一下锁 / 解；一颗按钮把五样全锁上。
    它只是个遥控器：锁、解锁、跳转都调各自原来的函数，自己不存任何东西。
+   2.48.0 中间那格换成下拉，直接在这儿换（以前得点过去再换）。换的时候是替你拨了一下原来那个下拉，
+   走的是原来那一套（先核卡、存设置、刷新各处），所以跟在原地换一模一样。
+   刷新很勤（锁、换卡、改设置都会刷）：下拉里的选项没变就不重写，选中的没变就不动，正在点开的那个不碰。
    ============================================================ */
 var IPE_CARD_OV_JUMP = { anchor: "ipe-anchor-slot", tpl: "ipe-template-slot", common: "ipe-template-common", rule: "ipe-rule-slot", lrule: "ipe-ledger-prompt-slot", note: "ipe-ledger-note-slot", order: "ipe-card-order" };
 /* 五样能锁的各自的状态：现在用的那套、锁的那套、是不是临时换了 */
 function ipeCardOvState(kind) {
     if (kind === "anchor") {
         var lk = ipeAnchorLockedItem(), cur = ipeGetActiveAnchorItem() || {};
-        return { name: (lk || cur).name || "", locked: !!lk, temp: false, lockedName: lk ? lk.name : "" };   // 锚点锁了就一律用锁的那套，没有「临时换」
+        return { id: (lk || cur).id, name: (lk || cur).name || "", locked: !!lk, temp: false, lockedName: lk ? lk.name : "" };   // 锚点锁了就一律用锁的那套，没有「临时换」
     }
     var it = ipeCardLockedItem(kind), c = ipeCardLockActive(kind) || {};
-    return { name: c.name || "", locked: !!it, temp: !!(it && it.id !== c.id), lockedName: it ? it.name : "" };
+    var id = kind === "common" ? ipeCommonInUseId() : c.id;   // 公共块「不挂」在锁的表里记成 (none)，下拉里是空串
+    return { id: id, name: c.name || "", locked: !!it, temp: !!(it && it.id !== c.id), lockedName: it ? it.name : "" };
 }
 function ipeCardOverviewRefresh() {
     var root = q("#ipe-card-ov"); if (!root) return;
-    function put(el, t) { if (el && el.textContent !== t) el.textContent = t; }   // 字没变就不写，省得白白重排
+    function put(el, t) { if (el && el.__ipeTxt !== t) { if (el.textContent !== t) el.textContent = t; el.__ipeTxt = t; } }   // 字没变就不写（2.48.0 连读都不读：记着上次写的）
     var k = ipeAnchorCardKey(), label = ipeAnchorCardLabel() || "这张卡", n = 0, todo = 0;
     ["anchor", "tpl", "common", "rule", "lrule"].forEach(function(kind){
-        var row = root.querySelector('[data-ov="' + kind + '"]'); if (!row) return;
+        var row = ipeCardOvRow(root, kind); if (!row) return;
         var s = { name: "", locked: false, temp: false, lockedName: "" };
         try { s = ipeCardOvState(kind); } catch(e) {}
         if (s.locked && !s.temp) n++; else todo++;
-        var v = row.querySelector(".ipe-card-v"), b = row.querySelector(".ipe-card-lock");
-        put(v, "「" + s.name + "」" + (s.temp ? "　临时换的，锁的是「" + s.lockedName + "」" : ""));
+        var b = row.__ipe.lock;
+        try { ipeCardOvFill(kind, row, s.id); } catch(eF) {}
+        put(row.__ipe.tip, s.temp ? "临时换的，这张卡锁的是「" + s.lockedName + "」" : "");
         if (b) {
             put(b, s.temp ? "🔒 改锁" : (s.locked ? "🔒 已锁" : "🔓 没锁"));
             b.classList.toggle("ipe-card-locked", s.locked && !s.temp);
@@ -4715,12 +4720,13 @@ function ipeCardOverviewRefresh() {
             b.title = !k ? "先打开一张角色卡的聊天" : (s.temp ? "锁成现在用的这套" : (s.locked ? "点一下解锁" : "点一下锁到这张卡"));
         }
     });
-    var rn = root.querySelector('[data-ov="note"] .ipe-card-v');
+    var rn = ipeCardOvRow(root, "note");
     if (rn) {
         var ni = null; try { ni = ipeLedgerNoteItem(); } catch(e2) {}
-        put(rn, ni ? "「" + (ni.name || "") + "」" + (String(ni.value || "").trim() ? "" : "（里面是空的）") : "还没选（不发给副 AI）");
+        try { ipeCardOvFill("note", rn, ni ? ni.id : "", !ni); } catch(eN) {}
+        put(rn.__ipe.tip, ni && !String(ni.value || "").trim() ? "这套里面是空的，发了等于没发" : "");
     }
-    var ro = root.querySelector('[data-ov="order"] .ipe-card-v');
+    var ro = (ipeCardOvRow(root, "order") || { __ipe: {} }).__ipe.v;
     if (ro) {
         var o = ""; try { o = ipeCardOrderGet().trim(); } catch(e3) {}
         put(ro, o ? o.length + " 字：" + (o.length > 16 ? o.slice(0, 16) + "…" : o) : "没写");
@@ -4732,6 +4738,69 @@ function ipeCardOverviewRefresh() {
         all.disabled = !k || todo === 0;
         put(all, !k ? "先打开一张角色卡的聊天" : (todo === 0 ? "🔒 五样都锁好了" : "🔒 把现在这五样全锁到这张卡"));
     }
+}
+/* 2.48.0 总览里的下拉：每样的选项、现在用的是哪个 */
+var IPE_CARD_OV_NAMES = { anchor: "锚点", tpl: "画风", common: "公共块", rule: "提取规则", lrule: "挂账规则", note: "本卡要点" };
+/* 换的时候替你拨的那个原来的下拉（画风用预览区那个：它不按分组筛，所有画风都在） */
+var IPE_CARD_OV_SRC = { anchor: "ipe-anchor-slot", tpl: "ipe-reinject-tpl", common: "ipe-template-common", rule: "ipe-rule-slot", lrule: "ipe-ledger-prompt-slot", note: "ipe-ledger-note-slot" };
+/* 拼选项要把整份列表解析一遍（画风几十套、每套几千字），刷新又很勤：按列表的原文记着拼好的，原文没变就直接用 */
+var IPE_CARD_OV_RAW = { anchor: ["anchorPresetsJson", "characterAnchors"], tpl: ["baseTemplatesJson"], common: ["commonBlocksJson"], rule: ["rulePresetsJson"], lrule: [LP[0]], note: [LN[0]] };
+var ipeCardOvCache = {};
+function ipeCardOvOptions(kind, noneRow) {
+    /* 一项项比原文（同一份字符串比的是同一个东西，一下就比完）；不拼成一长串再比，那样每次都要把几十 KB 抄一遍 */
+    var c = cfg(), raws = IPE_CARD_OV_RAW[kind].map(function(k){ return c[k]; }), hit = ipeCardOvCache[kind];
+    if (hit && hit.none === !!noneRow && hit.raws.length === raws.length && hit.raws.every(function(r, i){ return r === raws[i]; })) return hit.html;
+    function opts(list) { var h = ""; list.forEach(function(it){ if (it) h += '<option value="' + esc(it.id) + '">' + esc(it.name || "") + '</option>'; }); return h; }
+    var html;
+    if (kind === "anchor") html = opts(ipeSortByName(ipeGetAnchorPresets()));
+    else if (kind === "tpl") html = ipeTplOptionsHtml(ipeGetBaseTemplates(), null, "");
+    else if (kind === "common") html = '<option value="">（不挂）</option>' + opts(ipeSortByName(ipeGetCommonBlocks()));
+    else if (kind === "rule") html = opts(ipeSortByName(ipeGetRulePresets()));
+    else if (kind === "lrule") html = opts(ipePresetList.apply(null, LP));
+    else html = (noneRow ? '<option value="">（这张卡还没选 · 不发）</option>' : "") + opts(ipePresetList.apply(null, LN));   // 本卡要点：这张卡还没选，就跟原来那个下拉一样，最上面一格「还没选 · 不发」
+    ipeCardOvCache[kind] = { raws: raws, none: !!noneRow, html: html };
+    return html;
+}
+/* 一行里的几个元素查一次就记着（刷新很勤） */
+function ipeCardOvRow(root, kind) {
+    var row = root.querySelector('[data-ov="' + kind + '"]'); if (!row) return null;
+    if (!row.__ipe) row.__ipe = { sel: row.querySelector(".ipe-card-sel"), tip: row.querySelector(".ipe-card-tip"), lock: row.querySelector(".ipe-card-lock"), v: row.querySelector(".ipe-card-v") };
+    return row;
+}
+/* value = 现在用的那套（刷新时已经算过了，传进来，不再解析一遍）。
+   选中的值也记着：没变就不去读写下拉（读 select.value 要把选项挨个过一遍）；人在下拉里换过，change 那边会把记的清掉 */
+function ipeCardOvFill(kind, row, value, noneRow) {
+    var sel = row.__ipe ? row.__ipe.sel : row.querySelector(".ipe-card-sel"); if (!sel) return;
+    var html = ipeCardOvOptions(kind, noneRow), v = String(value == null ? "" : value);
+    if (sel.__ipeHtml !== html && !(sel.ownerDocument && sel.ownerDocument.activeElement === sel)) { sel.innerHTML = html; sel.__ipeHtml = html; sel.__ipeVal = null; }   // 选项没变不重写；正点开着的不碰
+    if (sel.__ipeVal !== v) { if (sel.value !== v) sel.value = v; sel.__ipeVal = v; }
+}
+/* 在总览里换了一样：替你拨一下原来那个下拉（走原来那套），再在眼前这页的状态行说一声 */
+function ipeCardOvPick(kind, id) {
+    id = String(id == null ? "" : id);
+    var src = q("#" + IPE_CARD_OV_SRC[kind]);
+    if (!src) return false;
+    src.value = id;
+    if (src.value !== id) { ipeCardOverviewRefresh(); return false; }   // 原来那个下拉里没有这一项（刚被删之类）：不动
+    try { src.dispatchEvent(new Event("change", { bubbles: true })); } catch(e) { return false; }
+    var relock = false;
+    if (kind === "anchor") {
+        /* 锚点锁着的时候，提取一律用锁的那套，光换下拉等于没换。在总览里换就是「这张卡要用它」：锁也跟着改过去 */
+        var lk = ipeAnchorLockedItem();
+        if (lk && lk.id !== id) { ipeAnchorLockCurrent(); relock = true; }
+    }
+    var name = "", tip = "", color = "#6ec577";
+    if (kind === "note") { var ni = ipeLedgerNoteItem(); name = ni ? ni.name || "" : ""; }
+    else {
+        var s = ipeCardOvState(kind); name = s.name;
+        if (s.temp) { tip = "（这张卡锁的是「" + s.lockedName + "」，这是临时换：下次换到这张卡会切回去；想一直用它，点右边的「🔒 改锁」）"; color = "#c9a227"; }
+    }
+    if (relock) tip = "（锚点锁着时提取一律用锁的那套，所以锁也跟着改成它了）";
+    var who = ipeAnchorCardKey() ? "「" + (ipeAnchorCardLabel() || "这张卡") + "」的" : "";
+    var msg = kind === "note" && !name ? who + "本卡要点：不发了" : who + IPE_CARD_OV_NAMES[kind] + "换成「" + name + "」" + tip;
+    (cfg().activeTab === "ledger" ? ipeLedgerStatus : setStatus)(msg, color);
+    ipeCardOverviewRefresh();
+    return true;
 }
 /* 跳到某个控件：切到它那一页，把外面收着的卡和折叠一层层打开，滚到眼前闪一下 */
 function ipeCardOvJump(kind) { return ipeJumpToEl(q("#" + IPE_CARD_OV_JUMP[kind])); }
@@ -4784,7 +4853,12 @@ function ipeCardOverviewBind() {
         var t = ev.target, row = t && t.closest ? t.closest(".ipe-card-row") : null; if (!row) return;
         var kind = row.getAttribute("data-ov");
         if (t.closest(".ipe-card-lock")) ipeCardOvToggleLock(kind);
-        else if (t.closest(".ipe-card-v")) ipeCardOvJump(kind);
+        else if (t.closest(".ipe-card-v") || t.closest(".ipe-card-k")) ipeCardOvJump(kind);
+    });
+    root.addEventListener("change", function(ev){   // 2.48.0 中间那格下拉
+        var t = ev.target; if (!t || !t.classList || !t.classList.contains("ipe-card-sel")) return;
+        t.__ipeVal = null;   // 人换过了：下次刷新一定按「现在用的」重设一遍（没换成就退回去）
+        var row = t.closest(".ipe-card-row"); if (row) ipeCardOvPick(row.getAttribute("data-ov"), t.value);
     });
     var all = q("#ipe-card-lock-all"); if (all) all.addEventListener("click", function(){ ipeCardOvLockAll(); });
     ipeCardOverviewRefresh();
@@ -5248,6 +5322,11 @@ function ipeTplGroupFilter() {
 /* 画风下拉：全部 = 有分组时按组分段；某一组 = 只列这组，当前那套不在就顶上标「当前」 */
 function ipeTplFillSelect(id, list, active, filter) {
     var el = q("#" + id); if (!el) return;
+    el.innerHTML = ipeTplOptionsHtml(list, active, filter);
+    el.value = String(active);
+}
+/* 画风下拉的选项：筛了组就只列这组（当前那套不在组里也补上），不筛就按组分段。active = null 不标选中（总览自己设值） */
+function ipeTplOptionsHtml(list, active, filter) {
     var shown = ipeSortByName(list), html = "";
     function opt(t, label) {
         return '<option value="' + esc(t.id) + '"' + (String(t.id) === String(active) ? " selected" : "") + '>' + esc(label || t.name) + '</option>';
@@ -5270,8 +5349,7 @@ function ipeTplFillSelect(id, list, active, filter) {
             if (rest.length) { html += '<optgroup label="未分组">'; rest.forEach(function(t){ html += opt(t); }); html += '</optgroup>'; }
         }
     }
-    el.innerHTML = html;
-    el.value = String(active);
+    return html;
 }
 function ipeTplRefreshGroupUI(list, item) {
     var groups = ipeTplGroups(list), f = ipeTplGroupFilter();
@@ -8191,13 +8269,17 @@ function createPanel() {
        + '<button type="button" class="ipe-section-header" aria-expanded="false"><span id="ipe-card-ov-title">这张卡</span><span class="ipe-collapse-icon" aria-hidden="true">▾</span></button>'
        + '<div class="ipe-section-body"><div id="ipe-card-ov" class="ipe-card-ov">'
        + [["anchor", "锚点", 1], ["tpl", "画风", 1], ["common", "公共块", 1], ["rule", "提取规则", 1], ["lrule", "挂账规则", 1], ["note", "本卡要点", 0], ["order", "长期指令", 0]].map(function(r){
-             return '<div class="ipe-card-row" data-ov="' + r[0] + '"><span class="ipe-card-k">' + r[1] + '</span>'
-                  + '<button type="button" class="ipe-card-v" title="点一下跳到它在的地方"></button>'
-                  + (r[2] ? '<button type="button" class="ipe-card-lock"></button>' : '') + '</div>';
+             /* 2.48.0 中间那格能直接下拉换（长期指令是一段字，没得选，照旧点了跳过去）；左边的名字点了跳到它在的地方改内容 */
+             var pick = r[0] !== "order";
+             return '<div class="ipe-card-row" data-ov="' + r[0] + '"><button type="button" class="ipe-card-k" title="点一下跳到它在的地方">' + r[1] + '</button>'
+                  + (pick ? '<select class="ipe-card-sel" id="ipe-card-sel-' + r[0] + '" aria-label="' + r[1] + '"></select>'
+                          : '<button type="button" class="ipe-card-v" title="点一下跳到它在的地方"></button>')
+                  + (r[2] ? '<button type="button" class="ipe-card-lock"></button>' : '')
+                  + (pick ? '<div class="ipe-card-tip"></div>' : '') + '</div>';
          }).join("")
        + '</div>'
        + '<div class="ipe-preview-actions"><button id="ipe-card-lock-all" class="ipe-btn ipe-btn-primary" type="button">🔒 把现在这五样全锁到这张卡</button></div>'
-       + '<div class="ipe-hint">点左边的名字跳到它在的地方；小锁点一下锁上、再点解开。锁了的，以后换到这张卡自动切回来。</div>'
+       + '<div class="ipe-hint">中间的下拉直接换；点左边的「画风」这些字，跳到它在的地方改内容；小锁点一下锁上、再点解开。锁了的，以后换到这张卡自动切回来；锁着的卡上从下拉换一套是临时换。</div>'
        + '</div></div>';
 
     h += secHTML("api-config","API 配置", true,

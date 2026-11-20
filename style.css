@@ -2963,6 +2963,32 @@ html #ipe-panel#ipe-panel .ipe-card-row {
 }
 html #ipe-panel#ipe-panel .ipe-card-row:last-child { border-bottom: 0; }
 html #ipe-panel#ipe-panel .ipe-card-k { flex: 0 0 58px; color: var(--dg-muted); font-size: 11.5px; font-weight: 600; }
+/* 2.48.0 左边的名字是颗能点的小字（点了跳过去改内容），中间是下拉 */
+html #ipe-panel#ipe-panel .ipe-card-row { flex-wrap: wrap; }
+html #ipe-panel#ipe-panel button.ipe-card-k {
+    margin: 0; padding: 6px 0; min-height: 0;
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+    color: var(--dg-muted); -webkit-text-fill-color: var(--dg-muted);
+    font-size: 11.5px; font-weight: 600; text-align: left; white-space: nowrap;
+    cursor: pointer;
+}
+html #ipe-panel#ipe-panel button.ipe-card-k::after { content: " ›"; color: var(--dg-faint); font-weight: 700; }
+html #ipe-panel#ipe-panel .ipe-section-body select.ipe-card-sel {
+    flex: 1 1 0; width: auto !important; min-width: 0 !important; max-width: none !important;
+    margin: 0 !important;
+    min-height: 36px !important;
+    padding-right: 28px !important;
+    color: var(--dg-ink) !important; -webkit-text-fill-color: var(--dg-ink);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    /* 右边一个小箭头，看得出能点开（共用做工层的 background 把面板下拉原来的箭头盖掉了，这里补回来，用各皮肤的主色） */
+    background:
+        linear-gradient(45deg, transparent 50%, var(--dg-a) 50%) calc(100% - 16px) 53% / 5px 5px no-repeat,
+        linear-gradient(135deg, var(--dg-a) 50%, transparent 50%) calc(100% - 11px) 53% / 5px 5px no-repeat,
+        var(--dg-field) !important;
+}
+html #ipe-panel#ipe-panel .ipe-card-tip { flex: 1 1 100%; padding: 0 0 2px 66px; color: var(--dg-warn, #8a6510); font-size: 11px; line-height: 1.45; }
+html #ipe-panel#ipe-panel .ipe-card-tip:empty { display: none; }
 html #ipe-panel#ipe-panel .ipe-card-v {
     flex: 1 1 auto; min-width: 0;
     padding: 6px 2px;
